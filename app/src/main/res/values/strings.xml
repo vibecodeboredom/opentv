@@ -50,7 +50,6 @@
     <string name="upload_started">Uploading — this can take a while for long recordings.</string>
     <string name="upload_done">Uploaded to %1$s</string>
     <string name="upload_failed">Upload failed: %1$s</string>
-</resources>
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
 </resources>
