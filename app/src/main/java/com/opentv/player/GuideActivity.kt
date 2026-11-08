@@ -154,9 +154,14 @@ class GuideActivity : FragmentActivity() {
                 // EPG fills in when it arrives: rebuild the rows with the
                 // real programme data. (If it was already cached, this
                 // returns immediately and nothing visibly changes.)
+                // Skip the rebuild when the EPG came back empty — the
+                // placeholders are already showing, and rebuilding the
+                // whole grid again for nothing just freezes the UI.
                 epg = epgDeferred.await()
-                rebuildRows()
-                buildGuide(allRows)
+                if (epg.isNotEmpty()) {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
             }.onFailure {
                 Toast.makeText(this@GuideActivity, R.string.load_failed, Toast.LENGTH_LONG).show()
                 finish()
@@ -241,7 +246,22 @@ class GuideActivity : FragmentActivity() {
         )
     }
 
+    /**
+     * Builds the guide grid. The grid used to be built in one synchronous
+     * pass — up to 400 rows × ~13 views each, twice (once for the
+     * placeholders, once when the EPG arrived). That blocked the main
+     * thread for seconds: the screen went black and the app ANR'd/crashed
+     * when opening the guide from the left/right overlay. Now rows are
+     * added in small chunks, posted to the main thread, so the UI stays
+     * responsive and the first rows appear quickly. A generation counter
+     * drops stale chunks when a newer build starts (search, block/hide,
+     * EPG fill-in).
+     */
+    private var guideBuildGeneration = 0
+
     private fun buildGuide(rows: List<GuideData.GuideRow>) {
+        guideBuildGeneration++
+        val generation = guideBuildGeneration
         container.removeAllViews()
         channelNameViews.clear()
         nowLine.visibility = View.GONE
@@ -249,7 +269,33 @@ class GuideActivity : FragmentActivity() {
         val cellHeight = dpToPx(CELL_HEIGHT_DP)
         val cellMargin = dpToPx(CELL_MARGIN_DP)
 
-        // Time header: date + current time, then one label per 30 minutes.
+        buildGuideHeader(cellHeight)
+
+        var firstNow: Pair<Channel, EpgParser.Programme>? = null
+        var firstNowCard: View? = null
+        var index = 0
+        fun buildChunk() {
+            if (generation != guideBuildGeneration) return
+            val end = minOf(index + GUIDE_BUILD_CHUNK_ROWS, rows.size)
+            while (index < end) {
+                val row = rows[index]
+                val built = buildGuideRow(row, windowEnd, cellHeight, cellMargin)
+                container.addView(built.layout)
+                if (firstNow == null) firstNow = built.firstNow
+                if (firstNowCard == null) firstNowCard = built.firstNowCard
+                index++
+            }
+            if (index < rows.size) {
+                container.post { buildChunk() }
+            } else {
+                finishGuideBuild(firstNow, firstNowCard)
+            }
+        }
+        buildChunk()
+    }
+
+    /** The time header: date + current time, then one label per 30 minutes. */
+    private fun buildGuideHeader(cellHeight: Int) {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(0xFF121218.toInt())
@@ -281,137 +327,154 @@ class GuideActivity : FragmentActivity() {
             header.addView(label)
         }
         container.addView(header)
+    }
 
-        // One row per channel: number + logo + name, then programme cells.
+    private data class BuiltGuideRow(
+        val layout: LinearLayout,
+        val firstNow: Pair<Channel, EpgParser.Programme>?,
+        val firstNowCard: View?
+    )
+
+    /** One channel row: number + logo + name, then its programme cells. */
+    private fun buildGuideRow(
+        row: GuideData.GuideRow,
+        windowEnd: Long,
+        cellHeight: Int,
+        cellMargin: Int
+    ): BuiltGuideRow {
         var firstNow: Pair<Channel, EpgParser.Programme>? = null
         var firstNowCard: View? = null
-        for (row in rows) {
-            val rowLayout = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = cellMargin }
-            }
+        val rowLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = cellMargin }
+        }
 
-            // Channel cell: number + logo + name (no group line, like the photo).
-            val channelCell = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
+        // Channel cell: number + logo + name (no group line, like the photo).
+        val channelCell = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF121218.toInt())
+            setPadding(dpToPx(12), 0, dpToPx(12), 0)
+            layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
+        }
+        if (row.channel.number > 0) {
+            channelCell.addView(TextView(this).apply {
+                text = row.channel.number.toString()
+                setTextColor(0xFF3B82F6.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
-                setBackgroundColor(0xFF121218.toInt())
-                setPadding(dpToPx(12), 0, dpToPx(12), 0)
-                layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
+                layoutParams = LinearLayout.LayoutParams(
+                    dpToPx(40),
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                )
+            })
+        }
+        val logo = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40)).apply {
+                marginEnd = dpToPx(12)
             }
-            if (row.channel.number > 0) {
-                channelCell.addView(TextView(this).apply {
-                    text = row.channel.number.toString()
-                    setTextColor(0xFF3B82F6.toInt())
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER_VERTICAL
+            load(row.channel.logo) {
+                placeholder(android.R.drawable.ic_media_play)
+                error(android.R.drawable.ic_media_play)
+            }
+        }
+        channelCell.addView(logo)
+        val nameView = TextView(this).apply {
+            text = row.channel.name
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        channelCell.addView(nameView)
+        channelNameViews[row.channel.id] = nameView
+        rowLayout.addView(channelCell)
+
+        // Programme cells (title only, like the photo), with spacers for gaps.
+        var posMinutes = 0L
+        for (programme in row.programmes) {
+            val layout = GuideData.layoutCell(programme, windowStart, windowEnd)
+            if (layout.startOffsetMinutes > posMinutes) {
+                rowLayout.addView(View(this).apply {
                     layoutParams = LinearLayout.LayoutParams(
-                        dpToPx(40),
-                        LinearLayout.LayoutParams.MATCH_PARENT
+                        (pxPerMinute * (layout.startOffsetMinutes - posMinutes)).toInt(),
+                        cellHeight
                     )
                 })
             }
-            val logo = ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40)).apply {
-                    marginEnd = dpToPx(12)
-                }
-                load(row.channel.logo) {
-                    placeholder(android.R.drawable.ic_media_play)
-                    error(android.R.drawable.ic_media_play)
+            val isNow = nowMillis in programme.startMillis until programme.stopMillis
+            val isPast = programme.stopMillis <= nowMillis
+            if (isNow && firstNow == null) firstNow = row.channel to programme
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setBackgroundResource(
+                    when {
+                        isNow -> R.drawable.guide_cell_now_bg
+                        isPast -> R.drawable.guide_cell_past_bg
+                        else -> R.drawable.guide_cell_bg
+                    }
+                )
+                layoutParams = LinearLayout.LayoutParams(
+                    (pxPerMinute * layout.widthMinutes).toInt() - cellMargin * 2,
+                    cellHeight
+                ).apply {
+                    leftMargin = cellMargin
+                    rightMargin = cellMargin
                 }
             }
-            channelCell.addView(logo)
-            val nameView = TextView(this).apply {
-                text = row.channel.name
-                setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            val titleView = TextView(this).apply {
+                text = programme.title
+                setTextColor(if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
             }
-            channelCell.addView(nameView)
-            channelNameViews[row.channel.id] = nameView
-            rowLayout.addView(channelCell)
-
-            // Programme cells (title only, like the photo), with spacers for gaps.
-            var posMinutes = 0L
-            for (programme in row.programmes) {
-                val layout = GuideData.layoutCell(programme, windowStart, windowEnd)
-                if (layout.startOffsetMinutes > posMinutes) {
-                    rowLayout.addView(View(this).apply {
-                        layoutParams = LinearLayout.LayoutParams(
-                            (pxPerMinute * (layout.startOffsetMinutes - posMinutes)).toInt(),
-                            cellHeight
-                        )
-                    })
-                }
-                val isNow = nowMillis in programme.startMillis until programme.stopMillis
-                val isPast = programme.stopMillis <= nowMillis
-                if (isNow && firstNow == null) firstNow = row.channel to programme
-                val card = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    setBackgroundResource(
-                        when {
-                            isNow -> R.drawable.guide_cell_now_bg
-                            isPast -> R.drawable.guide_cell_past_bg
-                            else -> R.drawable.guide_cell_bg
-                        }
+            card.addView(titleView)
+            card.setOnClickListener { onProgrammeClicked(row.channel, programme) }
+            card.setOnLongClickListener {
+                showContextMenu(row.channel, programme)
+                true
+            }
+            card.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+                if (hasFocus) {
+                    // Focused cell turns white with dark text; its
+                    // channel name turns blue (like the photo).
+                    titleView.setTextColor(0xFF121218.toInt())
+                    nameView.setTextColor(0xFF3B82F6.toInt())
+                    showDetails(row.channel, programme)
+                } else {
+                    titleView.setTextColor(
+                        if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt()
                     )
-                    layoutParams = LinearLayout.LayoutParams(
-                        (pxPerMinute * layout.widthMinutes).toInt() - cellMargin * 2,
-                        cellHeight
-                    ).apply {
-                        leftMargin = cellMargin
-                        rightMargin = cellMargin
-                    }
+                    nameView.setTextColor(0xFFFFFFFF.toInt())
                 }
-                val titleView = TextView(this).apply {
-                    text = programme.title
-                    setTextColor(if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt())
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                }
-                card.addView(titleView)
-                card.setOnClickListener { onProgrammeClicked(row.channel, programme) }
-                card.setOnLongClickListener {
-                    showContextMenu(row.channel, programme)
-                    true
-                }
-                card.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
-                    if (hasFocus) {
-                        // Focused cell turns white with dark text; its
-                        // channel name turns blue (like the photo).
-                        titleView.setTextColor(0xFF121218.toInt())
-                        nameView.setTextColor(0xFF3B82F6.toInt())
-                        showDetails(row.channel, programme)
-                    } else {
-                        titleView.setTextColor(
-                            if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt()
-                        )
-                        nameView.setTextColor(0xFFFFFFFF.toInt())
-                    }
-                }
-                rowLayout.addView(card)
-                if (isNow && firstNowCard == null) firstNowCard = card
-                posMinutes = layout.startOffsetMinutes + layout.widthMinutes
             }
-            container.addView(rowLayout)
+            rowLayout.addView(card)
+            if (isNow && firstNowCard == null) firstNowCard = card
+            posMinutes = layout.startOffsetMinutes + layout.widthMinutes
         }
+        return BuiltGuideRow(rowLayout, firstNow, firstNowCard)
+    }
 
+    /** After all rows are in: details header, focus, and the now-line. */
+    private fun finishGuideBuild(
+        firstNow: Pair<Channel, EpgParser.Programme>?,
+        firstNowCard: View?
+    ) {
         // Show the first programme on now in the details header.
         firstNow?.let { (ch, prog) -> showDetails(ch, prog) }
 
@@ -657,5 +720,7 @@ class GuideActivity : FragmentActivity() {
         /** Thinner rows (was 72) so more channels fit on one TV screen. */
         private const val CELL_HEIGHT_DP = 56
         private const val CELL_MARGIN_DP = 3
+        /** Rows added per posted chunk when building the guide grid. */
+        private const val GUIDE_BUILD_CHUNK_ROWS = 40
     }
 }
