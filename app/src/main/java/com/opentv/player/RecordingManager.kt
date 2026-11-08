@@ -82,12 +82,23 @@ object RecordingManager {
         val manager = getDownloadManager(context)
         val id = Recording.idForChannel(channel.id)
         val existing = runCatching { manager.downloadIndex.getDownload(id) }.getOrNull()
-        if (existing != null && existing.state != Download.STATE_FAILED) {
-            // Already have this recording (in progress or paused): resume it.
-            if (existing.request.stopReason != DownloadRequest.STOP_REASON_NONE) {
-                manager.addDownload(existing.request.copyWithStopReason(DownloadRequest.STOP_REASON_NONE))
+        if (existing != null) {
+            when (existing.state) {
+                Download.STATE_DOWNLOADING, Download.STATE_QUEUED, Download.STATE_RESTARTING -> return
+                Download.STATE_STOPPED -> {
+                    // Paused recording: clear its stop reason to resume it.
+                    DownloadService.sendSetStopReason(
+                        context, RecordingService::class.java, id,
+                        Download.STOP_REASON_NONE, false
+                    )
+                    return
+                }
+                Download.STATE_COMPLETED, Download.STATE_FAILED -> {
+                    // Re-record over the old one: drop it first.
+                    manager.removeDownload(id)
+                }
+                else -> return
             }
-            return
         }
         val mimeType = when {
             channel.url.contains(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
@@ -105,12 +116,11 @@ object RecordingManager {
     /** Stop an in-progress recording but KEEP the downloaded data. */
     @Synchronized
     fun stopRecording(context: Context, channelId: String) {
-        val manager = getDownloadManager(context)
         val id = Recording.idForChannel(channelId)
-        val download = runCatching { manager.downloadIndex.getDownload(id) }.getOrNull()
-            ?: return
-        if (download.state == Download.STATE_COMPLETED) return
-        manager.addDownload(download.request.copyWithStopReason(STOP_REASON_USER_STOPPED))
+        DownloadService.sendSetStopReason(
+            context, RecordingService::class.java, id,
+            STOP_REASON_USER_STOPPED, false
+        )
     }
 
     /** True while a channel's recording is actively downloading. */

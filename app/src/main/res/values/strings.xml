@@ -41,6 +41,7 @@
     <string name="recording_started">Recording started — it keeps going in the background</string>
     <string name="recording_stopped">Recording stopped and saved</string>
     <string name="recording_notification_channel">Recordings</string>
+    <string name="recording_notification_desc">Shows while a channel is being recorded</string>
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
 </resources>

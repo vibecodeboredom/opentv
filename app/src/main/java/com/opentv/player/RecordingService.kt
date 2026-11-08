@@ -23,7 +23,8 @@ class RecordingService : DownloadService(
     FOREGROUND_NOTIFICATION_ID,
     DEFAULT_FOREGROUND_NOTIFICATION_UPDATE_INTERVAL,
     CHANNEL_ID,
-    R.string.recording_notification_channel
+    R.string.recording_notification_channel,
+    R.string.recording_notification_desc
 ) {
 
     override fun getDownloadManager(): DownloadManager =
