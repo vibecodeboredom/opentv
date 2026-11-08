@@ -126,9 +126,11 @@ class ChannelSidebar(
     }
 
     /** Playlist picker (4.8.0): the active playlist is marked; picking
-     * another one switches to it and reloads the app with it. */
+     * another one switches to it and reloads the app with it.
+     * 4.9.0: only ENABLED playlists are listed — a deactivated one is
+     * not a switchable option. */
     private fun showPlaylistPicker() {
-        val playlists = PlaylistRepository.playlists(activity)
+        val playlists = PlaylistRepository.enabledPlaylists(activity)
         val active = PlaylistRepository.activePlaylist(activity)
         val names = playlists.map { p ->
             if (p.url == active.url) "● ${p.name}" else p.name
@@ -213,10 +215,11 @@ class ChannelSidebar(
         val groupCounts = visible.groupingBy { it.group }.eachCount()
         val items = mutableListOf<SidebarGroup>()
         // 4.8.0: "Playlists" first — it opens the playlist picker,
-        // not a channel list.
+        // not a channel list. The count is the enabled (switchable)
+        // playlists; disabled ones don't show in the picker (4.9.0).
         items += SidebarGroup(
             GROUP_PLAYLISTS, activity.getString(R.string.playlists_title),
-            PlaylistRepository.playlists(activity).size
+            PlaylistRepository.enabledPlaylists(activity).size
         )
         items += SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visible.size)
         items += SidebarGroup(

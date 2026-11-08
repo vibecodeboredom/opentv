@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Modern Settings button label (4.9.0): white on the dark button,
+     dark on the accent-green focused button. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true" android:color="#121218" />
+    <item android:state_focused="true" android:color="#121218" />
+    <item android:color="#FFFFFFFF" />
+</selector>

@@ -25,8 +25,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 object PlaylistRepository {
 
-    /** One playlist entry: a display name and its M3U URL (or "file:" URL). */
-    data class Playlist(val name: String, val url: String)
+    /** One playlist entry: a display name, its M3U URL (or "file:" URL),
+     * and whether it is enabled. A disabled playlist stays in the list
+     * but is never active and never shows as a switchable option — it
+     * just sits dormant until re-activated (4.9.0). */
+    data class Playlist(val name: String, val url: String, val enabled: Boolean = true)
 
     const val DEFAULT_PLAYLIST_URL = "https://iptv-org.github.io/iptv/countries/us.m3u"
     // iptv-org's own hosted guides (epg/guides/us.xml) are gone (404) — the
@@ -37,7 +40,10 @@ object PlaylistRepository {
     private const val PREFS = "opentv"
     private const val KEY_PLAYLIST_URL = "playlist_url"
     private const val KEY_EPG_URL = "epg_url"
-    /** 4.8.0: the playlist list, one "name\u0001url" entry per line. */
+    /** 4.8.0: the playlist list, one "name\u0001url" entry per line.
+     * 4.9.0: a third field, "1"/"0" for enabled/disabled, was added.
+     * Entries written before 4.9.0 have no third field and default to
+     * enabled, so existing lists migrate transparently. */
     private const val KEY_PLAYLISTS = "playlists"
     /** 4.8.0: the URL of the currently active playlist. */
     private const val KEY_ACTIVE_PLAYLIST = "active_playlist"
@@ -125,11 +131,43 @@ object PlaylistRepository {
         return migrated
     }
 
-    /** The currently active playlist (first entry when none is marked). */
+    /** The currently active playlist (first ENABLED entry when none is
+     * marked, or the marked one was disabled). The active playlist is
+     * always an enabled one — a disabled playlist can never be active. */
     fun activePlaylist(context: Context): Playlist {
         val list = playlists(context)
         val activeUrl = prefs(context).getString(KEY_ACTIVE_PLAYLIST, null)
-        return list.firstOrNull { it.url == activeUrl } ?: list.first()
+        return list.firstOrNull { it.url == activeUrl && it.enabled }
+            ?: list.firstOrNull { it.enabled }
+            ?: list.first()
+    }
+
+    /** Only the enabled playlists — the ones that can be switched to. */
+    fun enabledPlaylists(context: Context): List<Playlist> =
+        playlists(context).filter { it.enabled }
+
+    /**
+     * Enable or disable a playlist (by URL). Disabling the last enabled
+     * playlist is refused — the app always needs one active source.
+     * Disabling the active playlist activates the first remaining
+     * enabled one. Returns false when nothing changed.
+     */
+    fun setPlaylistEnabled(context: Context, url: String, enabled: Boolean): Boolean {
+        val list = playlists(context)
+        val entry = list.firstOrNull { it.url == url } ?: return false
+        if (entry.enabled == enabled) return false
+        if (!enabled && list.count { it.enabled } <= 1) return false
+        val wasActive = activePlaylist(context).url == url
+        val updated = list.map { if (it.url == url) it.copy(enabled = enabled) else it }
+        savePlaylists(context, updated)
+        if (!enabled && wasActive) {
+            val next = updated.firstOrNull { it.enabled }
+            if (next != null) {
+                prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, next.url).apply()
+                playlistCache = null
+            }
+        }
+        return true
     }
 
     /** URL of the active playlist — what every loader already calls. */
@@ -149,7 +187,10 @@ object PlaylistRepository {
         val cleanName = cleanPlaylistName(name).ifBlank { defaultPlaylistName(cleanUrl) }
         val list = playlists(context).toMutableList()
         val existing = list.indexOfFirst { it.url == cleanUrl }
-        val entry = Playlist(cleanName, cleanUrl)
+        // Re-adding a URL that's already listed only updates its name —
+        // its enabled state is kept, so a disabled playlist isn't
+        // silently re-enabled by an import or a duplicate add.
+        val entry = Playlist(cleanName, cleanUrl, list.getOrNull(existing)?.enabled ?: true)
         if (existing >= 0) list[existing] = entry else list += entry
         savePlaylists(context, list)
         return entry
@@ -165,30 +206,38 @@ object PlaylistRepository {
     }
 
     /**
-     * Remove a playlist (by URL). Refuses when it is the last one.
-     * Removing the active playlist activates the first remaining one.
-     * Returns false when nothing was removed.
+     * Remove a playlist (by URL). Refuses when it is the last one, and
+     * when removing it would leave no enabled playlist at all.
+     * Removing the active playlist activates the first remaining
+     * ENABLED one. Returns false when nothing was removed.
      */
     fun removePlaylist(context: Context, url: String): Boolean {
         val list = playlists(context).toMutableList()
         if (list.size <= 1) return false
+        val remaining = list.filter { it.url != url }
+        if (remaining.none { it.enabled }) return false
         val wasActive = activePlaylist(context).url == url
         val removed = list.removeAll { it.url == url }
         if (!removed) return false
         savePlaylists(context, list)
         if (wasActive) {
-            setActivePlaylist(context, list.first().url)
+            val next = list.firstOrNull { it.enabled } ?: list.first()
+            prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, next.url).apply()
+            playlistCache = null
         }
         return true
     }
 
     /**
-     * Make a listed playlist active. Clears the in-memory playlist cache
-     * so the next load fetches the new source (the EPG cache is global
-     * and stays — it is keyed by channel id/name either way).
+     * Make a listed playlist active. Refuses when the playlist is
+     * disabled (it must be re-enabled first). Clears the in-memory
+     * playlist cache so the next load fetches the new source (the EPG
+     * cache is global and stays — it is keyed by channel id/name
+     * either way).
      */
     fun setActivePlaylist(context: Context, url: String): Boolean {
-        if (playlists(context).none { it.url == url }) return false
+        val entry = playlists(context).firstOrNull { it.url == url } ?: return false
+        if (!entry.enabled) return false
         prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, url).apply()
         playlistCache = null
         return true
@@ -230,15 +279,19 @@ object PlaylistRepository {
     }
 
     private fun savePlaylists(context: Context, list: List<Playlist>) {
-        val raw = list.joinToString("\n") { "${it.name}\u0001${it.url}" }
+        val raw = list.joinToString("\n") {
+            "${it.name}\u0001${it.url}\u0001${if (it.enabled) "1" else "0"}"
+        }
         prefs(context).edit().putString(KEY_PLAYLISTS, raw).apply()
     }
 
     private fun parsePlaylists(raw: String): List<Playlist> =
         raw.split("\n").mapNotNull { line ->
-            val idx = line.indexOf('\u0001')
-            if (idx <= 0) null
-            else Playlist(line.substring(0, idx), line.substring(idx + 1))
+            val parts = line.split("\u0001")
+            if (parts.size < 2 || parts[0].isBlank() || parts[1].isBlank()) null
+            // Entries written before 4.9.0 have no third field — they
+            // default to enabled, so existing lists migrate as-is.
+            else Playlist(parts[0], parts[1], parts.getOrNull(2) != "0")
         }.filter { it.url.isNotBlank() }
 
     /** Names never carry newlines/tabs (they would break the storage format). */

@@ -148,4 +148,11 @@
     <string name="playlist_received">Received playlist: %1$s</string>
     <string name="playlist_import_failed">Could not import that playlist.</string>
     <string name="playlist_active">Active</string>
+    <string name="playlist_deactivate">Deactivate</string>
+    <string name="playlist_activate">Activate</string>
+    <string name="playlist_disabled">Disabled</string>
+    <string name="playlist_deactivated">Deactivated %1$s</string>
+    <string name="playlist_activated">Activated %1$s</string>
+    <string name="playlist_cannot_deactivate_last">You need at least one active playlist.</string>
+    <string name="playlist_disabled_hint">This playlist is disabled — long-press it to activate it.</string>
 </resources>

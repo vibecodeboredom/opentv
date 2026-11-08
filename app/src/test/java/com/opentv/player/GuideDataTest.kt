@@ -139,6 +139,84 @@ class GuideDataTest {
     }
 
     @Test
+    fun searchFindsChannelPastThe400RowCap() {
+        // The user's exact repro (4.9.0): a channel title that IS in the
+        // playlist but sits past the first 400 rows never appeared in
+        // search, because the old search only filtered the displayed
+        // rows. The new search covers the whole playlist.
+        val windowStart = 1_794_081_600_000L
+        val channels = (1..450).map { i -> channel("ch.$i", "Channel $i") }
+        val rows = GuideData.searchRows(channels, emptyMap(), windowStart, 6, query = "Channel 449")
+        assertEquals(1, rows.size)
+        assertEquals("Channel 449", rows[0].channel.name)
+    }
+
+    @Test
+    fun searchFindsProgrammeOutsideTheWindow() {
+        val windowStart = 1_794_081_600_000L
+        val cnn = channel("CNN.us", "CNN")
+        val epg = mapOf(
+            "CNN.us" to listOf(
+                // Airs 7 hours out — outside the 6h guide window.
+                EpgParser.Programme("CNN.us", windowStart + 7 * hour, windowStart + 8 * hour, "Late Night Special")
+            )
+        )
+        val rows = GuideData.searchRows(listOf(cnn), epg, windowStart, 6, query = "Late Night")
+        assertEquals(1, rows.size)
+        assertEquals("CNN", rows[0].channel.name)
+    }
+
+    @Test
+    fun searchMatchesPartialWords() {
+        val windowStart = 1_794_081_600_000L
+        val ch = channel("bbc.one", "BBC One")
+        // "break" is only part of the title word.
+        val rows = GuideData.searchRows(
+            listOf(ch),
+            mapOf("bbc.one" to listOf(
+                EpgParser.Programme("bbc.one", windowStart, windowStart + hour, "Breaking News Tonight")
+            )),
+            windowStart, 6, query = "break"
+        )
+        assertEquals(1, rows.size)
+    }
+
+    @Test
+    fun searchPutsChannelNameMatchesBeforeProgrammeMatches() {
+        val windowStart = 1_794_081_600_000L
+        val news = channel("news.1", "News Channel")
+        val sport = channel("sport.1", "Sports")
+        val epg = mapOf(
+            "sport.1" to listOf(
+                EpgParser.Programme("sport.1", windowStart, windowStart + hour, "News Roundup")
+            )
+        )
+        val rows = GuideData.searchRows(
+            listOf(news, sport), epg, windowStart, 6, query = "news"
+        )
+        assertEquals(2, rows.size)
+        assertEquals("News Channel", rows[0].channel.name)
+        assertEquals("Sports", rows[1].channel.name)
+    }
+
+    @Test
+    fun searchSkipsHiddenChannels() {
+        val windowStart = 1_794_081_600_000L
+        val cnn = channel("CNN.us", "CNN")
+        val rows = GuideData.searchRows(
+            listOf(cnn), emptyMap(), windowStart, 6,
+            hidden = setOf("CNN.us"), query = "CNN"
+        )
+        assertTrue(rows.isEmpty())
+    }
+
+    @Test
+    fun searchWordsSplitsAndLowercases() {
+        assertEquals(listOf("breaking", "bad"), GuideData.searchWords("  Breaking   BAD "))
+        assertTrue(GuideData.searchWords("   ").isEmpty())
+    }
+
+    @Test
     fun progressFractionIsHalfway() {
         val start = 1_794_081_600_000L
         val p = EpgParser.Programme("CNN.us", start, start + hour, "News")

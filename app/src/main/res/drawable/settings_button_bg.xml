@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Modern Settings button background (4.9.0): a rounded dark button
+     by default, solid accent green when focused or pressed. The label
+     turns dark on the green (see res/color/settings_button_text.xml),
+     so it stays readable. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#86C739" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#86C739" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#232629" />
+            <corners android:radius="12dp" />
+            <stroke
+                android:width="1dp"
+                android:color="#333639" />
+        </shape>
+    </item>
+</selector>

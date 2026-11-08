@@ -99,6 +99,9 @@ class GuideActivity : FragmentActivity() {
     /** Current search query ("" = no filter), so the EPG fill-in can
      * respect an active search instead of clobbering it. */
     private var currentSearchQuery: String = ""
+    /** Generation counter so a stale background search (an earlier
+     * keystroke) never overwrites a newer one. */
+    private var searchGeneration = 0
 
     /** First programme on now (and its card), for the details header
      * and the initial focus. Set while rows are built. */
@@ -388,30 +391,53 @@ class GuideActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * Search the guide. Empty query clears the filter. Otherwise the
+     * whole playlist + full EPG is searched (4.9.0, GuideData.searchRows):
+     * channel-name matches first, then programme-title matches, with
+     * forgiving word/partial matching. The old version only filtered
+     * the rows already on screen (capped at 400 channels, 6-hour
+     * window), so a channel past the first 400 — or a show airing
+     * later — never appeared even though it was in the playlist.
+     * Results are built as normal guide rows, so matches beyond the
+     * displayed set show up in the grid. The scan runs on a background
+     * thread (a full EPG can be tens of thousands of programmes) and
+     * a generation counter drops stale results when the user keeps
+     * typing.
+     */
     private fun applySearch(query: String) {
         currentSearchQuery = query
-        val q = query.trim().lowercase()
-        if (q.isEmpty()) {
+        if (query.trim().isEmpty()) {
             buildGuide(allRows)
             emptyView.visibility = View.GONE
             scroll.visibility = View.VISIBLE
             return
         }
-        val filtered = allRows.filter { row ->
-            row.channel.name.lowercase().contains(q) ||
-                row.programmes.any { it.title.lowercase().contains(q) }
-        }
-        if (filtered.isEmpty()) {
-            container.removeAllViews()
-            pinnedCol.removeAllViews()
-            displayRows = emptyList()
-            builtRowCount = 0
-            scroll.visibility = View.GONE
-            emptyView.visibility = View.VISIBLE
-        } else {
-            emptyView.visibility = View.GONE
-            scroll.visibility = View.VISIBLE
-            buildGuide(filtered)
+        val generation = ++searchGeneration
+        val channels = allChannels
+        val epgMap = epg
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val overrides = PlaylistRepository.epgOverrides(this)
+        val start = windowStart
+        lifecycleScope.launch {
+            val filtered = withContext(Dispatchers.Default) {
+                GuideData.searchRows(
+                    channels, epgMap, start, WINDOW_HOURS, hidden, overrides, query
+                )
+            }
+            if (generation != searchGeneration || currentSearchQuery != query) return@launch
+            if (filtered.isEmpty()) {
+                container.removeAllViews()
+                pinnedCol.removeAllViews()
+                displayRows = emptyList()
+                builtRowCount = 0
+                scroll.visibility = View.GONE
+                emptyView.visibility = View.VISIBLE
+            } else {
+                emptyView.visibility = View.GONE
+                scroll.visibility = View.VISIBLE
+                buildGuide(filtered)
+            }
         }
     }
 

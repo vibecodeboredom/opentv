@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 4.7.2: wrapped in a ScrollView — the layout used to be a plain
      LinearLayout, so the Share playlist section and the About block
-     sat below the fold on a TV screen with no way to reach them. -->
+     sat below the fold on a TV screen with no way to reach them.
+     4.9.0: modern look — dark palette (#080808 background, #161616
+     cards, #333639 borders, accent #86C739), card-style sections with
+     rounded corners, modern rounded buttons and inputs. All the same
+     settings and ids; visual refresh only. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black">
+    android:background="#080808">
 
 <LinearLayout
     android:layout_width="match_parent"
@@ -14,170 +18,260 @@
     android:padding="48dp">
 
     <!-- Playlists (4.8.0): several M3U playlists, one active at a time.
-         Tapping one makes it active and reloads the app with it. -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/playlists_title"
-        android:textColor="@android:color/white"
-        android:textSize="20sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/playlists_hint"
-        android:textColor="#FFAAAAAA"
-        android:textSize="15sp" />
-
+         Tapping one makes it active and reloads the app with it.
+         4.9.0: long-press a row to rename, activate/deactivate, or
+         remove it. -->
     <LinearLayout
-        android:id="@+id/playlists_list"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:orientation="vertical" />
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
 
-    <Button
-        android:id="@+id/add_playlist_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/playlist_add" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/playlists_title"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:text="@string/epg_url_label"
-        android:textColor="@android:color/white"
-        android:textSize="20sp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/playlists_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
 
-    <EditText
-        android:id="@+id/epg_url"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textColor="@android:color/white"
-        android:textSize="18sp"
-        android:inputType="textUri"
-        android:singleLine="true" />
+        <LinearLayout
+            android:id="@+id/playlists_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:text="@string/upload_url_label"
-        android:textColor="@android:color/white"
-        android:textSize="20sp" />
+        <Button
+            android:id="@+id/add_playlist_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/settings_button_bg"
+            android:minHeight="48dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@string/playlist_add"
+            android:textColor="@color/settings_button_text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
-    <EditText
-        android:id="@+id/upload_url"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textColor="@android:color/white"
-        android:textSize="18sp"
-        android:inputType="textUri"
-        android:singleLine="true" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/upload_url_hint"
-        android:textColor="#FFAAAAAA"
-        android:textSize="15sp" />
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="40dp"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/epg_url_label"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/epg_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/settings_input_bg"
+            android:padding="14dp"
+            android:textColor="@android:color/white"
+            android:textColorHint="#FF7A7A85"
+            android:textSize="16sp"
+            android:inputType="textUri"
+            android:singleLine="true" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/upload_url_label"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/upload_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/settings_input_bg"
+            android:padding="14dp"
+            android:textColor="@android:color/white"
+            android:textColorHint="#FF7A7A85"
+            android:textSize="16sp"
+            android:inputType="textUri"
+            android:singleLine="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/upload_url_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
         android:orientation="horizontal">
 
         <Button
             android:id="@+id/save_button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/save" />
+            android:background="@drawable/settings_button_bg"
+            android:minHeight="48dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@string/save"
+            android:textColor="@color/settings_button_text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
         <Button
             android:id="@+id/reset_button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
-            android:text="@string/reset_default" />
+            android:background="@drawable/settings_button_bg"
+            android:minHeight="48dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@string/reset_default"
+            android:textColor="@color/settings_button_text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
         <Button
             android:id="@+id/unhide_button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
-            android:text="@string/unhide_all" />
+            android:background="@drawable/settings_button_bg"
+            android:minHeight="48dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@string/unhide_all"
+            android:textColor="@color/settings_button_text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
     </LinearLayout>
 
     <!-- Share playlist (4.7.1): temporarily host a playlist on this
          TV's Wi-Fi so other devices on the same network can import it.
          The server stops itself after 10 minutes. -->
-    <TextView
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="48dp"
-        android:text="@string/share_playlist_title"
-        android:textColor="@android:color/white"
-        android:textSize="20sp"
-        android:textStyle="bold" />
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/share_playlist_hint"
-        android:textColor="#FFAAAAAA"
-        android:textSize="15sp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/share_playlist_title"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
-    <TextView
-        android:id="@+id/share_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/share_not_running"
-        android:textColor="@android:color/white"
-        android:textSize="18sp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/share_playlist_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
 
-    <Button
-        android:id="@+id/share_button"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="@string/share_playlist" />
+        <TextView
+            android:id="@+id/share_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/share_not_running"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/share_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/settings_button_bg"
+            android:minHeight="48dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@string/share_playlist"
+            android:textColor="@color/settings_button_text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
 
     <!-- About: app name, version, and a short note. -->
-    <TextView
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="48dp"
-        android:text="@string/about_title"
-        android:textColor="@android:color/white"
-        android:textSize="20sp"
-        android:textStyle="bold" />
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
 
-    <TextView
-        android:id="@+id/about_version"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textColor="@android:color/white"
-        android:textSize="18sp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/about_title"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="@string/about_text"
-        android:textColor="#FFAAAAAA"
-        android:textSize="15sp" />
+        <TextView
+            android:id="@+id/about_version"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/about_text"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+    </LinearLayout>
 
 </LinearLayout>
 </ScrollView>

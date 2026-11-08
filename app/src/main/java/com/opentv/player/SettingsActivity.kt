@@ -28,7 +28,9 @@ import kotlinx.coroutines.withContext
  * temporarily hosts a playlist on this TV's Wi-Fi so other devices on
  * the same network can import it — the server stops itself after
  * 10 minutes. (4.8.0) While sharing is on, other devices can also send
- * a playlist TO this TV, which is added to the playlist list. */
+ * a playlist TO this TV, which is added to the playlist list.
+ * (4.9.0) Playlists can be deactivated (long-press a row) without
+ * deleting them, and the screen got a modern card-style look. */
 class SettingsActivity : FragmentActivity() {
 
     /** Ticks once a second while sharing, to refresh the countdown. */
@@ -123,7 +125,10 @@ class SettingsActivity : FragmentActivity() {
     // ---- Playlists (4.8.0) -------------------------------------------------
 
     /** One row per playlist: name + URL, the active one marked in green.
-     * Tap to activate (and reload); long-press for Rename / Remove. */
+     * Tap to activate (and reload); long-press for Rename / Activate or
+     * Deactivate / Remove. A disabled playlist (4.9.0) is dimmed with a
+     * "Disabled" label and can't be activated by tapping — long-press
+     * to re-enable it. */
     private fun buildPlaylistsUi() {
         val container = findViewById<LinearLayout>(R.id.playlists_list)
         container.removeAllViews()
@@ -137,12 +142,12 @@ class SettingsActivity : FragmentActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 isFocusable = true
                 isFocusableInTouchMode = true
-                setPadding(dp(12), dp(10), dp(12), dp(10))
+                setPadding(dp(16), dp(12), dp(16), dp(12))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { topMargin = dp(4); bottomMargin = dp(4) }
-                setBackgroundResource(R.drawable.sidebar_row_bg)
+                setBackgroundResource(R.drawable.settings_row_bg)
             }
             val texts = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -150,7 +155,8 @@ class SettingsActivity : FragmentActivity() {
             }
             val nameView = TextView(this).apply {
                 text = playlist.name
-                setTextColor(0xFFFFFFFF.toInt())
+                // Disabled playlists are dimmed; the active name is white.
+                setTextColor(if (playlist.enabled) 0xFFFFFFFF.toInt() else 0xFF7A7A85.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
@@ -175,9 +181,24 @@ class SettingsActivity : FragmentActivity() {
                     setPadding(dp(8), 0, 0, 0)
                 }
                 row.addView(activeView)
+            } else if (!playlist.enabled) {
+                val disabledView = TextView(this).apply {
+                    text = getString(R.string.playlist_disabled)
+                    setTextColor(0xFF7A7A85.toInt())
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(dp(8), 0, 0, 0)
+                }
+                row.addView(disabledView)
             }
             row.setOnClickListener {
                 if (isActive) return@setOnClickListener
+                if (!playlist.enabled) {
+                    Toast.makeText(
+                        this, R.string.playlist_disabled_hint, Toast.LENGTH_SHORT
+                    ).show()
+                    return@setOnClickListener
+                }
                 if (PlaylistRepository.setActivePlaylist(this, playlist.url)) {
                     Toast.makeText(
                         this, getString(R.string.playlist_switched, playlist.name),
@@ -194,10 +215,18 @@ class SettingsActivity : FragmentActivity() {
         }
     }
 
-    /** Rename / Remove for one playlist (long-press on its row). */
+    /** Rename / Activate or Deactivate / Remove for one playlist
+     * (long-press on its row). Deactivating the active playlist
+     * switches to the first remaining enabled one and reloads. */
     private fun showPlaylistOptionsDialog(playlist: PlaylistRepository.Playlist) {
+        val toggleLabel = if (playlist.enabled) {
+            getString(R.string.playlist_deactivate)
+        } else {
+            getString(R.string.playlist_activate)
+        }
         val items = arrayOf(
             getString(R.string.playlist_rename),
+            toggleLabel,
             getString(R.string.playlist_remove)
         )
         AlertDialog.Builder(this)
@@ -206,6 +235,31 @@ class SettingsActivity : FragmentActivity() {
                 when (which) {
                     0 -> showRenamePlaylistDialog(playlist)
                     1 -> {
+                        val wasActive =
+                            PlaylistRepository.activePlaylist(this).url == playlist.url
+                        val newEnabled = !playlist.enabled
+                        if (PlaylistRepository.setPlaylistEnabled(this, playlist.url, newEnabled)) {
+                            Toast.makeText(
+                                this,
+                                getString(
+                                    if (newEnabled) R.string.playlist_activated
+                                    else R.string.playlist_deactivated,
+                                    playlist.name
+                                ),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            // Deactivating the active playlist switched
+                            // the active one — reload with it.
+                            if (!newEnabled && wasActive) restartToMain()
+                            else buildPlaylistsUi()
+                        } else {
+                            Toast.makeText(
+                                this, R.string.playlist_cannot_deactivate_last,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                    2 -> {
                         AlertDialog.Builder(this)
                             .setMessage(getString(R.string.playlist_remove_confirm, playlist.name))
                             .setPositiveButton(R.string.playlist_remove) { _, _ ->

@@ -27,6 +27,105 @@ object GuideData {
         return (nowMillis / hour) * hour
     }
 
+    /** Build the row for one channel: its programmes inside the window,
+     * or "No information" placeholders when it has none. Hidden
+     * channels get no row (null). The window math lives here so the
+     * search can build rows for channels outside the displayed set. */
+    fun buildRow(
+        channel: Channel,
+        epg: Map<String, List<EpgParser.Programme>>,
+        windowStartMillis: Long,
+        windowHours: Int = 6,
+        hidden: Set<String> = emptySet(),
+        epgOverrides: Map<String, String> = emptyMap()
+    ): GuideRow? {
+        if (hidden.contains(channel.id)) return null
+        val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
+        val programmes = programmesForChannel(channel, epg, epgOverrides)
+            .filter { it.stopMillis > windowStartMillis && it.startMillis < windowEnd }
+            .sortedBy { it.startMillis }
+        return if (programmes.isNotEmpty()) {
+            GuideRow(channel, programmes)
+        } else {
+            GuideRow(
+                channel,
+                placeholderProgrammes(channel, windowStartMillis, windowEnd)
+            )
+        }
+    }
+
+    /** A channel's full programme list from the EPG map (no window
+     * filter): tvg-id first (or its override), then the lowercased
+     * display name — EPG sources often use different ids than the
+     * playlist. Shared by buildRows and the search. */
+    fun programmesForChannel(
+        channel: Channel,
+        epg: Map<String, List<EpgParser.Programme>>,
+        epgOverrides: Map<String, String> = emptyMap()
+    ): List<EpgParser.Programme> {
+        val key = epgOverrides[channel.id]?.takeIf { it.isNotEmpty() }
+            ?: channel.tvgId
+        return key?.let { epg[it] }
+            ?: epg[channel.name.lowercase()]
+            ?: emptyList()
+    }
+
+    /** Split a search query into lowercase words. */
+    fun searchWords(query: String): List<String> =
+        query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+
+    /** True when every word in [words] appears as a substring of [text]
+     * (case-insensitive). Partial words match — typing "break" finds
+     * "Breaking Bad" — and multi-word queries need every word present,
+     * in any order. An empty word list never matches. */
+    fun matchesWords(text: String, words: List<String>): Boolean {
+        if (words.isEmpty()) return false
+        val lower = text.lowercase()
+        return words.all { lower.contains(it) }
+    }
+
+    /**
+     * Search the WHOLE playlist and the WHOLE EPG (4.9.0). The old
+     * search only filtered the rows already on screen — capped at 400
+     * channels and the current 6-hour window — so a channel past the
+     * first 400, or a show airing later, was invisible even though it
+     * was in the playlist. Now every channel is checked, and every
+     * programme in its full EPG list (not just the visible window).
+     *
+     * Returns channel-name matches first (in playlist order), then
+     * programme-title matches (in playlist order). Each result is a
+     * normal guide row for the current window, so it displays in the
+     * grid like any other row — including channels the guide would
+     * never have built on its own.
+     */
+    fun searchRows(
+        channels: List<Channel>,
+        epg: Map<String, List<EpgParser.Programme>>,
+        windowStartMillis: Long,
+        windowHours: Int = 6,
+        hidden: Set<String> = emptySet(),
+        epgOverrides: Map<String, String> = emptyMap(),
+        query: String
+    ): List<GuideRow> {
+        val words = searchWords(query)
+        if (words.isEmpty()) return emptyList()
+        val channelMatches = mutableListOf<GuideRow>()
+        val programmeMatches = mutableListOf<GuideRow>()
+        for (channel in channels) {
+            if (hidden.contains(channel.id)) continue
+            if (matchesWords(channel.name, words)) {
+                buildRow(channel, epg, windowStartMillis, windowHours, hidden, epgOverrides)
+                    ?.let { channelMatches += it }
+            } else if (programmesForChannel(channel, epg, epgOverrides)
+                    .any { matchesWords(it.title, words) }
+            ) {
+                buildRow(channel, epg, windowStartMillis, windowHours, hidden, epgOverrides)
+                    ?.let { programmeMatches += it }
+            }
+        }
+        return channelMatches + programmeMatches
+    }
+
     /** Build the rows for the guide. Every visible channel gets a row: channels
      * with EPG data in the window show their real programmes; channels
      * without any EPG data get "No information" placeholders covering the
@@ -43,28 +142,11 @@ object GuideData {
         hidden: Set<String> = emptySet(),
         epgOverrides: Map<String, String> = emptyMap()
     ): List<GuideRow> {
-        val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
         val rows = mutableListOf<GuideRow>()
         for (channel in channels) {
             if (rows.size >= MAX_GUIDE_ROWS) break
-            if (hidden.contains(channel.id)) continue
-            val key = epgOverrides[channel.id]?.takeIf { it.isNotEmpty() }
-                ?: channel.tvgId
-            // Try the tvg-id first, then the channel name (lowercased) —
-            // EPG sources often use different ids than the playlist.
-            val programmes = (key?.let { epg[it] }
-                ?: epg[channel.name.lowercase()]
-                ?: emptyList())
-                .filter { it.stopMillis > windowStartMillis && it.startMillis < windowEnd }
-                .sortedBy { it.startMillis }
-            if (programmes.isNotEmpty()) {
-                rows += GuideRow(channel, programmes)
-            } else {
-                rows += GuideRow(
-                    channel,
-                    placeholderProgrammes(channel, windowStartMillis, windowEnd)
-                )
-            }
+            buildRow(channel, epg, windowStartMillis, windowHours, hidden, epgOverrides)
+                ?.let { rows += it }
         }
         return rows
     }
