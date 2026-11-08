@@ -449,6 +449,11 @@ class GuideActivity : FragmentActivity() {
     private fun showContextMenu(channel: Channel, programme: EpgParser.Programme) {
         val dialog = Dialog(this)
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        // Don't pop the keyboard up on open — the search field is there
+        // when the user wants it, but it shouldn't cover the menu.
+        dialog.window?.setSoftInputMode(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+        )
         val view = layoutInflater.inflate(R.layout.dialog_guide_menu, null)
         dialog.setContentView(view)
         dialog.window?.setLayout(
