@@ -11,16 +11,19 @@
         android:keepScreenOn="true" />
 
     <!-- Channel info overlay (TiviMate-style): shown when left/right is
-         pressed. Top: group + date/time. Middle: logo, channel name, now
-         / next with times + progress bar. Bottom: a strip of tiles —
-         TV guide, History, the 3 most recent channels, Clear. -->
+         pressed. A compact panel anchored to the bottom of the screen —
+         it never covers the whole picture. Top: group + date/time.
+         Middle: now / next with times + progress bar. Bottom: logo +
+         channel name, then the strip of tiles — TV guide, History, the
+         3 most recent channels, Clear. -->
     <LinearLayout
         android:id="@+id/channel_info"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
         android:orientation="vertical"
         android:padding="28dp"
-        android:background="#CC000000"
+        android:background="#E6000000"
         android:visibility="gone">
 
         <!-- Top bar: group (left) + date/time (right). -->
@@ -47,71 +50,37 @@
                 android:textColor="@android:color/white" />
         </LinearLayout>
 
-        <!-- Channel + programme info. -->
+        <!-- Current / next programme. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="120dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
 
-            <!-- Logo + channel name (left), like the reference photo. -->
-            <LinearLayout
+            <TextView
+                android:id="@+id/info_now_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:gravity="center_horizontal">
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/white"
+                android:maxLines="1" />
 
-                <ImageView
-                    android:id="@+id/info_logo"
-                    android:layout_width="120dp"
-                    android:layout_height="72dp"
-                    android:scaleType="fitCenter"
-                    android:contentDescription="@string/guide_preview" />
-
-                <TextView
-                    android:id="@+id/info_channel_name"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:textSize="20sp"
-                    android:textStyle="bold"
-                    android:textColor="@android:color/white"
-                    android:maxLines="1" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="0dp"
+            <TextView
+                android:id="@+id/info_now_meta"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="24dp"
-                android:orientation="vertical">
+                android:layout_marginTop="6dp"
+                android:textSize="17sp"
+                android:textColor="#DDDDDD" />
 
-                <TextView
-                    android:id="@+id/info_now_title"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textSize="24sp"
-                    android:textStyle="bold"
-                    android:textColor="@android:color/white"
-                    android:maxLines="1" />
-
-                <TextView
-                    android:id="@+id/info_now_meta"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:textSize="17sp"
-                    android:textColor="#DDDDDD" />
-
-                <TextView
-                    android:id="@+id/info_next"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textSize="17sp"
-                    android:textColor="#AAAAAA" />
-            </LinearLayout>
+            <TextView
+                android:id="@+id/info_next"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textSize="17sp"
+                android:textColor="#AAAAAA" />
         </LinearLayout>
 
         <!-- Current programme progress. -->
@@ -125,10 +94,32 @@
             android:progress="0"
             android:progressDrawable="@drawable/guide_progress_drawable" />
 
-        <View
+        <!-- Channel identity at the bottom of the panel: logo + name. -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:id="@+id/info_logo"
+                android:layout_width="120dp"
+                android:layout_height="72dp"
+                android:scaleType="fitCenter"
+                android:contentDescription="@string/guide_preview" />
+
+            <TextView
+                android:id="@+id/info_channel_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="16dp"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/white"
+                android:maxLines="1" />
+        </LinearLayout>
 
         <!-- Bottom strip: TV guide, History, recent channels, Clear.
              Tiles are built in code (recents are dynamic). -->
@@ -136,6 +127,7 @@
             android:id="@+id/info_strip"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
             android:orientation="horizontal"
             android:gravity="center" />
 
