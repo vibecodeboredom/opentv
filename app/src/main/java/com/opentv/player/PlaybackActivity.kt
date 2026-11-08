@@ -632,7 +632,9 @@ class PlaybackActivity : FragmentActivity() {
      * 4.6.1: modern look — rounded tile_bg selector (accent on focus) and
      * fresh vector icons instead of the dated system drawables. The label
      * and icon turn dark on the green focused tile so they stay readable;
-     * channel logos are never tinted. */
+     * channel logos are never tinted.
+     * 4.6.3: tiles are smaller and more compact (120x84dp, 32dp icons,
+     * 13sp labels) so the strip takes up less of the screen. */
     private fun buildStripStatic(recents: List<Channel>, noInfo: String) {
         infoStrip.removeAllViews()
         stripTiles.clear()
@@ -643,15 +645,15 @@ class PlaybackActivity : FragmentActivity() {
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isFocusableInTouchMode = true
-                setPadding(dp(8), dp(10), dp(8), dp(10))
-                layoutParams = LinearLayout.LayoutParams(dp(150), dp(110)).apply {
-                    marginEnd = dp(12)
+                setPadding(dp(6), dp(8), dp(6), dp(8))
+                layoutParams = LinearLayout.LayoutParams(dp(120), dp(84)).apply {
+                    marginEnd = dp(8)
                 }
                 setBackgroundResource(R.drawable.tile_bg)
                 setOnClickListener { onClick() }
             }
             val icon = ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+                layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 if (logoUrl != null) {
                     load(logoUrl) {
@@ -665,7 +667,7 @@ class PlaybackActivity : FragmentActivity() {
             val labelView = TextView(this).apply {
                 text = label
                 setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -673,7 +675,7 @@ class PlaybackActivity : FragmentActivity() {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(6) }
+                ).apply { topMargin = dp(4) }
             }
             tileView.addView(icon)
             tileView.addView(labelView)

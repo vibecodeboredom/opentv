@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Info-overlay strip tile background (4.6.1): rounded 16dp dark-grey
      tile, accent green when focused or pressed. The label/icon turn
-     dark on the green background (handled in code). -->
+     dark on the green background (handled in code).
+     4.6.3: the default tile is 50% transparent (#80232629) so the video
+     shows through, matching the more transparent overlay panel. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
@@ -17,7 +19,7 @@
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#232629" />
+            <solid android:color="#80232629" />
             <corners android:radius="16dp" />
         </shape>
     </item>
