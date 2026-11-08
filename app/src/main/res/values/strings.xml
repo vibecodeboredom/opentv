@@ -23,6 +23,9 @@
     <string name="overlay_clear">Clear</string>
     <string name="overlay_no_info">No information</string>
     <string name="overlay_recents_cleared">Recent channels cleared</string>
+    <string name="about_title">About</string>
+    <string name="about_version">OpenTV %1$s</string>
+    <string name="about_text">A free, open-source Android TV IPTV player. Built with AI assistance — expect rough edges, bug reports welcome.</string>
     <string name="no_guide_data">No guide data available for this playlist.</string>
     <string name="starts_at">starts at %1$s</string>
     <string name="recordings">Recordings</string>
