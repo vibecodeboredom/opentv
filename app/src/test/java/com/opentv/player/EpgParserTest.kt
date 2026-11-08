@@ -33,7 +33,7 @@ class EpgParserTest {
     fun nowAndNextFindsCurrentAndFollowing() {
         val epg = EpgParser.parse(sample)
         // 20:30 UTC on Nov 7 2026: Evening News is on, Late Show is next.
-        val nowMillis = 1_762_566_600_000L // 2026-11-07 20:30:00 UTC
+        val nowMillis = 1_794_083_400_000L // 2026-11-07 20:30:00 UTC
         val (now, next) = EpgParser.nowAndNext(epg["CNN.us"], nowMillis)
         assertEquals("Evening News", now?.title)
         assertEquals("Late Show", next?.title)

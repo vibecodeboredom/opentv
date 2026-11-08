@@ -1,15 +1,18 @@
 package com.opentv.player
 
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
-import java.io.StringReader
+import org.w3c.dom.Element
+import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * Minimal XMLTV parser. Only keeps programme titles with start/stop times,
  * keyed by channel id, so the player can show "Now" / "Next".
+ *
+ * Uses the JDK DOM parser (javax.xml) so it works both on-device and in
+ * plain JVM unit tests (Android's XmlPullParser is a stub there).
  */
 object EpgParser {
 
@@ -27,47 +30,24 @@ object EpgParser {
     fun parse(xml: String): Map<String, List<Programme>> {
         val result = mutableMapOf<String, MutableList<Programme>>()
         try {
-            val factory = XmlPullParserFactory.newInstance()
-            val parser = factory.newPullParser()
-            parser.setInput(StringReader(xml))
-            var event = parser.eventType
-            var currentChannel: String? = null
-            var currentStart = 0L
-            var currentStop = 0L
-            var currentTitle: String? = null
-            var inTitle = false
-            while (event != XmlPullParser.END_DOCUMENT) {
-                when (event) {
-                    XmlPullParser.START_TAG -> when (parser.name) {
-                        "programme" -> {
-                            currentChannel = parser.getAttributeValue(null, "channel")
-                            currentStart = parseDate(parser.getAttributeValue(null, "start"))
-                            currentStop = parseDate(parser.getAttributeValue(null, "stop"))
-                            currentTitle = null
-                        }
-                        "title" -> inTitle = true
-                    }
-                    XmlPullParser.TEXT -> if (inTitle) {
-                        currentTitle = (currentTitle ?: "") + parser.text
-                    }
-                    XmlPullParser.END_TAG -> when (parser.name) {
-                        "title" -> inTitle = false
-                        "programme" -> {
-                            val channel = currentChannel
-                            val title = currentTitle?.trim()
-                            if (channel != null && title != null && currentStop > currentStart) {
-                                result.getOrPut(channel) { mutableListOf() } += Programme(
-                                    channelId = channel,
-                                    startMillis = currentStart,
-                                    stopMillis = currentStop,
-                                    title = title
-                                )
-                            }
-                            currentChannel = null
-                        }
-                    }
+            val factory = DocumentBuilderFactory.newInstance()
+            val builder = factory.newDocumentBuilder()
+            val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+            val programmes = doc.getElementsByTagName("programme")
+            for (i in 0 until programmes.length) {
+                val el = programmes.item(i) as? Element ?: continue
+                val channel = el.getAttribute("channel")
+                val start = parseDate(el.getAttribute("start"))
+                val stop = parseDate(el.getAttribute("stop"))
+                val title = el.getElementsByTagName("title").item(0)?.textContent?.trim()
+                if (channel.isNotEmpty() && !title.isNullOrEmpty() && stop > start) {
+                    result.getOrPut(channel) { mutableListOf() } += Programme(
+                        channelId = channel,
+                        startMillis = start,
+                        stopMillis = stop,
+                        title = title
+                    )
                 }
-                event = parser.next()
             }
         } catch (ignored: Exception) {
             // EPG is best-effort; a bad file just means no guide data.
