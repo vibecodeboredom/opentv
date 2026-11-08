@@ -454,11 +454,14 @@ class GuideActivity : FragmentActivity() {
         dialog.window?.setSoftInputMode(
             android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
         )
+        // Side panel, not a centered popup: dock to the right edge,
+        // full height, like TiviMate's menu.
+        dialog.window?.setGravity(Gravity.END)
         val view = layoutInflater.inflate(R.layout.dialog_guide_menu, null)
         dialog.setContentView(view)
         dialog.window?.setLayout(
             ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
+            ViewGroup.LayoutParams.MATCH_PARENT
         )
 
         val menuSearch = view.findViewById<EditText>(R.id.menu_search)

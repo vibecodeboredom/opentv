@@ -19,7 +19,10 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 
 /**
- * Plays one channel with ExoPlayer. OK pauses/resumes (PlayerView controller).
+ * Plays one channel with ExoPlayer. OK opens the TV Guide (intercepted
+ * in dispatchKeyEvent before the PlayerView controller sees it). The
+ * play/pause button is hidden from the controller — live TV has no
+ * use for pause.
  *
  * - INFO toggles the channel as a favorite.
  * - MENU opens options: favorite toggle + record / stop recording.
@@ -85,6 +88,10 @@ class PlaybackActivity : FragmentActivity() {
         }
         this.player = player
         playerView.player = player
+        // Live TV has no use for pause: hide the play/pause button from
+        // the controller. The controller view is inflated lazily, so hide
+        // it once the view has laid out.
+        playerView.post { hidePlayPauseButton() }
 
         val uri = recordingUri ?: ch!!.url
         val title = recordingName ?: ch!!.name
@@ -148,6 +155,20 @@ class PlaybackActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         guideLaunched = false
+        // Keep the play/pause button hidden if the controller re-inflated.
+        playerView.post { hidePlayPauseButton() }
+    }
+
+    /**
+     * Hides the play/pause button from the PlayerView controller.
+     * Live TV has no use for pause; the button is part of media3's
+     * default controller layout (id exo_play_pause), so hide it once
+     * the controller view exists.
+     */
+    private fun hidePlayPauseButton() {
+        playerView.findViewById<android.view.View>(
+            androidx.media3.ui.R.id.exo_play_pause
+        )?.visibility = android.view.View.GONE
     }
 
     /**
