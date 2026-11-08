@@ -90,6 +90,8 @@
     <string name="guide_preview">Channel preview</string>
     <string name="guide_min_left">%1$d min</string>
     <string name="menu_search_hint">Search</string>
+    <string name="menu_recent_searches">Recent searches</string>
+    <string name="menu_clear_recent">Clear</string>
     <string name="menu_settings">⚙  Settings</string>
     <string name="menu_external_player">Open in external player</string>
     <string name="menu_record">Record</string>

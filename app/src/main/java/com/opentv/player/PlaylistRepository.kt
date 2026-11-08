@@ -52,10 +52,14 @@ object PlaylistRepository {
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
     private const val KEY_RECENT = "recent_channels"
+    /** 4.9.3: guide search queries, one per line, most recent first. */
+    private const val KEY_RECENT_SEARCHES = "recent_searches"
     /** Id of the last channel that actually played (4.6.0: resume it on launch). */
     private const val KEY_LAST_CHANNEL = "last_channel"
     /** The overlay's channel strip shows this many most recent channels. */
     private const val MAX_RECENT = 3
+    /** Guide search remembers this many past queries. */
+    private const val MAX_RECENT_SEARCHES = 8
     private const val CACHE_FILE = "playlist.m3u"
     /**
      * 4.8.0: a playlist stored on this device (received over the local
@@ -392,6 +396,37 @@ object PlaylistRepository {
     /** Clear the recent-channels list (the overlay's "Clear" tile). */
     fun clearRecentChannels(context: Context) {
         prefs(context).edit().remove(KEY_RECENT).apply()
+    }
+
+    /**
+     * Recent guide searches (4.9.3), most recent first. Stored as one
+     * query per line — a StringSet would lose the order.
+     */
+    fun recentSearches(context: Context): List<String> {
+        val raw = prefs(context).getString(KEY_RECENT_SEARCHES, "") ?: ""
+        return raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    /**
+     * Remember a guide search query (deduped case-insensitively, most
+     * recent first, max 8). Call only when a query is actually
+     * submitted (Enter) or re-run from the recent list — not on every
+     * keystroke, or half-typed text would fill the list.
+     */
+    fun saveRecentSearch(context: Context, query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        val current = recentSearches(context).toMutableList()
+        current.removeAll { it.equals(trimmed, ignoreCase = true) }
+        current.add(0, trimmed)
+        prefs(context).edit()
+            .putString(KEY_RECENT_SEARCHES, current.take(MAX_RECENT_SEARCHES).joinToString("\n"))
+            .apply()
+    }
+
+    /** Clear the recent-searches list (the menu's "Clear" action). */
+    fun clearRecentSearches(context: Context) {
+        prefs(context).edit().remove(KEY_RECENT_SEARCHES).apply()
     }
 
     /** Id of the last channel that actually played, or "" when none. */

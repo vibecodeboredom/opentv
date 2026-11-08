@@ -971,19 +971,41 @@ class GuideActivity : FragmentActivity() {
         )
 
         val menuSearch = view.findViewById<EditText>(R.id.menu_search)
+        val recentContainer = view.findViewById<LinearLayout>(R.id.menu_recent_container)
+        val recentList = view.findViewById<LinearLayout>(R.id.menu_recent_list)
+        // Recent searches (4.9.3): shown while the field is empty, so a
+        // past query can be re-run without typing. Hidden as soon as the
+        // user starts typing, so the menu doesn't jump around.
+        val updateRecentVisibility = {
+            recentContainer.visibility =
+                if (menuSearch.text.isEmpty() &&
+                    PlaylistRepository.recentSearches(this).isNotEmpty()
+                ) View.VISIBLE else View.GONE
+        }
         menuSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 applySearch(s?.toString().orEmpty())
+                updateRecentVisibility()
             }
         })
         menuSearch.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                // Submitted (Enter) — this is the moment a query is
+                // remembered, not on every keystroke.
+                PlaylistRepository.saveRecentSearch(this, menuSearch.text.toString())
                 dialog.dismiss()
                 true
             } else false
         }
+        populateRecentSearches(recentList, menuSearch, dialog, updateRecentVisibility)
+        view.findViewById<TextView>(R.id.menu_clear_recent).setOnClickListener {
+            PlaylistRepository.clearRecentSearches(this)
+            recentList.removeAllViews()
+            updateRecentVisibility()
+        }
+        updateRecentVisibility()
 
         view.findViewById<TextView>(R.id.menu_settings).setOnClickListener {
             dialog.dismiss()
@@ -1069,6 +1091,46 @@ class GuideActivity : FragmentActivity() {
         }
 
         dialog.show()
+    }
+
+    /**
+     * Fill the recent-searches list under the menu's search field
+     * (4.9.3). One row per past query (most recent first, at most
+     * MAX_RECENT_SEARCHES_SHOWN, so the full-height menu never
+     * overflows the screen). Rows use the same focusable menu-row
+     * background as the other actions (accent when focused). Tapping
+     * one runs that search immediately — setText fires the TextWatcher,
+     * so applySearch runs — moves it to the top of the list, and
+     * closes the menu onto the results.
+     */
+    private fun populateRecentSearches(
+        recentList: LinearLayout,
+        menuSearch: EditText,
+        dialog: Dialog,
+        updateRecentVisibility: () -> Unit
+    ) {
+        recentList.removeAllViews()
+        val recents = PlaylistRepository.recentSearches(this)
+            .take(MAX_RECENT_SEARCHES_SHOWN)
+        for (query in recents) {
+            recentList.addView(TextView(this).apply {
+                text = query
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                setBackgroundResource(R.drawable.guide_menu_item_bg)
+                isFocusable = true
+                isFocusableInTouchMode = true
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setOnClickListener {
+                    menuSearch.setText(query)
+                    PlaylistRepository.saveRecentSearch(this@GuideActivity, query)
+                    dialog.dismiss()
+                }
+            })
+        }
+        updateRecentVisibility()
     }
 
     private fun openExternalPlayer(channel: Channel) {
@@ -1174,5 +1236,8 @@ class GuideActivity : FragmentActivity() {
         /** Focus reaching this close to the last built row triggers
          * an append, so DPAD Down never runs out of grid below. */
         private const val GUIDE_FOCUS_BUFFER = 6
+        /** Recent searches shown in the menu (4.9.3) — fewer than the
+         * 8 stored, so the full-height menu never overflows the screen. */
+        private const val MAX_RECENT_SEARCHES_SHOWN = 5
     }
 }
