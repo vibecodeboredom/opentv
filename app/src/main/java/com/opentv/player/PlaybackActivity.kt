@@ -41,6 +41,10 @@ import java.util.Locale
  * 3 most recent channels, Clear). While the overlay is up, left/right
  * moves between the tiles and OK activates the focused one.
  *
+ * The player is built in onStart and released in onStop, so leaving
+ * for the guide and coming straight back resumes the channel instead
+ * of a black screen that never loads.
+ *
  * - INFO toggles the channel as a favorite.
  * - MENU opens options: favorite toggle + record / stop recording.
  *
@@ -129,6 +133,44 @@ class PlaybackActivity : FragmentActivity() {
 
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
 
+        // Best-effort EPG: show Now / Next for this channel once it loads.
+        if (ch != null) {
+            lifecycleScope.launch {
+                val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
+                val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
+                nowProgramme = now
+                nextProgramme = next
+                if (now != null || next != null) {
+                    val text = buildString {
+                        now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
+                        next?.let {
+                            if (isNotEmpty()) append("  •  ")
+                            append("${getString(R.string.next_up)}: ${it.title}")
+                        }
+                    }
+                    Toast.makeText(this@PlaybackActivity, text, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * (Re)creates the player and starts playback. Called from onStart so
+     * returning from the guide (which stops this activity and releases the
+     * player) resumes the channel instead of leaving a black screen that
+     * never loads. Guarded by player == null so onCreate -> onStart
+     * doesn't build it twice.
+     */
+    private fun initializePlayer() {
+        if (player != null) return
+        val ch = channel
+        val uri = recordingUri ?: ch?.url ?: return
+        val title = recordingName ?: ch?.name ?: return
+        val subtitle = if (recordingUri != null) {
+            getString(R.string.recording_label)
+        } else {
+            ch.group
+        }
         val player = if (recordingUri != null) {
             // Playback from the local download cache.
             val mediaSourceFactory = DefaultMediaSourceFactory(this)
@@ -141,14 +183,8 @@ class PlaybackActivity : FragmentActivity() {
         }
         this.player = player
         playerView.player = player
-
-        val uri = recordingUri ?: ch!!.url
-        val title = recordingName ?: ch!!.name
-        val subtitle = if (recordingUri != null) {
-            getString(R.string.recording_label)
-        } else {
-            ch!!.group
-        }
+        everPlayed = false
+        autoRetrying = false
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
@@ -185,26 +221,13 @@ class PlaybackActivity : FragmentActivity() {
                 ).show()
             }
         })
+    }
 
-        // Best-effort EPG: show Now / Next for this channel once it loads.
-        if (ch != null) {
-            lifecycleScope.launch {
-                val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
-                val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
-                nowProgramme = now
-                nextProgramme = next
-                if (now != null || next != null) {
-                    val text = buildString {
-                        now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
-                        next?.let {
-                            if (isNotEmpty()) append("  •  ")
-                            append("${getString(R.string.next_up)}: ${it.title}")
-                        }
-                    }
-                    Toast.makeText(this@PlaybackActivity, text, Toast.LENGTH_LONG).show()
-                }
-            }
-        }
+    override fun onStart() {
+        super.onStart()
+        // Rebuild the player if it was released in onStop (e.g. after
+        // visiting the guide and coming back).
+        initializePlayer()
     }
 
     override fun onResume() {
