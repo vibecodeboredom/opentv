@@ -53,19 +53,6 @@ class BrowseFragment : BrowseSupportFragment() {
             "guide" -> startActivity(Intent(requireContext(), GuideActivity::class.java))
             "recordings" -> startActivity(Intent(requireContext(), RecordingsActivity::class.java))
             "statistics" -> startActivity(Intent(requireContext(), StatsActivity::class.java))
-            "developer" -> openDeveloperOptions()
-        }
-    }
-
-    private fun openDeveloperOptions() {
-        try {
-            startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-        } catch (e: Exception) {
-            Toast.makeText(
-                requireContext(),
-                R.string.developer_options_unavailable,
-                Toast.LENGTH_LONG
-            ).show()
         }
     }
 
@@ -122,13 +109,6 @@ class BrowseFragment : BrowseSupportFragment() {
                 "statistics",
                 getString(R.string.statistics),
                 getString(R.string.statistics_desc)
-            )
-        )
-        actionsAdapter.add(
-            MenuAction(
-                "developer",
-                getString(R.string.developer_options),
-                getString(R.string.developer_options_desc)
             )
         )
         actionsAdapter.add(

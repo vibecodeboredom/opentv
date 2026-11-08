@@ -15,7 +15,7 @@ Open-source Android TV IPTV player. Native Leanback UI, M3U playlists, XMLTV EPG
 - **Recording** — press MENU while watching to record a channel locally; recordings keep going in the background and live on the Recordings screen (play / delete, with storage used)
 - **Recording upload** — set an upload URL in Settings and send a finished recording to your own server as an .mp4 (HTTP PUT; basic auth via `https://user:pass@host/path`). The export reads from the local recording cache.
 - **Statistics** — a local-only stats screen (watch time, most-watched channels, recordings, favorites, channel counts). Stored on the TV only, never shared; includes a Clear statistics option.
-- **Developer options** — a button in the OpenTV row that opens the TV's system developer menu directly.
+- **Developer options** — a separate app ([DevOptions](https://github.com/vibecodeboredom/devoptions)) that jumps straight to the TV's system developer menu.
 - **Settings** — change the playlist or EPG URL from inside the app
 
 OpenTV is a player only. It does not provide, host, or distribute any channels or streams. You add your own playlist (or use the preloaded free iptv-org list).

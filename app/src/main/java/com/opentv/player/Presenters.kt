@@ -62,7 +62,6 @@ class ActionPresenter : Presenter() {
             "guide" -> android.R.drawable.ic_menu_today
             "recordings" -> android.R.drawable.ic_menu_save
             "statistics" -> android.R.drawable.ic_menu_info_details
-            "developer" -> android.R.drawable.ic_menu_manage
             else -> android.R.drawable.ic_menu_more
         }
         cardView.mainImage = ContextCompat.getDrawable(cardView.context, iconRes)

@@ -65,9 +65,6 @@
     <string name="stats_favorites">Favorites</string>
     <string name="stats_recordings">Recordings</string>
     <string name="stats_recordings_size">Recordings size</string>
-    <string name="developer_options">Developer options</string>
-    <string name="developer_options_desc">Open the TV\'s system developer menu directly</string>
-    <string name="developer_options_unavailable">Developer options isn\'t available — enable it first in Settings &gt; About (tap Build 7 times).</string>
     <string name="guide_search_hint">Search channels or shows…</string>
     <string name="guide_now">Now</string>
     <string name="guide_no_results">No channels or shows match your search.</string>
