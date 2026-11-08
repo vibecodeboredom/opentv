@@ -307,6 +307,13 @@ object PlaylistShareServer {
             sendHtml(out, 400, messagePage("Could not import", "That URL did not return an M3U playlist."))
             return
         }
+        // 4.9.1: a header-only playlist parses to zero channels and can
+        // never load — reject it here with a clear message instead of
+        // adding a dead entry that fails every time it is used.
+        if (M3uParser.parse(text).isEmpty()) {
+            sendHtml(out, 400, messagePage("No channels in that playlist", "That URL returned a playlist with no channels in it."))
+            return
+        }
         val context = appContext
         if (context == null) {
             sendHtml(out, 500, messagePage("TV busy", "Try again in a moment."))
@@ -343,6 +350,13 @@ object PlaylistShareServer {
         }
         if (!text.trimStart().startsWith("#EXTM3U")) {
             sendHtml(out, 400, messagePage("Not an M3U playlist", "That file does not start with #EXTM3U."))
+            return
+        }
+        // 4.9.1: a header-only file parses to zero channels and can
+        // never load — reject it here with a clear message instead of
+        // adding a dead entry that fails every time it is used.
+        if (M3uParser.parse(text).isEmpty()) {
+            sendHtml(out, 400, messagePage("No channels in that file", "That file has no channels in it — send a playlist with at least one channel."))
             return
         }
         val context = appContext

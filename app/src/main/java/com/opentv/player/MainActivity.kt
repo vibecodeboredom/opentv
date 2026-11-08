@@ -79,18 +79,29 @@ class MainActivity : FragmentActivity() {
                 intent.putExtra(PlaybackActivity.EXTRA_CHANNEL, pick)
                 startActivity(intent)
                 finish()
-            }.onFailure {
-                showLoadError()
+            }.onFailure { cause ->
+                showLoadError(cause)
             }
         }
     }
 
-    /** Playlist failed: say so plainly, then fall back to the browse menu. */
-    private fun showLoadError() {
+    /**
+     * Playlist failed: say so plainly, then fall back to the browse
+     * menu. A local-file failure shows its own message (file missing /
+     * no channels) instead of the generic "check your connection"
+     * line, so it is diagnosable; everything else keeps the generic
+     * message. The fallback itself is unchanged.
+     */
+    private fun showLoadError(cause: Throwable? = null) {
         spinner.visibility = View.GONE
         status.visibility = View.GONE
         error.visibility = View.VISIBLE
-        error.setText(R.string.load_failed)
+        val message = cause?.message
+        error.text = if (message != null && message.startsWith("Local playlist")) {
+            message
+        } else {
+            getString(R.string.load_failed)
+        }
         showBrowse()
     }
 

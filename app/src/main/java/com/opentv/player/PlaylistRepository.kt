@@ -246,10 +246,17 @@ object PlaylistRepository {
     /**
      * Store an M3U text received over the local share as a local file
      * and add it to the playlist list. Returns the new entry, or null
-     * when the text is not an M3U playlist.
+     * when the text is not an M3U playlist. 4.9.1: also returns null
+     * when the text parses to zero channels — a header-only file
+     * ("#EXTM3U" and nothing else) used to pass the header check, get
+     * added to the list, and then fail every load with "couldn't load
+     * playlist", because loadPlaylist requires at least one channel
+     * and no snapshot ever existed for it. Rejecting it here means an
+     * un-loadable entry can never be created.
      */
     fun saveLocalPlaylist(context: Context, name: String, text: String): Playlist? {
         if (!text.trimStart().startsWith("#EXTM3U")) return null
+        if (M3uParser.parse(text).isEmpty()) return null
         val fileName = SHARED_FILE_PREFIX + System.currentTimeMillis() + ".m3u"
         return try {
             context.openFileOutput(fileName, Context.MODE_PRIVATE)
@@ -453,17 +460,26 @@ object PlaylistRepository {
         }
         // Local playlist (received over the share): the source file IS
         // the cache — read and parse it directly, never a network fetch.
+        // 4.9.1: the two failure modes get distinct messages so the
+        // error is diagnosable instead of the generic "check your
+        // connection" line — a missing file and a file with no channels
+        // are different problems. (A snapshot, when one exists, was
+        // already returned above, so reaching here means there is
+        // nothing to fall back to.)
         if (isLocalPlaylist(url)) {
             val text = localPlaylistText(context, url)
-            if (text != null) {
-                val channels = M3uParser.parse(text)
-                if (channels.isNotEmpty()) {
-                    storePlaylist(context, url, channels)
-                    return@withContext Result.success(channels)
-                }
+            if (text == null) {
+                return@withContext Result.failure(
+                    IllegalStateException("Local playlist file is missing: $url")
+                )
+            }
+            val channels = M3uParser.parse(text)
+            if (channels.isNotEmpty()) {
+                storePlaylist(context, url, channels)
+                return@withContext Result.success(channels)
             }
             return@withContext Result.failure(
-                IllegalStateException("Local playlist missing: $url")
+                IllegalStateException("Local playlist has no channels: $url")
             )
         }
         // No snapshot yet (first run, or a new playlist URL): download /
@@ -543,7 +559,7 @@ object PlaylistRepository {
         if (isLocalPlaylist(url)) {
             val text = localPlaylistText(context, url)
             return@withContext if (text != null) Result.success(text)
-            else Result.failure(IllegalStateException("Local playlist missing: $url"))
+            else Result.failure(IllegalStateException("Local playlist file is missing: $url"))
         }
         val file = context.getFileStreamPath(playlistCacheFileName(url))
         if (file.exists()) {
@@ -572,14 +588,29 @@ object PlaylistRepository {
      * when the fresh data lands, so the next guide/playback open picks
      * it up. A failed refresh leaves the stale snapshot in place and
      * the next load retries it.
+     *
+     * 4.9.1: a local playlist is re-read from its file here instead of
+     * being skipped — a file replaced on disk (or repaired after a bad
+     * upload) gets picked up, and the snapshot is refreshed. It is
+     * NEVER fetched over HTTP. Only a non-empty parse replaces the
+     * snapshot, so a deleted or emptied file can never clobber the
+     * good channels already stored.
      */
     private fun refreshPlaylistInBackground(context: Context, url: String) {
-        // A local playlist never needs a network refresh.
-        if (isLocalPlaylist(url)) return
         if (!playlistRefreshRunning.compareAndSet(false, true)) return
         refreshScope.launch {
             try {
                 val appContext = context.applicationContext
+                if (isLocalPlaylist(url)) {
+                    val text = localPlaylistText(appContext, url)
+                    if (text != null) {
+                        val channels = M3uParser.parse(text)
+                        if (channels.isNotEmpty()) {
+                            storePlaylist(appContext, url, channels)
+                        }
+                    }
+                    return@launch
+                }
                 val text = try {
                     fetchText(url).also { fresh ->
                         try {
