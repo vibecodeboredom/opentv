@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Loading-screen status pill (4.6.0, TiviMate-style): 14sp white text on a
+     rounded 16dp pill, 50% grey — the same treatment as the player
+     error/status text. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#80808080" />
+    <corners android:radius="16dp" />
+</shape>

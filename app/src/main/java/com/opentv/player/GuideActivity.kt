@@ -78,12 +78,17 @@ class GuideActivity : FragmentActivity() {
     /** The programme the details header is currently showing. */
     private var detailChannelShown: Channel? = null
 
+    /** Id of the channel playing underneath (passed by PlaybackActivity);
+     * its number + name are highlighted in the accent colour. */
+    private var currentChannelId: String? = null
+
     /** Channel name views per row, so focus can turn the name blue. */
     private val channelNameViews = mutableMapOf<String, TextView>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_guide)
+        currentChannelId = intent.getStringExtra(EXTRA_CURRENT_CHANNEL_ID)
         container = findViewById(R.id.guide_container)
         loading = findViewById(R.id.guide_loading)
         scroll = findViewById(R.id.guide_scroll)
@@ -298,7 +303,7 @@ class GuideActivity : FragmentActivity() {
     private fun buildGuideHeader(cellHeight: Int) {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(0xFF121218.toInt())
+            setBackgroundColor(0xFF161616.toInt())
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -353,17 +358,22 @@ class GuideActivity : FragmentActivity() {
         }
 
         // Channel cell: number + logo + name (no group line, like the photo).
+        // 4.6.0 palette: #161616 panel; the current channel's number and
+        // name are accent (#86C739), the rest 70% white / white.
+        val isCurrentChannel = row.channel.id == currentChannelId
         val channelCell = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(0xFF121218.toInt())
+            setBackgroundColor(0xFF161616.toInt())
             setPadding(dpToPx(12), 0, dpToPx(12), 0)
             layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
         }
         if (row.channel.number > 0) {
             channelCell.addView(TextView(this).apply {
                 text = row.channel.number.toString()
-                setTextColor(0xFF3B82F6.toInt())
+                setTextColor(
+                    if (isCurrentChannel) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt()
+                )
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
@@ -385,7 +395,7 @@ class GuideActivity : FragmentActivity() {
         channelCell.addView(logo)
         val nameView = TextView(this).apply {
             text = row.channel.name
-            setTextColor(0xFFFFFFFF.toInt())
+            setTextColor(if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
@@ -437,7 +447,15 @@ class GuideActivity : FragmentActivity() {
             }
             val titleView = TextView(this).apply {
                 text = programme.title
-                setTextColor(if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt())
+                // "Now" cells sit on the accent background, so their text
+                // is dark for contrast; past cells are muted grey.
+                setTextColor(
+                    when {
+                        isNow -> 0xFF080808.toInt()
+                        isPast -> 0xFF6B6B75.toInt()
+                        else -> 0xFFFFFFFF.toInt()
+                    }
+                )
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
@@ -452,15 +470,22 @@ class GuideActivity : FragmentActivity() {
             card.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
                 if (hasFocus) {
                     // Focused cell turns white with dark text; its
-                    // channel name turns blue (like the photo).
+                    // channel name turns accent (4.6.0 palette).
                     titleView.setTextColor(0xFF121218.toInt())
-                    nameView.setTextColor(0xFF3B82F6.toInt())
+                    nameView.setTextColor(0xFF86C739.toInt())
                     showDetails(row.channel, programme)
                 } else {
                     titleView.setTextColor(
-                        if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt()
+                        when {
+                            isNow -> 0xFF080808.toInt()
+                            isPast -> 0xFF6B6B75.toInt()
+                            else -> 0xFFFFFFFF.toInt()
+                        }
                     )
-                    nameView.setTextColor(0xFFFFFFFF.toInt())
+                    // The current channel stays accent; the rest go white.
+                    nameView.setTextColor(
+                        if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                    )
                 }
             }
             rowLayout.addView(card)
@@ -714,6 +739,8 @@ class GuideActivity : FragmentActivity() {
         ).toInt()
 
     companion object {
+        /** Intent extra: id of the channel playing underneath. */
+        const val EXTRA_CURRENT_CHANNEL_ID = "current_channel_id"
         private const val WINDOW_HOURS = 6
         private const val PX_PER_MINUTE_DP = 4
         private const val CHANNEL_COL_DP = 320

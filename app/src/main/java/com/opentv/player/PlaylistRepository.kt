@@ -27,6 +27,8 @@ object PlaylistRepository {
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
     private const val KEY_RECENT = "recent_channels"
+    /** Id of the last channel that actually played (4.6.0: resume it on launch). */
+    private const val KEY_LAST_CHANNEL = "last_channel"
     /** The overlay's channel strip shows this many most recent channels. */
     private const val MAX_RECENT = 3
     private const val CACHE_FILE = "playlist.m3u"
@@ -118,6 +120,15 @@ object PlaylistRepository {
     /** Clear the recent-channels list (the overlay's "Clear" tile). */
     fun clearRecentChannels(context: Context) {
         prefs(context).edit().remove(KEY_RECENT).apply()
+    }
+
+    /** Id of the last channel that actually played, or "" when none. */
+    fun lastChannelId(context: Context): String =
+        prefs(context).getString(KEY_LAST_CHANNEL, "") ?: ""
+
+    /** Remember the last channel that actually played (resumed on launch). */
+    fun setLastChannelId(context: Context, channelId: String) {
+        prefs(context).edit().putString(KEY_LAST_CHANNEL, channelId).apply()
     }
 
     /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */

@@ -10,9 +10,11 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.OptIn
@@ -35,19 +37,43 @@ import java.util.Locale
 
 /**
  * Plays one channel with ExoPlayer. The media controller is fully
- * disabled — no overlay ever pops up. OK opens the TV Guide, and
- * left/right shows a TiviMate-style channel info overlay: group +
- * date/time on top, logo + channel name, now/next with times and a
- * progress bar, and a bottom strip of tiles (TV guide, History, the
- * 3 most recent channels, Clear). While the overlay is up, left/right
- * moves between the tiles and OK activates the focused one.
+ * disabled — OpenTV draws its own UI instead.
+ *
+ * 4.6.0 (TiviMate-style) key map — documented here because the remote
+ * is the whole interface:
+ * - OK (short): sidebar up → activate the focused row; info overlay up →
+ *   activate the focused tile; nothing up → open the TV Guide. If playback
+ *   is paused and nothing is up, OK resumes instead of opening the guide.
+ * - OK (long-press, ~600ms, nothing up): open the context menu (the same
+ *   options MENU shows: favorite, record). Implemented with a delayed
+ *   runnable: the short-press action fires on key-UP, so a hold never
+ *   also triggers the short-press action.
+ * - LEFT: sidebar up → back (channels → groups, groups → close); overlay
+ *   up → move between strip tiles (only when a strip tile has focus, so
+ *   the transport buttons keep normal Left/Right focus movement);
+ *   nothing up → open the left sidebar (channels/groups).
+ * - RIGHT: sidebar up → activate the focused row; overlay up → move
+ *   between strip tiles (same focus caveat as Left); nothing up → show
+ *   the channel info overlay.
+ * - UP/DOWN: move focus between rows/tiles/buttons (framework focus
+ *   search; the ScrollView scrolls to the focused sidebar row).
+ * - BACK: sidebar up → back/close; overlay up → hide it; else the
+ *   system default (leave playback).
+ * - Play/pause key (remote): toggle pause/resume. Channel up/down keys:
+ *   next / previous channel.
+ * - MENU opens options (favorite + record). INFO toggles favorite.
+ *
+ * The left sidebar (4.6.0) is a 320dp panel over a 60% black scrim:
+ * groups at the top ("All channels", "Favorites", "History", then the
+ * playlist groups), channels below with number + logo + name + the
+ * current programme. The current channel is highlighted in the accent
+ * (#86C739); the focused row gets a rounded 16dp highlight and its text
+ * turns accent. Channel rows are capped at 200 (the footer says so) so
+ * opening the sidebar never has to build thousands of views.
  *
  * The player is built in onStart and released in onStop, so leaving
  * for the guide and coming straight back resumes the channel instead
  * of a black screen that never loads.
- *
- * - INFO toggles the channel as a favorite.
- * - MENU opens options: favorite toggle + record / stop recording.
  *
  * Can also play back a local recording (EXTRA_RECORDING_*): the player is
  * built with the download cache as its data source, so it reads from disk.
@@ -65,6 +91,14 @@ class PlaybackActivity : FragmentActivity() {
         private const val MAX_AUTO_RETRY = 3
         /** Overlay auto-hides after this long with no key press. */
         private const val OVERLAY_TIMEOUT_MS = 10_000L
+        /** Hold OK this long to open the context menu instead of the guide. */
+        private const val LONG_PRESS_MS = 600L
+        /** Sidebar channel rows are capped at this many (see the footer). */
+        private const val SIDEBAR_MAX_CHANNELS = 200
+        /** Sidebar group keys (pseudo-groups first, then playlist groups). */
+        private const val GROUP_ALL = "ALL"
+        private const val GROUP_FAVORITES = "FAV"
+        private const val GROUP_HISTORY = "HIST"
     }
 
     private var player: ExoPlayer? = null
@@ -79,14 +113,46 @@ class PlaybackActivity : FragmentActivity() {
     private lateinit var infoNext: TextView
     private lateinit var infoProgress: ProgressBar
     private lateinit var infoStrip: LinearLayout
+    /** Bottom transport bar: title + icon-only buttons. */
+    private lateinit var transportTitle: TextView
+    private lateinit var transportPlayPause: ImageButton
+    private lateinit var transportRecord: ImageButton
+    private lateinit var transportFavorite: ImageButton
+    /** Centred play icon shown while paused. */
+    private lateinit var pausedCluster: ImageView
+    /** Left sidebar + scrim. */
+    private lateinit var sidebarScrim: View
+    private lateinit var sidebar: View
+    private lateinit var sidebarTitle: TextView
+    private lateinit var sidebarSubtitle: TextView
+    private lateinit var sidebarScroll: ScrollView
+    private lateinit var sidebarList: LinearLayout
+    private lateinit var sidebarFooter: TextView
     /** Auto-hide for the overlay. */
     private val infoHandler = Handler(Looper.getMainLooper())
     private val hideInfoRunnable = Runnable { hideOverlay() }
+    /** Long-press OK: opens the context menu. */
+    private val longPressRunnable = Runnable {
+        longPressFired = true
+        showOptions()
+    }
+    private var longPressFired = false
+    /** Sidebar / overlay state captured when OK goes down, so the
+     * short-press action on key-UP uses the state at press time. */
+    private var okDownSidebarUp = false
+    private var okDownOverlayUp = false
     /** Now / next programmes, filled once EPG loads. */
     private var nowProgramme: EpgParser.Programme? = null
     private var nextProgramme: EpgParser.Programme? = null
     /** The strip tiles, in order, for left/right focus movement. */
     private val stripTiles = mutableListOf<View>()
+    /** Sidebar state: are we showing the groups list, and which group
+     * (GROUP_ALL / GROUP_FAVORITES / GROUP_HISTORY / a group name). */
+    private var sidebarInGroups = true
+    private var sidebarGroup = GROUP_ALL
+    /** Channel id -> "now playing" TextView, so the EPG fill-in can update
+     * sidebar rows after they are built (same pattern as the strip). */
+    private val sidebarProgrammeViews = mutableMapOf<String, TextView>()
     private var channel: Channel? = null
     private var recordingId: String? = null
     private var recordingUri: String? = null
@@ -116,8 +182,20 @@ class PlaybackActivity : FragmentActivity() {
         infoNext = findViewById(R.id.info_next)
         infoProgress = findViewById(R.id.info_progress)
         infoStrip = findViewById(R.id.info_strip)
-        // No media controller at all — the video just plays. Left/right
-        // shows the channel info overlay instead.
+        transportTitle = findViewById(R.id.transport_title)
+        transportPlayPause = findViewById(R.id.transport_play_pause)
+        transportRecord = findViewById(R.id.transport_record)
+        transportFavorite = findViewById(R.id.transport_favorite)
+        pausedCluster = findViewById(R.id.paused_cluster)
+        sidebarScrim = findViewById(R.id.sidebar_scrim)
+        sidebar = findViewById(R.id.sidebar)
+        sidebarTitle = findViewById(R.id.sidebar_title)
+        sidebarSubtitle = findViewById(R.id.sidebar_subtitle)
+        sidebarScroll = findViewById(R.id.sidebar_scroll)
+        sidebarList = findViewById(R.id.sidebar_list)
+        sidebarFooter = findViewById(R.id.sidebar_footer)
+        // No media controller at all — the video just plays. The overlay
+        // and sidebar are OpenTV's own UI.
         playerView.useController = false
 
         val ch = intent.getSerializableExtra(EXTRA_CHANNEL) as? Channel
@@ -133,6 +211,25 @@ class PlaybackActivity : FragmentActivity() {
         channel = ch
 
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+
+        // Transport buttons (bottom bar). Play/pause toggles playback;
+        // prev/next switch channel; record and favorite are the same
+        // actions the MENU options dialog offers.
+        findViewById<ImageButton>(R.id.transport_prev).setOnClickListener {
+            switchToAdjacentChannel(-1)
+        }
+        transportPlayPause.setOnClickListener { togglePlayPause() }
+        findViewById<ImageButton>(R.id.transport_next).setOnClickListener {
+            switchToAdjacentChannel(1)
+        }
+        transportRecord.setOnClickListener { toggleRecording() }
+        transportFavorite.setOnClickListener {
+            toggleFavorite()
+            updateTransportIcons()
+        }
+        pausedCluster.setOnClickListener { togglePlayPause() }
+        sidebarScrim.setOnClickListener { hideSidebar() }
+        updateTransportIcons()
 
         // Best-effort EPG: show Now / Next for this channel once it loads.
         if (ch != null) {
@@ -213,9 +310,20 @@ class PlaybackActivity : FragmentActivity() {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY && !everPlayed) {
                     everPlayed = true
-                    // First real playback: this channel counts as watched.
-                    channel?.let { PlaylistRepository.recordRecentChannel(this@PlaybackActivity, it.id) }
+                    // First real playback: this channel counts as watched,
+                    // and it becomes the channel launch resumes next time.
+                    channel?.let {
+                        PlaylistRepository.recordRecentChannel(this@PlaybackActivity, it.id)
+                        PlaylistRepository.setLastChannelId(this@PlaybackActivity, it.id)
+                    }
                 }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Paused: show the centred play cluster; playing: hide it.
+                // The transport play/pause icon follows the same state.
+                pausedCluster.visibility = if (isPlaying) View.GONE else View.VISIBLE
+                updateTransportIcons()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -252,37 +360,445 @@ class PlaybackActivity : FragmentActivity() {
     }
 
     /**
-     * OK opens the TV Guide (or activates the focused strip tile when the
-     * overlay is up). Left/right shows the overlay, and moves between the
-     * strip tiles while it is up. BACK hides the overlay. Intercepted here,
-     * before the PlayerView sees the key.
+     * Key handling — see the class comment for the full map. OK is handled
+     * on key-UP (with a long-press timer armed on key-DOWN) so a hold
+     * opens the context menu without also firing the short-press action.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val sidebarUp = sidebar.visibility == View.VISIBLE
+        val overlayUp = overlay.visibility == View.VISIBLE
         if (event.action == KeyEvent.ACTION_DOWN) {
-            val overlayUp = overlay.visibility == View.VISIBLE
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                    if (overlayUp) activateFocusedTile() else openGuide()
+                    okDownSidebarUp = sidebarUp
+                    okDownOverlayUp = overlayUp
+                    // Long-press OK (nothing up) opens the context menu.
+                    if (!sidebarUp && !overlayUp) {
+                        longPressFired = false
+                        infoHandler.postDelayed(longPressRunnable, LONG_PRESS_MS)
+                    }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    if (overlayUp) moveStripFocus(event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
-                    else showChannelInfo()
+                    val right = event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                    if (sidebarUp) {
+                        if (right) sidebarActivate() else sidebarBack()
+                        return true
+                    }
+                    if (overlayUp) {
+                        // Only steer the strip when a strip tile has
+                        // focus; the transport buttons below it keep
+                        // normal Left/Right focus movement.
+                        if (stripTiles.any { it.isFocused }) {
+                            moveStripFocus(right)
+                            return true
+                        }
+                        return super.dispatchKeyEvent(event)
+                    }
+                    // Nothing up: Left opens the sidebar, Right shows
+                    // the channel info overlay.
+                    if (right) showChannelInfo() else showSidebar()
                     return true
                 }
                 KeyEvent.KEYCODE_BACK -> {
+                    if (sidebarUp) {
+                        sidebarBack()
+                        return true
+                    }
                     if (overlayUp) {
                         hideOverlay()
                         return true
                     }
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                KeyEvent.KEYCODE_MEDIA_PLAY,
+                KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                    togglePlayPause()
+                    return true
+                }
+                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                    switchToAdjacentChannel(if (event.keyCode == KeyEvent.KEYCODE_CHANNEL_UP) 1 else -1)
+                    return true
+                }
+            }
+        }
+        if (event.action == KeyEvent.ACTION_UP) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    infoHandler.removeCallbacks(longPressRunnable)
+                    if (longPressFired) {
+                        // The long-press already opened the menu.
+                        longPressFired = false
+                        return true
+                    }
+                    if (okDownSidebarUp) {
+                        sidebarActivate()
+                    } else if (okDownOverlayUp) {
+                        activateFocusedTile()
+                    } else if (player?.isPlaying == false) {
+                        // Paused with nothing up: OK resumes.
+                        togglePlayPause()
+                    } else {
+                        openGuide()
+                    }
+                    return true
                 }
             }
         }
         return super.dispatchKeyEvent(event)
     }
 
-    /** Shows the channel info overlay (TiviMate-style); auto-hides after 10s idle. */
+    /** Pause / resume, and keep the cluster + transport icon in sync. */
+    private fun togglePlayPause() {
+        val p = player ?: return
+        if (p.isPlaying) p.pause() else p.play()
+        // onIsPlayingChanged updates the cluster and the icon.
+    }
+
+    /** Refresh the transport bar icons for the current state. */
+    private fun updateTransportIcons() {
+        val p = player
+        transportPlayPause.setImageResource(
+            if (p != null && !p.isPlaying) android.R.drawable.ic_media_play
+            else android.R.drawable.ic_media_pause
+        )
+        val ch = channel
+        val isFav = ch != null && PlaylistRepository.favorites(this).contains(ch.id)
+        transportFavorite.setImageResource(
+            if (isFav) android.R.drawable.btn_star_big_on
+            else android.R.drawable.btn_star_big_off
+        )
+        transportRecord.setImageResource(android.R.drawable.ic_menu_save)
+        val isRecording = ch != null && RecordingManager.isRecording(this, ch.id)
+        transportRecord.alpha = if (isRecording) 1.0f else 0.6f
+    }
+
+    /** Start / stop recording this channel (same action as MENU offers). */
+    private fun toggleRecording() {
+        val ch = channel ?: return
+        if (RecordingManager.isRecording(this, ch.id)) {
+            RecordingManager.stopRecording(this, ch.id)
+            Toast.makeText(this, R.string.recording_stopped, Toast.LENGTH_SHORT).show()
+        } else {
+            RecordingManager.startRecording(this, ch)
+            Toast.makeText(this, R.string.recording_started, Toast.LENGTH_SHORT).show()
+        }
+        updateTransportIcons()
+    }
+
+    /** Switch to the channel before / after the current one in the playlist. */
+    private fun switchToAdjacentChannel(delta: Int) {
+        val currentId = channel?.id ?: return
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val channels = result.getOrNull() ?: return@launch
+            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            val visible = channels.filter { it.id !in hidden }
+            val list = visible.ifEmpty { channels }
+            val idx = list.indexOfFirst { it.id == currentId }.takeIf { it >= 0 } ?: return@launch
+            val next = list[(idx + delta).mod(list.size)]
+            switchToChannel(next)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Left sidebar (4.6.0)
+    // ------------------------------------------------------------------
+
+    /** Open the sidebar on the groups list; hides the info overlay. */
+    private fun showSidebar() {
+        if (recordingUri != null) return // Recordings have no channel list.
+        hideOverlay()
+        sidebarInGroups = true
+        sidebarGroup = GROUP_ALL
+        sidebarScrim.visibility = View.VISIBLE
+        sidebar.visibility = View.VISIBLE
+        buildSidebarGroups()
+    }
+
+    private fun hideSidebar() {
+        sidebar.visibility = View.GONE
+        sidebarScrim.visibility = View.GONE
+        sidebarProgrammeViews.clear()
+    }
+
+    /** Left / BACK inside the sidebar: channels -> groups, groups -> close. */
+    private fun sidebarBack() {
+        if (!sidebarInGroups) {
+            sidebarInGroups = true
+            buildSidebarGroups()
+        } else {
+            hideSidebar()
+        }
+    }
+
+    /** OK / Right inside the sidebar: open a group, or switch channel. */
+    private fun sidebarActivate() {
+        val focused = sidebarListFocusedRow() ?: return
+        val tag = focused.tag
+        when (tag) {
+            is SidebarGroup -> {
+                sidebarInGroups = false
+                sidebarGroup = tag.key
+                buildSidebarChannels(tag.key)
+            }
+            is Channel -> switchToChannel(tag)
+        }
+    }
+
+    /** The sidebar row (group or channel) that currently has focus. */
+    private fun sidebarListFocusedRow(): View? {
+        for (i in 0 until sidebarList.childCount) {
+            val row = sidebarList.getChildAt(i)
+            if (row.isFocused) return row
+        }
+        return null
+    }
+
+    private data class SidebarGroup(val key: String, val label: String, val count: Int)
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** The groups list: All channels, Favorites, History, then playlist groups. */
+    private fun buildSidebarGroups() {
+        sidebarTitle.setText(R.string.sidebar_groups)
+        sidebarSubtitle.text = ""
+        sidebarFooter.text = ""
+        sidebarList.removeAllViews()
+        sidebarProgrammeViews.clear()
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val channels = result.getOrNull() ?: emptyList()
+            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            val visible = channels.filter { it.id !in hidden }
+            val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
+            val recents = PlaylistRepository.recentChannelIds(this@PlaybackActivity)
+            val groups = visible.map { it.group }.distinct()
+            if (sidebar.visibility != View.VISIBLE || !sidebarInGroups) return@launch
+            val items = mutableListOf<SidebarGroup>()
+            items += SidebarGroup(GROUP_ALL, getString(R.string.sidebar_all_channels), visible.size)
+            items += SidebarGroup(
+                GROUP_FAVORITES, getString(R.string.favorites),
+                visible.count { it.id in favorites }
+            )
+            items += SidebarGroup(
+                GROUP_HISTORY, getString(R.string.sidebar_history), recents.size
+            )
+            for (g in groups) {
+                items += SidebarGroup(g, g, visible.count { it.group == g })
+            }
+            for (item in items) {
+                sidebarList.addView(buildSidebarGroupRow(item))
+            }
+            if (items.isEmpty()) {
+                sidebarFooter.setText(R.string.sidebar_no_groups)
+            }
+            // Focus the "All channels" row so Up/Down works straight away.
+            sidebarList.post {
+                (sidebarList.getChildAt(0) as? View)?.requestFocus()
+            }
+        }
+    }
+
+    /** One group row: name + channel count, accent text when focused. */
+    private fun buildSidebarGroupRow(item: SidebarGroup): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(2); bottomMargin = dp(2) }
+            minimumHeight = dp(56)
+            setBackgroundResource(R.drawable.sidebar_row_bg)
+            tag = item
+            setOnClickListener {
+                sidebarInGroups = false
+                sidebarGroup = item.key
+                buildSidebarChannels(item.key)
+            }
+        }
+        val nameView = TextView(this).apply {
+            text = item.label
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val countView = TextView(this).apply {
+            text = item.count.toString()
+            setTextColor(0xB3FFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+        row.addView(nameView)
+        row.addView(countView)
+        row.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+            nameView.setTextColor(if (hasFocus) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
+        }
+        return row
+    }
+
+    /** The channels of one group (or a pseudo-group), capped at 200 rows. */
+    private fun buildSidebarChannels(groupKey: String) {
+        val groupLabel = when (groupKey) {
+            GROUP_ALL -> getString(R.string.sidebar_all_channels)
+            GROUP_FAVORITES -> getString(R.string.favorites)
+            GROUP_HISTORY -> getString(R.string.sidebar_history)
+            else -> groupKey
+        }
+        sidebarTitle.text = groupLabel
+        sidebarList.removeAllViews()
+        sidebarProgrammeViews.clear()
+        sidebarFooter.text = ""
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val channels = result.getOrNull() ?: emptyList()
+            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            val visible = channels.filter { it.id !in hidden }
+            val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
+            val recents = PlaylistRepository.recentChannelIds(this@PlaybackActivity)
+            val byId = channels.associateBy { it.id }
+            val list = when (groupKey) {
+                GROUP_ALL -> visible
+                GROUP_FAVORITES -> visible.filter { it.id in favorites }
+                GROUP_HISTORY -> recents.mapNotNull { byId[it] }.filter { it.id !in hidden }
+                else -> visible.filter { it.group == groupKey }
+            }
+            if (sidebar.visibility != View.VISIBLE || sidebarInGroups) return@launch
+            sidebarSubtitle.text = getString(R.string.sidebar_channels_count, list.size)
+            val shown = list.take(SIDEBAR_MAX_CHANNELS)
+            for (ch in shown) {
+                sidebarList.addView(buildSidebarChannelRow(ch))
+            }
+            if (list.isEmpty()) {
+                sidebarFooter.setText(R.string.sidebar_no_channels)
+            } else if (list.size > SIDEBAR_MAX_CHANNELS) {
+                sidebarFooter.text = getString(R.string.sidebar_first_n, SIDEBAR_MAX_CHANNELS)
+            }
+            // Focus the current channel's row (or the first row) so
+            // Up/Down works straight away.
+            val currentId = channel?.id
+            sidebarList.post {
+                val target = (0 until sidebarList.childCount)
+                    .map { sidebarList.getChildAt(it) }
+                    .firstOrNull { (it.tag as? Channel)?.id == currentId }
+                    ?: sidebarList.getChildAt(0)
+                target?.requestFocus()
+                // Keep the focused row visible once the list is laid out.
+                sidebarScroll.post {
+                    (0 until sidebarList.childCount)
+                        .map { sidebarList.getChildAt(it) }
+                        .firstOrNull { it.isFocused }
+                        ?.let { sidebarScroll.scrollTo(0, it.top) }
+                }
+            }
+            // Fill in "now playing" once the EPG is in (cached after the
+            // first load, so this is usually instant).
+            val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
+            if (sidebar.visibility != View.VISIBLE || sidebarInGroups) return@launch
+            val now = System.currentTimeMillis()
+            for (ch in shown) {
+                val view = sidebarProgrammeViews[ch.id] ?: continue
+                val programmes = epg[ch.tvgId] ?: epg[ch.name.lowercase()]
+                val current = EpgParser.nowAndNext(programmes, now).first
+                view.text = current?.title ?: getString(R.string.overlay_no_info)
+            }
+        }
+    }
+
+    /** One channel row: number + logo + name + now-playing programme. */
+    private fun buildSidebarChannelRow(ch: Channel): View {
+        val isCurrent = ch.id == channel?.id
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(2); bottomMargin = dp(2) }
+            minimumHeight = dp(56)
+            setBackgroundResource(R.drawable.sidebar_row_bg)
+            tag = ch
+            setOnClickListener { switchToChannel(ch) }
+        }
+        val numberView = TextView(this).apply {
+            text = if (ch.number > 0) ch.number.toString() else ""
+            // The current channel's number is accent; the rest are 70% white.
+            setTextColor(if (isCurrent) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(dp(36), LinearLayout.LayoutParams.MATCH_PARENT)
+        }
+        val logoView = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+                marginEnd = dp(12)
+            }
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            load(ch.logo) {
+                placeholder(android.R.drawable.ic_media_play)
+                error(android.R.drawable.ic_media_play)
+            }
+        }
+        val textBlock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val nameView = TextView(this).apply {
+            text = ch.name
+            // Current channel in accent, the rest white.
+            setTextColor(if (isCurrent) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        val programmeView = TextView(this).apply {
+            text = getString(R.string.overlay_no_info)
+            setTextColor(0xB3FFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        textBlock.addView(nameView)
+        textBlock.addView(programmeView)
+        row.addView(numberView)
+        row.addView(logoView)
+        row.addView(textBlock)
+        sidebarProgrammeViews[ch.id] = programmeView
+        row.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+            // Focused row: name (and number, unless it is the current
+            // channel, which is already accent) turns accent.
+            nameView.setTextColor(
+                if (hasFocus || isCurrent) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+            )
+            if (!isCurrent) {
+                numberView.setTextColor(if (hasFocus) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt())
+            }
+        }
+        return row
+    }
+
+    // ------------------------------------------------------------------
+    // Info overlay (restyled 4.6.0)
+    // ------------------------------------------------------------------
+
+    /** Shows the channel info overlay; auto-hides after 10s idle. */
     private fun showChannelInfo() {
+        hideSidebar()
         val ch = channel
         val name = recordingName ?: ch?.name ?: return
         val now = System.currentTimeMillis()
@@ -314,6 +830,9 @@ class PlaybackActivity : FragmentActivity() {
         } else {
             getString(R.string.overlay_no_info)
         }
+        // Bottom bar title: the programme on now, or the channel name.
+        transportTitle.text = nowP?.title ?: name
+        updateTransportIcons()
         buildStrip()
         overlay.visibility = View.VISIBLE
         // Focus the first tile so left/right + OK work straight away.
@@ -325,6 +844,7 @@ class PlaybackActivity : FragmentActivity() {
     private fun hideOverlay() {
         overlay.visibility = View.GONE
         infoHandler.removeCallbacks(hideInfoRunnable)
+        infoHandler.removeCallbacks(longPressRunnable)
     }
 
     private fun armHideTimer() {
@@ -363,7 +883,6 @@ class PlaybackActivity : FragmentActivity() {
     private fun buildStripStatic(recents: List<Channel>, noInfo: String) {
         infoStrip.removeAllViews()
         stripTiles.clear()
-        val dp = { v: Int -> (v * resources.displayMetrics.density).toInt() }
 
         fun tile(iconRes: Int?, logoUrl: String?, label: String, onClick: () -> Unit) {
             val tileView = LinearLayout(this).apply {
@@ -375,10 +894,11 @@ class PlaybackActivity : FragmentActivity() {
                 layoutParams = LinearLayout.LayoutParams(dp(150), dp(110)).apply {
                     marginEnd = dp(12)
                 }
-                setBackgroundColor(0xFF1C1C22.toInt())
+                // 4.6.0 palette: dark-grey tile, accent highlight on focus.
+                setBackgroundColor(0xFF232629.toInt())
                 setOnClickListener { onClick() }
                 onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
-                    setBackgroundColor(if (hasFocus) 0xFF3B82F6.toInt() else 0xFF1C1C22.toInt())
+                    setBackgroundColor(if (hasFocus) 0xFF86C739.toInt() else 0xFF232629.toInt())
                 }
             }
             val icon = ImageView(this).apply {
@@ -444,6 +964,7 @@ class PlaybackActivity : FragmentActivity() {
     /** Switch playback to the given channel (used by a recent-channel tile). */
     private fun switchToChannel(pick: Channel) {
         hideOverlay()
+        hideSidebar()
         val intent = Intent(this, PlaybackActivity::class.java)
         intent.putExtra(EXTRA_CHANNEL, pick)
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -454,7 +975,10 @@ class PlaybackActivity : FragmentActivity() {
     private fun openGuide() {
         if (guideLaunched) return
         guideLaunched = true
-        startActivity(Intent(this, GuideActivity::class.java))
+        val intent = Intent(this, GuideActivity::class.java)
+        // The guide highlights the current channel in the accent colour.
+        channel?.let { intent.putExtra(GuideActivity.EXTRA_CURRENT_CHANNEL_ID, it.id) }
+        startActivity(intent)
     }
 
     /** Pick a different random channel and restart playback with it. */
@@ -491,6 +1015,7 @@ class PlaybackActivity : FragmentActivity() {
             }
             KeyEvent.KEYCODE_INFO -> {
                 toggleFavorite()
+                updateTransportIcons()
                 return true
             }
         }
@@ -529,7 +1054,10 @@ class PlaybackActivity : FragmentActivity() {
             .setTitle(ch.name)
             .setItems(items.toTypedArray()) { _, which ->
                 when (which) {
-                    0 -> toggleFavorite()
+                    0 -> {
+                        toggleFavorite()
+                        updateTransportIcons()
+                    }
                     1 -> {
                         if (isRecording) {
                             RecordingManager.stopRecording(this, ch.id)
@@ -546,6 +1074,7 @@ class PlaybackActivity : FragmentActivity() {
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
+                        updateTransportIcons()
                     }
                 }
             }
@@ -555,7 +1084,9 @@ class PlaybackActivity : FragmentActivity() {
     override fun onStop() {
         super.onStop()
         infoHandler.removeCallbacks(hideInfoRunnable)
+        infoHandler.removeCallbacks(longPressRunnable)
         overlay.visibility = View.GONE
+        hideSidebar()
         // Log the watch session (local only, never shared).
         val watchedMillis = System.currentTimeMillis() - sessionStartMillis
         if (sessionStartMillis > 0L && watchedMillis > 0L) {

@@ -40,7 +40,7 @@
         android:id="@+id/menu_programme_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="#3B82F6"
+        android:textColor="#86C739"
         android:textSize="18sp"
         android:textStyle="bold"
         android:padding="16dp" />
@@ -85,7 +85,7 @@
         android:id="@+id/menu_channel_name"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="#3B82F6"
+        android:textColor="#86C739"
         android:textSize="18sp"
         android:textStyle="bold"
         android:padding="16dp" />

@@ -1,6 +1,78 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Loading screen (4.6.0, TiviMate-style): full-screen black, the OpenTV
+     logo centred near the top, a centred indeterminate spinner below it,
+     and a 14sp white status line on a rounded pill. The app used to launch
+     straight into a random channel (or a black screen when the playlist
+     failed); now launch always shows this screen first.
+     The error banner is a direct child of the root (not inside the loading
+     content) so it stays visible over the browse menu when loading fails. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/main_frame"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black" />
+    android:background="@android:color/black">
+
+    <LinearLayout
+        android:id="@+id/loading_content"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <!-- OpenTV's own gradient logo (the banner asset, 320x180). -->
+        <ImageView
+            android:id="@+id/loading_logo"
+            android:layout_width="320dp"
+            android:layout_height="180dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_banner"
+            android:contentDescription="@string/app_name" />
+
+        <ProgressBar
+            android:id="@+id/loading_spinner"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp" />
+
+        <!-- Status line: 14sp white on the rounded 16dp pill. -->
+        <TextView
+            android:id="@+id/loading_status"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/loading_status_bg"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="@string/loading_playlist"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+
+    <!-- Shown when loading fails; stays visible over the browse menu. -->
+    <TextView
+        android:id="@+id/loading_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="48dp"
+        android:background="@drawable/loading_status_bg"
+        android:gravity="center"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:textColor="#FF7043"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+    <!-- Browse fallback (Settings lives here); hidden until needed. -->
+    <FrameLayout
+        android:id="@+id/browse_frame"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+</FrameLayout>

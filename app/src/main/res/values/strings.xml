@@ -2,6 +2,18 @@
 <resources>
     <string name="app_name">OpenTV</string>
     <string name="loading">Loading channels…</string>
+    <string name="loading_playlist">Loading playlist…</string>
+    <string name="loading_guide">Loading guide…</string>
+    <string name="loading_starting">Starting…</string>
+    <string name="sidebar_groups">Groups</string>
+    <string name="sidebar_all_channels">All channels</string>
+    <string name="sidebar_history">History</string>
+    <string name="sidebar_channels_count">Channels: %1$d</string>
+    <string name="sidebar_first_n">Displaying first %1$d channels. Use the guide to find more.</string>
+    <string name="sidebar_no_channels">No channels in this group</string>
+    <string name="sidebar_no_groups">No groups</string>
+    <string name="transport_prev_channel">Previous channel</string>
+    <string name="transport_next_channel">Next channel</string>
     <string name="favorites">Favorites</string>
     <string name="settings_row">OpenTV</string>
     <string name="change_playlist">Change playlist</string>

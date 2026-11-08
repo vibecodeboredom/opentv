@@ -7,7 +7,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#0B0B0E">
+    android:background="#080808">
 
     <!-- Details header: preview box + selected programme info.
          Kept compact so more channel rows fit on screen. -->
