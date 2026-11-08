@@ -1,27 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Guide, rebuilt from scratch to match the TiviMate reference photo:
+     a big details header (preview box + programme info), then the grid.
+     No title bar, no search bar, no Now button in the guide itself —
+     search lives in the long-press context menu. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#0B0B0E"
-    android:padding="16dp">
+    android:background="#0B0B0E">
 
-    <!-- Details header: preview box + selected programme info (TiviMate style). -->
+    <!-- Details header: preview box + selected programme info. -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="200dp"
-        android:orientation="horizontal">
+        android:layout_height="320dp"
+        android:orientation="horizontal"
+        android:padding="24dp">
 
         <!-- Preview box: selected channel's logo. -->
         <FrameLayout
-            android:layout_width="360dp"
+            android:layout_width="560dp"
             android:layout_height="match_parent"
             android:background="@drawable/guide_preview_bg">
 
             <ImageView
                 android:id="@+id/guide_detail_logo"
-                android:layout_width="120dp"
-                android:layout_height="120dp"
+                android:layout_width="180dp"
+                android:layout_height="180dp"
                 android:layout_gravity="center"
                 android:contentDescription="@string/guide_preview" />
 
@@ -30,9 +34,9 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="bottom|center_horizontal"
-                android:layout_marginBottom="12dp"
+                android:layout_marginBottom="16dp"
                 android:textColor="#FFFFFF"
-                android:textSize="16sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
                 android:maxLines="1" />
         </FrameLayout>
@@ -42,7 +46,7 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-            android:layout_marginStart="24dp"
+            android:layout_marginStart="32dp"
             android:orientation="vertical">
 
             <LinearLayout
@@ -57,7 +61,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textColor="#FFFFFF"
-                    android:textSize="28sp"
+                    android:textSize="30sp"
                     android:textStyle="bold"
                     android:maxLines="1" />
 
@@ -69,7 +73,7 @@
                     android:layout_marginStart="16dp"
                     android:text="☆"
                     android:textColor="#7A7A85"
-                    android:textSize="32sp"
+                    android:textSize="34sp"
                     android:focusable="true"
                     android:clickable="true"
                     android:padding="8dp" />
@@ -78,7 +82,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="16dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
@@ -87,12 +91,12 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="#C9C9D1"
-                    android:textSize="16sp" />
+                    android:textSize="17sp" />
 
                 <ProgressBar
                     android:id="@+id/guide_detail_progress"
                     style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="200dp"
+                    android:layout_width="220dp"
                     android:layout_height="8dp"
                     android:layout_marginStart="16dp"
                     android:max="100"
@@ -105,52 +109,22 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
                     android:textColor="#C9C9D1"
-                    android:textSize="16sp" />
+                    android:textSize="17sp" />
             </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
 
             <TextView
                 android:id="@+id/guide_detail_category"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="end"
-                android:layout_marginTop="48dp"
                 android:textColor="#9A9AA3"
-                android:textSize="16sp" />
+                android:textSize="17sp" />
         </LinearLayout>
-    </LinearLayout>
-
-    <!-- Search + jump-to-now. -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-
-        <EditText
-            android:id="@+id/guide_search"
-            android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_weight="1"
-            android:layout_marginEnd="16dp"
-            android:background="@drawable/guide_search_bg"
-            android:hint="@string/guide_search_hint"
-            android:textColor="@android:color/white"
-            android:textColorHint="#7A7A85"
-            android:textSize="16sp"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:inputType="text"
-            android:singleLine="true"
-            android:imeOptions="actionSearch" />
-
-        <Button
-            android:id="@+id/guide_now_button"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:text="@string/guide_now"
-            android:textColor="@android:color/white"
-            android:background="@drawable/guide_now_button_bg" />
     </LinearLayout>
 
     <ProgressBar
@@ -165,7 +139,6 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="16dp"
         android:visibility="gone">
 
         <HorizontalScrollView

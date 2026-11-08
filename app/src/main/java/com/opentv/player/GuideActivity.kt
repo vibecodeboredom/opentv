@@ -16,7 +16,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -32,18 +31,20 @@ import coil.load
 import kotlinx.coroutines.launch
 
 /**
- * The TV guide, TiviMate style (v4.0):
- * - Details header on top: preview box with the channel logo, programme
+ * The TV guide, rebuilt from scratch (v4.0.1) to match the TiviMate
+ * reference photo exactly:
+ * - Big details header: preview box with the channel logo, programme
  *   title, time range, progress bar with minutes left, favorite star,
  *   and the channel's category. It follows the focused programme.
- * - Grid: channel numbers + logos + names down the left, 30-minute time
- *   columns across the top, programme cards with rounded corners. The
- *   focused card turns white with dark text. Red current-time line.
+ * - Grid: channel numbers in blue, logos, and names down the left;
+ *   30-minute time columns across the top with the date + current time;
+ *   flat programme cells showing just the title. The focused cell turns
+ *   white with dark text, and its channel name turns blue. Red
+ *   current-time line.
  * - Long-press OK on a programme opens the context menu (search, settings,
  *   external player, record, custom recording, favorites, block/hide,
- *   assign EPG, channel options).
- * - Search filters channels and programme titles. "Now" jumps to the
- *   current time.
+ *   assign EPG, channel options). Search lives in that menu, not in the
+ *   guide itself.
  *
  * A 6-hour window starting at the top of the current hour.
  */
@@ -55,7 +56,6 @@ class GuideActivity : FragmentActivity() {
     private lateinit var hscroll: HorizontalScrollView
     private lateinit var nowLine: View
     private lateinit var emptyView: TextView
-    private lateinit var searchBox: EditText
 
     private lateinit var detailLogo: ImageView
     private lateinit var detailChannel: TextView
@@ -76,7 +76,9 @@ class GuideActivity : FragmentActivity() {
 
     /** The programme the details header is currently showing. */
     private var detailChannelShown: Channel? = null
-    private var detailProgrammeShown: EpgParser.Programme? = null
+
+    /** Channel name views per row, so focus can turn the name blue. */
+    private val channelNameViews = mutableMapOf<String, TextView>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,7 +89,6 @@ class GuideActivity : FragmentActivity() {
         hscroll = findViewById(R.id.guide_hscroll)
         nowLine = findViewById(R.id.guide_now_line)
         emptyView = findViewById(R.id.guide_empty)
-        searchBox = findViewById(R.id.guide_search)
 
         detailLogo = findViewById(R.id.guide_detail_logo)
         detailChannel = findViewById(R.id.guide_detail_channel)
@@ -101,14 +102,6 @@ class GuideActivity : FragmentActivity() {
         pxPerMinute = dpToPx(PX_PER_MINUTE_DP)
         channelColWidth = dpToPx(CHANNEL_COL_DP)
 
-        findViewById<Button>(R.id.guide_now_button).setOnClickListener { scrollToNow() }
-        searchBox.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                applySearch(s?.toString().orEmpty())
-            }
-        })
         detailStar.setOnClickListener {
             val ch = detailChannelShown ?: return@setOnClickListener
             PlaylistRepository.toggleFavorite(this, ch.id)
@@ -189,7 +182,6 @@ class GuideActivity : FragmentActivity() {
     /** Show a channel + programme in the details header. */
     private fun showDetails(channel: Channel, programme: EpgParser.Programme) {
         detailChannelShown = channel
-        detailProgrammeShown = programme
         detailTitle.text = programme.title
         detailTime.text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
         detailChannel.text = if (channel.number > 0) {
@@ -229,6 +221,7 @@ class GuideActivity : FragmentActivity() {
 
     private fun buildGuide(rows: List<GuideData.GuideRow>) {
         container.removeAllViews()
+        channelNameViews.clear()
         nowLine.visibility = View.GONE
         val windowEnd = windowStart + WINDOW_HOURS * 60L * 60 * 1000
         val cellHeight = dpToPx(CELL_HEIGHT_DP)
@@ -245,8 +238,8 @@ class GuideActivity : FragmentActivity() {
         }
         header.addView(TextView(this).apply {
             text = GuideData.formatDateTime(nowMillis)
-            setTextColor(0xFF9A9AA3.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextColor(0xFFC9C9D1.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dpToPx(12), 0, dpToPx(12), 0)
@@ -256,7 +249,7 @@ class GuideActivity : FragmentActivity() {
             val label = TextView(this).apply {
                 text = GuideData.formatHourLabel(windowStart + m * 60L * 1000)
                 setTextColor(0xFF9A9AA3.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -267,7 +260,7 @@ class GuideActivity : FragmentActivity() {
         }
         container.addView(header)
 
-        // One row per channel: number + logo + name, then programme cards.
+        // One row per channel: number + logo + name, then programme cells.
         var firstNow: Pair<Channel, EpgParser.Programme>? = null
         for (row in rows) {
             val rowLayout = LinearLayout(this).apply {
@@ -278,7 +271,7 @@ class GuideActivity : FragmentActivity() {
                 ).apply { topMargin = cellMargin }
             }
 
-            // Channel cell: number + logo + name + group.
+            // Channel cell: number + logo + name (no group line, like the photo).
             val channelCell = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -290,11 +283,11 @@ class GuideActivity : FragmentActivity() {
                 channelCell.addView(TextView(this).apply {
                     text = row.channel.number.toString()
                     setTextColor(0xFF3B82F6.toInt())
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
                     typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER_VERTICAL
                     layoutParams = LinearLayout.LayoutParams(
-                        dpToPx(44),
+                        dpToPx(48),
                         LinearLayout.LayoutParams.MATCH_PARENT
                     )
                 })
@@ -309,33 +302,23 @@ class GuideActivity : FragmentActivity() {
                 }
             }
             channelCell.addView(logo)
-            val nameCol = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
+            val nameView = TextView(this).apply {
+                text = row.channel.name
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+                typeface = Typeface.DEFAULT_BOLD
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
             }
-            nameCol.addView(TextView(this).apply {
-                text = row.channel.name
-                setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                typeface = Typeface.DEFAULT_BOLD
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            nameCol.addView(TextView(this).apply {
-                text = row.channel.group
-                setTextColor(0xFF9A9AA3.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                maxLines = 1
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
-            channelCell.addView(nameCol)
+            channelCell.addView(nameView)
+            channelNameViews[row.channel.id] = nameView
             rowLayout.addView(channelCell)
 
-            // Programme cards, with spacers for gaps.
+            // Programme cells (title only, like the photo), with spacers for gaps.
             var posMinutes = 0L
             for (programme in row.programmes) {
                 val layout = GuideData.layoutCell(programme, windowStart, windowEnd)
@@ -379,14 +362,7 @@ class GuideActivity : FragmentActivity() {
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
-                val timeView = TextView(this).apply {
-                    text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
-                    setTextColor(if (isPast) 0xFF55555F.toInt() else 0xFFC9C9D1.toInt())
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                    maxLines = 1
-                }
                 card.addView(titleView)
-                card.addView(timeView)
                 card.setOnClickListener { onProgrammeClicked(row.channel, programme) }
                 card.setOnLongClickListener {
                     showContextMenu(row.channel, programme)
@@ -394,17 +370,16 @@ class GuideActivity : FragmentActivity() {
                 }
                 card.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
                     if (hasFocus) {
-                        // Focused card turns white with dark text (TiviMate look).
+                        // Focused cell turns white with dark text; its
+                        // channel name turns blue (like the photo).
                         titleView.setTextColor(0xFF121218.toInt())
-                        timeView.setTextColor(0xFF55555F.toInt())
+                        nameView.setTextColor(0xFF3B82F6.toInt())
                         showDetails(row.channel, programme)
                     } else {
                         titleView.setTextColor(
                             if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt()
                         )
-                        timeView.setTextColor(
-                            if (isPast) 0xFF55555F.toInt() else 0xFFC9C9D1.toInt()
-                        )
+                        nameView.setTextColor(0xFFFFFFFF.toInt())
                     }
                 }
                 rowLayout.addView(card)
