@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenTV</string>
+    <string name="loading">Loading channels…</string>
+    <string name="favorites">Favorites</string>
+    <string name="settings_row">OpenTV</string>
+    <string name="change_playlist">Change playlist</string>
+    <string name="change_playlist_desc">Set the M3U playlist URL</string>
+    <string name="refresh_playlist">Refresh playlist</string>
+    <string name="refresh_playlist_desc">Reload channels from the playlist</string>
+    <string name="playlist_url_label">Playlist (M3U) URL</string>
+    <string name="epg_url_label">EPG (XMLTV) URL (optional)</string>
+    <string name="save">Save</string>
+    <string name="reset_default">Reset to default</string>
+    <string name="no_channels">No channels found. Check the playlist URL in Settings.</string>
+    <string name="load_failed">Could not load the playlist. Check your connection and the URL in Settings.</string>
+    <string name="now_playing">Now</string>
+    <string name="next_up">Next</string>
+</resources>
