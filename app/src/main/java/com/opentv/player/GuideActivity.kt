@@ -102,6 +102,12 @@ class GuideActivity : FragmentActivity() {
         pxPerMinute = dpToPx(PX_PER_MINUTE_DP)
         channelColWidth = dpToPx(CHANNEL_COL_DP)
 
+        // The star is a touch target only — it must never steal DPAD
+        // focus, or the guide opens with nothing in the grid focused
+        // and a long-press OK lands on the star instead of a programme.
+        detailStar.isFocusable = false
+        detailStar.isFocusableInTouchMode = false
+
         detailStar.setOnClickListener {
             val ch = detailChannelShown ?: return@setOnClickListener
             PlaylistRepository.toggleFavorite(this, ch.id)
@@ -265,6 +271,7 @@ class GuideActivity : FragmentActivity() {
 
         // One row per channel: number + logo + name, then programme cells.
         var firstNow: Pair<Channel, EpgParser.Programme>? = null
+        var firstNowCard: View? = null
         for (row in rows) {
             val rowLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -386,6 +393,7 @@ class GuideActivity : FragmentActivity() {
                     }
                 }
                 rowLayout.addView(card)
+                if (isNow && firstNowCard == null) firstNowCard = card
                 posMinutes = layout.startOffsetMinutes + layout.widthMinutes
             }
             container.addView(rowLayout)
@@ -393,6 +401,13 @@ class GuideActivity : FragmentActivity() {
 
         // Show the first programme on now in the details header.
         firstNow?.let { (ch, prog) -> showDetails(ch, prog) }
+
+        // Focus the programme on now, so the guide opens with a cell
+        // focused and a long-press OK lands on a programme (the side
+        // menu), not on the header star.
+        firstNowCard?.let { card ->
+            container.post { card.requestFocus() }
+        }
 
         // Position the red now-line at the current time, spanning all rows.
         val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L

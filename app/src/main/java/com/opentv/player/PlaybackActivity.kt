@@ -35,6 +35,9 @@ class PlaybackActivity : FragmentActivity() {
         const val EXTRA_RECORDING_ID = "recording_id"
         const val EXTRA_RECORDING_URI = "recording_uri"
         const val EXTRA_RECORDING_NAME = "recording_name"
+        const val EXTRA_RETRY_COUNT = "retry_count"
+        /** Dead streams are common in the playlist — auto-try another random channel this many times. */
+        private const val MAX_AUTO_RETRY = 3
     }
 
     private var player: ExoPlayer? = null
@@ -46,6 +49,10 @@ class PlaybackActivity : FragmentActivity() {
     private var sessionStartMillis: Long = 0L
     /** Guard so a rapid double OK press doesn't stack two guides. */
     private var guideLaunched = false
+    /** True once this stream actually started playing. */
+    private var everPlayed = false
+    private var retryCount: Int = 0
+    private var autoRetrying = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +63,7 @@ class PlaybackActivity : FragmentActivity() {
         recordingId = intent.getStringExtra(EXTRA_RECORDING_ID)
         recordingUri = intent.getStringExtra(EXTRA_RECORDING_URI)
         recordingName = intent.getStringExtra(EXTRA_RECORDING_NAME)
+        retryCount = intent.getIntExtra(EXTRA_RETRY_COUNT, 0)
 
         if (ch == null && recordingUri == null) {
             finish()
@@ -94,7 +102,22 @@ class PlaybackActivity : FragmentActivity() {
         player.play()
         sessionStartMillis = System.currentTimeMillis()
         player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) everPlayed = true
+            }
+
             override fun onPlayerError(error: PlaybackException) {
+                // Dead stream that never played: quietly try another
+                // random channel instead of leaving a black screen.
+                // Once a stream has played, or retries are spent, just
+                // show the error like before.
+                if (recordingUri == null && !everPlayed && !autoRetrying &&
+                    retryCount < MAX_AUTO_RETRY
+                ) {
+                    autoRetrying = true
+                    tryAnotherChannel()
+                    return
+                }
                 Toast.makeText(
                     this@PlaybackActivity,
                     getString(R.string.playback_error, error.message ?: "unknown error"),
@@ -147,6 +170,32 @@ class PlaybackActivity : FragmentActivity() {
         if (guideLaunched) return
         guideLaunched = true
         startActivity(Intent(this, GuideActivity::class.java))
+    }
+
+    /** Pick a different random channel and restart playback with it. */
+    private fun tryAnotherChannel() {
+        val currentId = channel?.id
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val pick = result.getOrNull()
+                ?.filter { it.id != currentId && it.id !in PlaylistRepository.hiddenChannels(this@PlaybackActivity) }
+                ?.randomOrNull()
+            if (pick != null) {
+                val intent = Intent(this@PlaybackActivity, PlaybackActivity::class.java)
+                intent.putExtra(EXTRA_CHANNEL, pick)
+                intent.putExtra(EXTRA_RETRY_COUNT, retryCount + 1)
+                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                startActivity(intent)
+                finish()
+            } else {
+                autoRetrying = false
+                Toast.makeText(
+                    this@PlaybackActivity,
+                    R.string.load_failed,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {

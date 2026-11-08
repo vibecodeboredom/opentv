@@ -63,7 +63,8 @@
                     android:textColor="#FFFFFF"
                     android:textSize="30sp"
                     android:textStyle="bold"
-                    android:maxLines="1" />
+                    android:maxLines="2"
+                    android:ellipsize="end" />
 
                 <!-- Favorite star: tap to favorite/unfavorite the channel. -->
                 <TextView
