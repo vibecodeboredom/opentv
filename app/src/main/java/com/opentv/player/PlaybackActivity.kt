@@ -278,7 +278,8 @@ class PlaybackActivity : FragmentActivity() {
         buildStrip()
         overlay.visibility = View.VISIBLE
         // Focus the first tile so left/right + OK work straight away.
-        stripTiles.firstOrNull()?.requestFocus()
+        // Deferred until after layout, so the focus actually sticks.
+        infoStrip.post { stripTiles.firstOrNull()?.requestFocus() }
         armHideTimer()
     }
 
@@ -310,7 +311,12 @@ class PlaybackActivity : FragmentActivity() {
             if (overlay.visibility != View.VISIBLE) return@launch
             val keepFocus = stripTiles.indexOfFirst { it.isFocused }
             buildStripStatic(recents, noInfo)
-            if (keepFocus in stripTiles.indices) stripTiles[keepFocus].requestFocus()
+            // Restore focus (or default to the first tile); deferred
+            // until after layout so it sticks.
+            infoStrip.post {
+                if (keepFocus in stripTiles.indices) stripTiles[keepFocus].requestFocus()
+                else stripTiles.firstOrNull()?.requestFocus()
+            }
         }
     }
 
@@ -362,14 +368,9 @@ class PlaybackActivity : FragmentActivity() {
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { topMargin = dp(6) }
             })
-            tileView.setOnKeyListener { _, keyCode, ev ->
-                if (ev.action == KeyEvent.ACTION_DOWN &&
-                    (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)
-                ) {
-                    onClick()
-                    true
-                } else false
-            }
+            // OK is handled by the activity's dispatchKeyEvent (it calls
+            // performClick on the focused tile), so no per-tile key
+            // listener is needed here.
             infoStrip.addView(tileView)
             stripTiles += tileView
         }
