@@ -12,7 +12,9 @@ import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.OnItemViewClickedListener
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
+import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
@@ -81,9 +83,46 @@ class RecordingsFragment : BrowseSupportFragment() {
             .setTitle(recording.channelName)
             .setMessage(info)
             .setPositiveButton(R.string.play) { _, _ -> playRecording(recording) }
+            .setNeutralButton(R.string.upload) { _, _ -> uploadRecording(recording) }
             .setNegativeButton(R.string.delete) { _, _ -> deleteRecording(recording) }
-            .setNeutralButton(android.R.string.cancel, null)
             .show()
+    }
+
+    private fun uploadRecording(recording: Recording) {
+        if (PlaylistRepository.uploadUrl(requireContext()).isBlank()) {
+            Toast.makeText(
+                requireContext(),
+                R.string.upload_url_missing,
+                Toast.LENGTH_LONG
+            ).show()
+            startActivity(Intent(requireContext(), SettingsActivity::class.java))
+            return
+        }
+        if (recording.inProgress) {
+            Toast.makeText(
+                requireContext(),
+                R.string.upload_wait_recording,
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        Toast.makeText(requireContext(), R.string.upload_started, Toast.LENGTH_SHORT).show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val result = RecordingUploader.upload(requireContext(), recording)
+            result.onSuccess { destUrl ->
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.upload_done, destUrl),
+                    Toast.LENGTH_LONG
+                ).show()
+            }.onFailure { e ->
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.upload_failed, e.message ?: "unknown error"),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     private fun playRecording(recording: Recording) {

@@ -11,8 +11,8 @@ android {
         applicationId 'com.opentv.player'
         minSdk 26
         targetSdk 35
-        versionCode 2
-        versionName '0.2.0'
+        versionCode 3
+        versionName '0.3.0'
     }
 
     buildTypes {
@@ -45,6 +45,7 @@ dependencies {
     implementation 'androidx.media3:media3-common:1.4.1'
     implementation 'androidx.media3:media3-datasource:1.4.1'
     implementation 'androidx.media3:media3-database:1.4.1'
+    implementation 'androidx.media3:media3-transformer:1.4.1'
     implementation 'io.coil-kt:coil:2.7.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.6'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'

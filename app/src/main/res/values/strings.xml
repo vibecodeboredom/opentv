@@ -42,6 +42,15 @@
     <string name="recording_stopped">Recording stopped and saved</string>
     <string name="recording_notification_channel">Recordings</string>
     <string name="recording_notification_desc">Shows while a channel is being recorded</string>
+    <string name="upload_url_label">Recording upload URL (optional)</string>
+    <string name="upload_url_hint">Base URL that accepts HTTP PUT, e.g. https://user:pass@myserver.example.com/recordings — recordings are uploaded there as .mp4 files.</string>
+    <string name="upload">Upload</string>
+    <string name="upload_url_missing">Set a recording upload URL in Settings first.</string>
+    <string name="upload_wait_recording">Stop the recording first, then upload it.</string>
+    <string name="upload_started">Uploading — this can take a while for long recordings.</string>
+    <string name="upload_done">Uploaded to %1$s</string>
+    <string name="upload_failed">Upload failed: %1$s</string>
+</resources>
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
 </resources>

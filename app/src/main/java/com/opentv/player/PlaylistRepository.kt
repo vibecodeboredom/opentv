@@ -19,6 +19,7 @@ object PlaylistRepository {
     private const val PREFS = "opentv"
     private const val KEY_PLAYLIST_URL = "playlist_url"
     private const val KEY_EPG_URL = "epg_url"
+    private const val KEY_UPLOAD_URL = "upload_url"
     private const val KEY_FAVORITES = "favorites"
     private const val CACHE_FILE = "playlist.m3u"
 
@@ -31,6 +32,10 @@ object PlaylistRepository {
     fun epgUrl(context: Context): String =
         prefs(context).getString(KEY_EPG_URL, DEFAULT_EPG_URL) ?: DEFAULT_EPG_URL
 
+    /** Base URL recordings are uploaded to (HTTP PUT). Empty = not configured. */
+    fun uploadUrl(context: Context): String =
+        prefs(context).getString(KEY_UPLOAD_URL, "") ?: ""
+
     fun setUrls(context: Context, playlistUrl: String, epgUrl: String) {
         prefs(context).edit()
             .putString(KEY_PLAYLIST_URL, playlistUrl.ifBlank { DEFAULT_PLAYLIST_URL })
@@ -38,10 +43,15 @@ object PlaylistRepository {
             .apply()
     }
 
+    fun setUploadUrl(context: Context, uploadUrl: String) {
+        prefs(context).edit().putString(KEY_UPLOAD_URL, uploadUrl.trim()).apply()
+    }
+
     fun resetUrls(context: Context) {
         prefs(context).edit()
             .remove(KEY_PLAYLIST_URL)
             .remove(KEY_EPG_URL)
+            .remove(KEY_UPLOAD_URL)
             .apply()
     }
 
