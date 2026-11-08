@@ -158,10 +158,16 @@ class ChannelSidebar(
      * true when focus moved (the key is consumed). */
     fun moveFocus(down: Boolean): Boolean {
         if (list.childCount == 0) return false
-        val current = (0 until list.childCount)
-            .map { list.getChildAt(it) }
-            .indexOfFirst { it.isFocused }
-            .takeIf { it >= 0 } ?: if (down) -1 else list.childCount
+        // 4.9.5: plain loop instead of building a throwaway list of all
+        // rows on every Up/Down press just to find the focused one.
+        var current = -1
+        for (i in 0 until list.childCount) {
+            if (list.getChildAt(i).isFocused) {
+                current = i
+                break
+            }
+        }
+        if (current < 0) current = if (down) -1 else list.childCount
         val next = if (down) (current + 1).coerceAtMost(list.childCount - 1)
         else (current - 1).coerceAtLeast(0)
         val target = list.getChildAt(next) ?: return false
@@ -356,17 +362,19 @@ class ChannelSidebar(
         // Up/Down works straight away.
         val currentId = currentChannelId()
         list.post {
-            val target = (0 until list.childCount)
-                .map { list.getChildAt(it) }
-                .firstOrNull { (it.tag as? Channel)?.id == currentId }
-                ?: list.getChildAt(0)
-            target?.requestFocus()
+            // 4.9.5: plain loops instead of throwaway lists of all rows.
+            var target: View? = null
+            for (i in 0 until list.childCount) {
+                val row = list.getChildAt(i)
+                if ((row.tag as? Channel)?.id == currentId) {
+                    target = row
+                    break
+                }
+            }
+            (target ?: list.getChildAt(0))?.requestFocus()
             // Keep the focused row visible once the list is laid out.
             scroll.post {
-                (0 until list.childCount)
-                    .map { list.getChildAt(it) }
-                    .firstOrNull { it.isFocused }
-                    ?.let { scroll.scrollTo(0, it.top) }
+                focusedRow()?.let { scroll.scrollTo(0, it.top) }
             }
         }
         fillNowPlaying(shown)

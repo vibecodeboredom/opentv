@@ -139,6 +139,12 @@ class PlaybackActivity : FragmentActivity() {
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
+    /** Channel id -> Channel for the strip's recents (4.9.5): the map
+     * used to be rebuilt from the whole playlist on every overlay
+     * open. It is rebuilt only when the playlist list itself changes
+     * (cachedPlaylist returns the same instance while fresh). */
+    private var stripByIdPlaylist: List<Channel>? = null
+    private var stripById: Map<String, Channel> = emptyMap()
     /** Sidebar / overlay state captured when OK goes down, so the
      * short-press action on key-UP uses the state at press time. */
     private var okDownSidebarUp = false
@@ -531,14 +537,44 @@ class PlaybackActivity : FragmentActivity() {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
             val channels = result.getOrNull() ?: return@launch
             val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
-            val visible = channels.filter { it.id !in hidden }
-            val list = visible.ifEmpty { channels }
-            val idx = list.indexOfFirst { it.id == currentId }.takeIf { it >= 0 } ?: return@launch
-            val next = list[(idx + delta).mod(list.size)]
+            // 4.9.5: find the adjacent channel without building a
+            // filtered copy of the whole playlist (was a ~1500-element
+            // list per CH+/CH- press). Two allocation-free passes:
+            // count the visible channels and the current channel's
+            // visible position, then pick the channel at the target
+            // visible position. Falls back to the full list when every
+            // channel is hidden, exactly like the old ifEmpty.
+            var visibleIndex = -1
+            var visibleCount = 0
+            for (ch in channels) {
+                if (ch.id in hidden) continue
+                if (ch.id == currentId) visibleIndex = visibleCount
+                visibleCount++
+            }
+            val next: Channel? = if (visibleCount > 0) {
+                if (visibleIndex < 0) return@launch
+                val target = (visibleIndex + delta).mod(visibleCount)
+                var seen = 0
+                var found: Channel? = null
+                for (ch in channels) {
+                    if (ch.id in hidden) continue
+                    if (seen == target) {
+                        found = ch
+                        break
+                    }
+                    seen++
+                }
+                found
+            } else {
+                val idx = channels.indexOfFirst { it.id == currentId }
+                    .takeIf { it >= 0 } ?: return@launch
+                channels[(idx + delta).mod(channels.size)]
+            }
+            val pick = next ?: return@launch
             // Channel up/down restarts playback on the new channel and
             // flashes its info briefly (4.7.3) instead of the normal
             // Left/Right overlay duration.
-            switchToChannel(next, briefInfo = true)
+            switchToChannel(pick, briefInfo = true)
         }
     }
 
@@ -645,12 +681,18 @@ class PlaybackActivity : FragmentActivity() {
      * once, with recents — instead of building it empty and rebuilding it
      * a frame later. When the playlist isn't cached yet, the fixed tiles
      * show immediately and the recents fill in once it loads (skipped
-     * entirely when the recents are unchanged from the last build). */
+     * entirely when the recents are unchanged from the last build).
+     * 4.9.5: the cached path also skips the rebuild when the recents
+     * are unchanged and the strip is already built — every Right press
+     * and channel-switch flash used to remove and rebuild all the
+     * tiles (views + listeners + logo loads) for the same recents. */
     private fun buildStrip() {
         val noInfo = getString(R.string.overlay_no_info)
         val cached = PlaylistRepository.cachedPlaylist()
         if (cached != null) {
-            buildStripStatic(stripRecents(cached), noInfo)
+            val recents = stripRecents(cached)
+            if (recents.map { it.id } == lastStripRecents && stripTiles.isNotEmpty()) return
+            buildStripStatic(recents, noInfo)
             return
         }
         buildStripStatic(emptyList(), noInfo)
@@ -673,11 +715,14 @@ class PlaybackActivity : FragmentActivity() {
 
     /** The 3 most recent channels (not the current one) from a list. */
     private fun stripRecents(channels: List<Channel>): List<Channel> {
-        val byId = channels.associateBy { it.id }
+        if (stripByIdPlaylist !== channels) {
+            stripById = channels.associateBy { it.id }
+            stripByIdPlaylist = channels
+        }
         val currentId = channel?.id
         return PlaylistRepository.recentChannelIds(this)
             .filter { it != currentId }
-            .mapNotNull { byId[it] }
+            .mapNotNull { stripById[it] }
             .take(3)
     }
 

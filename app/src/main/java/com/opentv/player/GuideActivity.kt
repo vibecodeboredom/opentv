@@ -29,7 +29,9 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import coil.load
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -63,6 +65,9 @@ class GuideActivity : FragmentActivity() {
     private lateinit var scroll: ScrollView
     private lateinit var nowLine: View
     private lateinit var emptyView: TextView
+    /** The frame the now-line spans — cached (4.9.5) instead of
+     * re-finding it on every row append. */
+    private lateinit var guideFrame: FrameLayout
 
     private lateinit var detailLogo: ImageView
     private lateinit var detailChannel: TextView
@@ -102,6 +107,9 @@ class GuideActivity : FragmentActivity() {
     /** Generation counter so a stale background search (an earlier
      * keystroke) never overwrites a newer one. */
     private var searchGeneration = 0
+    /** The pending debounced search (4.9.5): cancelled and restarted
+     * on every keystroke, so a scan only runs once typing pauses. */
+    private var searchJob: Job? = null
 
     /** First programme on now (and its card), for the details header
      * and the initial focus. Set while rows are built. */
@@ -131,6 +139,7 @@ class GuideActivity : FragmentActivity() {
         loading = findViewById(R.id.guide_loading)
         scroll = findViewById(R.id.guide_scroll)
         nowLine = findViewById(R.id.guide_now_line)
+        guideFrame = findViewById(R.id.guide_frame)
         emptyView = findViewById(R.id.guide_empty)
 
         // Lazy rows (4.7.2): append more when the user scrolls near the
@@ -404,22 +413,31 @@ class GuideActivity : FragmentActivity() {
      * thread (a full EPG can be tens of thousands of programmes) and
      * a generation counter drops stale results when the user keeps
      * typing.
+     *
+     * 4.9.5 — debounced: the scan used to run on EVERY keystroke, so
+     * typing a 10-character query queued up to 10 full playlist + EPG
+     * scans (the generation counter only dropped the results, the
+     * scans still ran to completion). Now the pending scan is
+     * cancelled on each keystroke and only runs once typing pauses
+     * for SEARCH_DEBOUNCE_MS. Clearing the search is still instant.
      */
     private fun applySearch(query: String) {
         currentSearchQuery = query
+        searchJob?.cancel()
         if (query.trim().isEmpty()) {
             buildGuide(allRows)
             emptyView.visibility = View.GONE
             scroll.visibility = View.VISIBLE
             return
         }
-        val generation = ++searchGeneration
         val channels = allChannels
         val epgMap = epg
         val hidden = PlaylistRepository.hiddenChannels(this)
         val overrides = PlaylistRepository.epgOverrides(this)
         val start = windowStart
-        lifecycleScope.launch {
+        searchJob = lifecycleScope.launch {
+            delay(SEARCH_DEBOUNCE_MS)
+            val generation = ++searchGeneration
             val filtered = withContext(Dispatchers.Default) {
                 GuideData.searchRows(
                     channels, epgMap, start, WINDOW_HOURS, hidden, overrides, query
@@ -918,8 +936,7 @@ class GuideActivity : FragmentActivity() {
         container.post {
             if (generation != guideBuildGeneration) return@post
             if (nowLine.visibility != View.VISIBLE) return@post
-            val frame = findViewById<FrameLayout>(R.id.guide_frame)
-            val h = frame.height
+            val h = guideFrame.height
             if (h > 0) {
                 nowLine.layoutParams = FrameLayout.LayoutParams(dpToPx(3), h)
                 nowLine.requestLayout()
@@ -1239,5 +1256,9 @@ class GuideActivity : FragmentActivity() {
         /** Recent searches shown in the menu (4.9.3) — fewer than the
          * 8 stored, so the full-height menu never overflows the screen. */
         private const val MAX_RECENT_SEARCHES_SHOWN = 5
+        /** Search waits this long after the last keystroke before
+         * scanning (4.9.5) — typing used to launch a full
+         * playlist + EPG scan on every keystroke. */
+        private const val SEARCH_DEBOUNCE_MS = 250L
     }
 }

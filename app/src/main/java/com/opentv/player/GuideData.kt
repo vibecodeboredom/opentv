@@ -40,12 +40,27 @@ object GuideData {
         epgOverrides: Map<String, String> = emptyMap()
     ): GuideRow? {
         if (hidden.contains(channel.id)) return null
+        return buildRowFromProgrammes(
+            channel, programmesForChannel(channel, epg, epgOverrides),
+            windowStartMillis, windowHours
+        )
+    }
+
+    /** Same as buildRow, but the channel's programme list is already
+     * fetched — the search calls this so it doesn't look the list up
+     * twice (once for the title match, once for the row). */
+    private fun buildRowFromProgrammes(
+        channel: Channel,
+        programmes: List<EpgParser.Programme>,
+        windowStartMillis: Long,
+        windowHours: Int = 6
+    ): GuideRow? {
         val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
-        val programmes = programmesForChannel(channel, epg, epgOverrides)
+        val inWindow = programmes
             .filter { it.stopMillis > windowStartMillis && it.startMillis < windowEnd }
             .sortedBy { it.startMillis }
-        return if (programmes.isNotEmpty()) {
-            GuideRow(channel, programmes)
+        return if (inWindow.isNotEmpty()) {
+            GuideRow(channel, inWindow)
         } else {
             GuideRow(
                 channel,
@@ -113,13 +128,15 @@ object GuideData {
         val programmeMatches = mutableListOf<GuideRow>()
         for (channel in channels) {
             if (hidden.contains(channel.id)) continue
+            // Fetch the programme list once and use it for both the
+            // title match and the row build — it used to be looked up
+            // a second time inside buildRow.
+            val programmes = programmesForChannel(channel, epg, epgOverrides)
             if (matchesWords(channel.name, words)) {
-                buildRow(channel, epg, windowStartMillis, windowHours, hidden, epgOverrides)
+                buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { channelMatches += it }
-            } else if (programmesForChannel(channel, epg, epgOverrides)
-                    .any { matchesWords(it.title, words) }
-            ) {
-                buildRow(channel, epg, windowStartMillis, windowHours, hidden, epgOverrides)
+            } else if (programmes.any { matchesWords(it.title, words) }) {
+                buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { programmeMatches += it }
             }
         }
@@ -195,7 +212,7 @@ object GuideData {
 
     /** Format a time as "8 PM" / "8:30 PM" for the guide header. */
     fun formatHourLabel(millis: Long): String {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+        val cal = calendarFor(millis)
         val hour = cal.get(java.util.Calendar.HOUR)
         val minute = cal.get(java.util.Calendar.MINUTE)
         val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
@@ -205,7 +222,7 @@ object GuideData {
 
     /** Format a clock time as "8:00 PM" (always with minutes). */
     fun formatClock(millis: Long): String {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+        val cal = calendarFor(millis)
         val hour = cal.get(java.util.Calendar.HOUR)
         val minute = cal.get(java.util.Calendar.MINUTE)
         val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
@@ -236,13 +253,31 @@ object GuideData {
 
     /** Format the guide date as "Sat, Nov 7". */
     fun formatDate(millis: Long): String {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
-        val days = arrayOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-        val months = arrayOf(
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-        )
-        return "${days[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1]}, " +
-            "${months[cal.get(java.util.Calendar.MONTH)]} ${cal.get(java.util.Calendar.DAY_OF_MONTH)}"
+        val cal = calendarFor(millis)
+        return "${WEEKDAYS[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1]}, " +
+            "${MONTHS[cal.get(java.util.Calendar.MONTH)]} ${cal.get(java.util.Calendar.DAY_OF_MONTH)}"
+    }
+
+    private val WEEKDAYS = arrayOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+    private val MONTHS = arrayOf(
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    )
+
+    /**
+     * One Calendar per thread, reused by the format helpers. They used
+     * to allocate a fresh Calendar on every call — and they run on
+     * every guide focus change (showDetails formats the time range
+     * twice per move). Same fields, same output, no allocation.
+     * ThreadLocal because the helpers are static and a shared instance
+     * would not be safe if a background caller ever used one.
+     */
+    private val calendarThreadLocal = ThreadLocal<java.util.Calendar>()
+
+    private fun calendarFor(millis: Long): java.util.Calendar {
+        val cal = calendarThreadLocal.get()
+            ?: java.util.Calendar.getInstance().also { calendarThreadLocal.set(it) }
+        cal.timeInMillis = millis
+        return cal
     }
 }
