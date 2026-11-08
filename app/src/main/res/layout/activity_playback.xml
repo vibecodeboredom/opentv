@@ -10,4 +10,42 @@
         android:layout_height="match_parent"
         android:keepScreenOn="true" />
 
+    <!-- Channel info banner: shown when left/right is pressed, instead
+         of the media controller. Auto-hides after a few seconds. -->
+    <LinearLayout
+        android:id="@+id/channel_info"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:background="#CC000000"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/info_channel_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/info_now"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="18sp"
+            android:textColor="#DDDDDD" />
+
+        <TextView
+            android:id="@+id/info_next"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="18sp"
+            android:textColor="#AAAAAA" />
+
+    </LinearLayout>
+
 </FrameLayout>

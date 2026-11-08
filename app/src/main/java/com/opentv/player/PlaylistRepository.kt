@@ -27,6 +27,16 @@ object PlaylistRepository {
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
     private const val CACHE_FILE = "playlist.m3u"
+    private const val EPG_CACHE_PREFIX = "epg_"
+    /** Playlist is re-downloaded at most every 6h; EPG at most every 12h. */
+    private const val PLAYLIST_TTL_MS = 6L * 60 * 60 * 1000
+    private const val EPG_TTL_MS = 12L * 60 * 60 * 1000
+
+    /** In-memory cache so a playlist / EPG is never re-downloaded or
+     * re-parsed twice in one session. @Volatile: replaced atomically,
+     * worst case a redundant reload, never corruption. */
+    @Volatile private var playlistCache: Pair<Long, List<Channel>>? = null
+    @Volatile private var epgCache: Pair<Long, Map<String, List<EpgParser.Programme>>>? = null
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -46,6 +56,9 @@ object PlaylistRepository {
             .putString(KEY_PLAYLIST_URL, playlistUrl.ifBlank { DEFAULT_PLAYLIST_URL })
             .putString(KEY_EPG_URL, epgUrl.ifBlank { DEFAULT_EPG_URL })
             .apply()
+        // New sources: drop the cached data so the next load uses them.
+        playlistCache = null
+        epgCache = null
     }
 
     fun setUploadUrl(context: Context, uploadUrl: String) {
@@ -100,19 +113,32 @@ object PlaylistRepository {
         prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
     }
 
-    /** Fetch the playlist from the network; fall back to the cached copy on failure. */
+    /**
+     * Fetch the playlist from the network; fall back to the cached copy on
+     * failure. The parsed list is kept in memory (6h TTL) and the raw M3U
+     * on disk, so launching, opening the guide, or changing channel does
+     * not re-download and re-parse the whole playlist every time.
+     */
     suspend fun loadPlaylist(context: Context): Result<List<Channel>> = withContext(Dispatchers.IO) {
+        val cached = playlistCache
+        if (cached != null && System.currentTimeMillis() - cached.first < PLAYLIST_TTL_MS) {
+            return@withContext Result.success(cached.second)
+        }
         val url = playlistUrl(context)
         try {
             val text = fetchText(url)
             context.openFileOutput(CACHE_FILE, Context.MODE_PRIVATE).use { it.write(text.toByteArray()) }
-            Result.success(M3uParser.parse(text))
+            val channels = M3uParser.parse(text)
+            playlistCache = System.currentTimeMillis() to channels
+            Result.success(channels)
         } catch (e: Exception) {
             try {
-                val cached = context.openFileInput(CACHE_FILE).bufferedReader().use { it.readText() }
-                val channels = M3uParser.parse(cached)
-                if (channels.isNotEmpty()) Result.success(channels)
-                else Result.failure(e)
+                val cachedText = context.openFileInput(CACHE_FILE).bufferedReader().use { it.readText() }
+                val channels = M3uParser.parse(cachedText)
+                if (channels.isNotEmpty()) {
+                    playlistCache = System.currentTimeMillis() to channels
+                    Result.success(channels)
+                } else Result.failure(e)
             } catch (ignored: Exception) {
                 Result.failure(e)
             }
@@ -126,18 +152,26 @@ object PlaylistRepository {
      * Programmes are indexed by channel id AND by lowercased display name,
      * so a playlist channel can match its EPG data by name when the ids
      * don't align across sources.
+     *
+     * The merged result is kept in memory (12h TTL) and each source's raw
+     * XML on disk, so the guide and the player don't re-download and
+     * re-parse the whole guide on every open. Each source is parsed in a
+     * single pass (programmes + display names together).
      */
     suspend fun loadEpg(context: Context): Map<String, List<EpgParser.Programme>> = withContext(Dispatchers.IO) {
+        val cached = epgCache
+        if (cached != null && System.currentTimeMillis() - cached.first < EPG_TTL_MS) {
+            return@withContext cached.second
+        }
         val merged = mutableMapOf<String, MutableList<EpgParser.Programme>>()
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
         for (url in urls) {
             try {
-                val text = fetchText(url)
-                val parsed = EpgParser.parse(text)
+                val text = epgXml(context, url)
+                val (parsed, names) = EpgParser.parseWithNames(text)
                 for ((id, list) in parsed) {
                     merged.getOrPut(id) { mutableListOf() } += list
                 }
-                val names = EpgParser.channelDisplayNames(text)
                 for ((id, name) in names) {
                     val list = parsed[id] ?: continue
                     merged.getOrPut(name.lowercase()) { mutableListOf() } += list
@@ -146,7 +180,39 @@ object PlaylistRepository {
                 // One bad source doesn't kill the rest.
             }
         }
+        epgCache = System.currentTimeMillis() to merged
         merged
+    }
+
+    /**
+     * Raw EPG XML for one source URL: the disk copy is used when it is
+     * fresh (12h TTL), otherwise the URL is fetched and the disk copy
+     * refreshed. Falls back to a stale disk copy when the fetch fails.
+     */
+    private fun epgXml(context: Context, url: String): String {
+        val fileName = EPG_CACHE_PREFIX + url.hashCode().toString(16) + ".xml"
+        val file = context.getFileStreamPath(fileName)
+        val fresh = file.exists() &&
+            System.currentTimeMillis() - file.lastModified() < EPG_TTL_MS
+        if (fresh) {
+            try {
+                return file.bufferedReader().use { it.readText() }
+            } catch (ignored: Exception) {
+                // Fall through to a fresh fetch.
+            }
+        }
+        return try {
+            val text = fetchText(url)
+            try {
+                context.openFileOutput(fileName, Context.MODE_PRIVATE).use { it.write(text.toByteArray()) }
+            } catch (ignored: Exception) {
+                // Disk cache is best-effort.
+            }
+            text
+        } catch (e: Exception) {
+            // Fetch failed: use the stale disk copy if there is one.
+            if (file.exists()) file.bufferedReader().use { it.readText() } else throw e
+        }
     }
 
     private fun fetchText(urlString: String): String {

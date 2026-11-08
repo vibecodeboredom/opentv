@@ -3,7 +3,11 @@ package com.opentv.player
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
+import android.view.View
+import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.fragment.app.FragmentActivity
@@ -19,11 +23,10 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 
 /**
- * Plays one channel with ExoPlayer. OK opens the TV Guide (intercepted
- * in dispatchKeyEvent before the PlayerView controller sees it). The
- * play/pause button is gone from the controller entirely — the app
- * overrides media3's exo_player_control_view.xml without it, because
- * live TV has no use for pause.
+ * Plays one channel with ExoPlayer. The media controller is fully
+ * disabled — no overlay ever pops up. OK opens the TV Guide
+ * (intercepted in dispatchKeyEvent), and left/right shows a small
+ * channel info banner (name, now, next) instead of the controller.
  *
  * - INFO toggles the channel as a favorite.
  * - MENU opens options: favorite toggle + record / stop recording.
@@ -46,6 +49,16 @@ class PlaybackActivity : FragmentActivity() {
 
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
+    private lateinit var channelInfoView: View
+    private lateinit var infoChannelName: TextView
+    private lateinit var infoNow: TextView
+    private lateinit var infoNext: TextView
+    /** Auto-hide for the channel info banner. */
+    private val infoHandler = Handler(Looper.getMainLooper())
+    private val hideInfoRunnable = Runnable { channelInfoView.visibility = View.GONE }
+    /** Now / next programme titles for the info banner, filled once EPG loads. */
+    private var nowTitle: String? = null
+    private var nextTitle: String? = null
     private var channel: Channel? = null
     private var recordingId: String? = null
     private var recordingUri: String? = null
@@ -62,6 +75,13 @@ class PlaybackActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_playback)
         playerView = findViewById(R.id.player_view)
+        channelInfoView = findViewById(R.id.channel_info)
+        infoChannelName = findViewById(R.id.info_channel_name)
+        infoNow = findViewById(R.id.info_now)
+        infoNext = findViewById(R.id.info_next)
+        // No media controller at all — the video just plays. Left/right
+        // shows the channel info banner instead.
+        playerView.useController = false
 
         val ch = intent.getSerializableExtra(EXTRA_CHANNEL) as? Channel
         recordingId = intent.getStringExtra(EXTRA_RECORDING_ID)
@@ -135,6 +155,8 @@ class PlaybackActivity : FragmentActivity() {
             lifecycleScope.launch {
                 val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
                 val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
+                nowTitle = now?.title
+                nextTitle = next?.title
                 if (now != null || next != null) {
                     val text = buildString {
                         now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
@@ -155,19 +177,37 @@ class PlaybackActivity : FragmentActivity() {
     }
 
     /**
-     * OK (center / enter) once opens the TV Guide. Intercepted here,
-     * before the PlayerView controller sees it, so OK never pauses —
-     * the remote's play/pause button still does that.
+     * OK (center / enter) once opens the TV Guide. Left/right shows the
+     * channel info banner instead of the (disabled) media controller.
+     * Intercepted here, before the PlayerView sees the key.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN &&
-            (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                event.keyCode == KeyEvent.KEYCODE_ENTER)
-        ) {
-            openGuide()
-            return true
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    openGuide()
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    showChannelInfo()
+                    return true
+                }
+            }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /** Shows the channel info banner (name, now, next); auto-hides after 5s. */
+    private fun showChannelInfo() {
+        val name = recordingName ?: channel?.name ?: return
+        infoChannelName.text = name
+        infoNow.text = nowTitle?.let { "${getString(R.string.now_playing)}: $it" } ?: ""
+        infoNow.visibility = if (nowTitle != null) View.VISIBLE else View.GONE
+        infoNext.text = nextTitle?.let { "${getString(R.string.next_up)}: $it" } ?: ""
+        infoNext.visibility = if (nextTitle != null) View.VISIBLE else View.GONE
+        channelInfoView.visibility = View.VISIBLE
+        infoHandler.removeCallbacks(hideInfoRunnable)
+        infoHandler.postDelayed(hideInfoRunnable, 5000L)
     }
 
     private fun openGuide() {
@@ -273,6 +313,8 @@ class PlaybackActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        infoHandler.removeCallbacks(hideInfoRunnable)
+        channelInfoView.visibility = View.GONE
         // Log the watch session (local only, never shared).
         val watchedMillis = System.currentTimeMillis() - sessionStartMillis
         if (sessionStartMillis > 0L && watchedMillis > 0L) {

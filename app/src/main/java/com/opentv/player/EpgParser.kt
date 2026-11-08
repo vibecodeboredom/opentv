@@ -27,21 +27,28 @@ object EpgParser {
         timeZone = TimeZone.getTimeZone("UTC")
     }
 
-    fun parse(xml: String): Map<String, List<Programme>> {
-        val result = mutableMapOf<String, MutableList<Programme>>()
+    /**
+     * Single-pass parse: returns the programmes map AND the channel
+     * id -> display-name map from one DOM parse. Parsing the XML twice
+     * (once for programmes, once for names) was doubling the guide's
+     * load time, so callers that need both should use this.
+     */
+    fun parseWithNames(xml: String): Pair<Map<String, List<Programme>>, Map<String, String>> {
+        val programmes = mutableMapOf<String, MutableList<Programme>>()
+        val names = mutableMapOf<String, String>()
         try {
             val factory = DocumentBuilderFactory.newInstance()
             val builder = factory.newDocumentBuilder()
             val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
-            val programmes = doc.getElementsByTagName("programme")
-            for (i in 0 until programmes.length) {
-                val el = programmes.item(i) as? Element ?: continue
+            val programmeNodes = doc.getElementsByTagName("programme")
+            for (i in 0 until programmeNodes.length) {
+                val el = programmeNodes.item(i) as? Element ?: continue
                 val channel = el.getAttribute("channel")
                 val start = parseDate(el.getAttribute("start"))
                 val stop = parseDate(el.getAttribute("stop"))
                 val title = el.getElementsByTagName("title").item(0)?.textContent?.trim()
                 if (channel.isNotEmpty() && !title.isNullOrEmpty() && stop > start) {
-                    result.getOrPut(channel) { mutableListOf() } += Programme(
+                    programmes.getOrPut(channel) { mutableListOf() } += Programme(
                         channelId = channel,
                         startMillis = start,
                         stopMillis = stop,
@@ -49,45 +56,46 @@ object EpgParser {
                     )
                 }
             }
-        } catch (ignored: Exception) {
-            // EPG is best-effort; a bad file just means no guide data.
-        }
-        return result
-    }
-
-    /** Channel id -> display name, from the <channel> elements. Used to match
-     * a playlist channel to its EPG data by name when the ids don't align. */
-    fun channelDisplayNames(xml: String): Map<String, String> {
-        val result = mutableMapOf<String, String>()
-        try {
-            val factory = DocumentBuilderFactory.newInstance()
-            val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
-            val channels = doc.getElementsByTagName("channel")
-            for (i in 0 until channels.length) {
-                val el = channels.item(i) as? Element ?: continue
+            val channelNodes = doc.getElementsByTagName("channel")
+            for (i in 0 until channelNodes.length) {
+                val el = channelNodes.item(i) as? Element ?: continue
                 val id = el.getAttribute("id")
                 val name = el.getElementsByTagName("display-name").item(0)
                     ?.textContent?.trim()
                 if (id.isNotEmpty() && !name.isNullOrEmpty()) {
-                    result[id] = name
+                    names[id] = name
                 }
             }
         } catch (ignored: Exception) {
-            // EPG is best-effort.
+            // EPG is best-effort; a bad file just means no guide data.
         }
-        return result
+        return programmes to names
     }
 
-    /** Returns the programme airing now and the next one, for a channel. */
+    fun parse(xml: String): Map<String, List<Programme>> = parseWithNames(xml).first
+
+    /** Channel id -> display name, from the <channel> elements. Used to match
+     * a playlist channel to its EPG data by name when the ids don't align. */
+    fun channelDisplayNames(xml: String): Map<String, String> = parseWithNames(xml).second
+
+    /**
+     * Returns the programme airing now and the next one, for a channel.
+     * Single linear scan, no sort: XMLTV lists a channel's programmes in
+     * chronological order, so the first programme containing now is the
+     * current one and the first starting at/after now is the next.
+     */
     fun nowAndNext(
         programmes: List<Programme>?,
         nowMillis: Long = System.currentTimeMillis()
     ): Pair<Programme?, Programme?> {
         if (programmes.isNullOrEmpty()) return null to null
-        val sorted = programmes.sortedBy { it.startMillis }
-        val now = sorted.firstOrNull { nowMillis in it.startMillis until it.stopMillis }
-        val next = sorted.firstOrNull { it.startMillis >= nowMillis }
+        var now: Programme? = null
+        var next: Programme? = null
+        for (p in programmes) {
+            if (now == null && nowMillis in p.startMillis until p.stopMillis) now = p
+            if (next == null && p.startMillis >= nowMillis) next = p
+            if (now != null && next != null) break
+        }
         return now to next
     }
 
