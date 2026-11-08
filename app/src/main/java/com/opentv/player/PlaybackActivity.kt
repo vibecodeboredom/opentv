@@ -63,7 +63,7 @@ import java.util.Locale
  *   next / previous channel.
  * - MENU opens options (favorite + record). INFO toggles favorite.
  *
- * The left sidebar (4.6.0) is a 320dp panel over a 60% black scrim:
+ * The left sidebar (4.6.1) is a 260dp panel over a 60% black scrim:
  * groups at the top ("All channels", "Favorites", "History", then the
  * playlist groups), channels below with number + logo + name + the
  * current programme. The current channel is highlighted in the accent
@@ -137,6 +137,9 @@ class PlaybackActivity : FragmentActivity() {
         showOptions()
     }
     private var longPressFired = false
+    /** The recents the strip was last built with, so an unchanged list
+     * doesn't rebuild the whole strip a second time. */
+    private var lastStripRecents: List<String> = emptyList()
     /** Sidebar / overlay state captured when OK goes down, so the
      * short-press action on key-UP uses the state at press time. */
     private var okDownSidebarUp = false
@@ -455,22 +458,29 @@ class PlaybackActivity : FragmentActivity() {
         // onIsPlayingChanged updates the cluster and the icon.
     }
 
-    /** Refresh the transport bar icons for the current state. */
+    /** Refresh the transport bar icons for the current state. Uses the
+     * modern vector icons (4.6.1) — no more dated system drawables. The
+     * record dot turns red while recording instead of dimming. */
     private fun updateTransportIcons() {
         val p = player
         transportPlayPause.setImageResource(
-            if (p != null && !p.isPlaying) android.R.drawable.ic_media_play
-            else android.R.drawable.ic_media_pause
+            if (p != null && !p.isPlaying) R.drawable.ic_play
+            else R.drawable.ic_pause
         )
         val ch = channel
         val isFav = ch != null && PlaylistRepository.favorites(this).contains(ch.id)
         transportFavorite.setImageResource(
-            if (isFav) android.R.drawable.btn_star_big_on
-            else android.R.drawable.btn_star_big_off
+            if (isFav) R.drawable.ic_star_filled
+            else R.drawable.ic_star
         )
-        transportRecord.setImageResource(android.R.drawable.ic_menu_save)
+        transportRecord.setImageResource(R.drawable.ic_record)
         val isRecording = ch != null && RecordingManager.isRecording(this, ch.id)
-        transportRecord.alpha = if (isRecording) 1.0f else 0.6f
+        // Red dot while recording; white when idle. Alpha stays 1.0 —
+        // the colour is the state now.
+        transportRecord.setColorFilter(
+            if (isRecording) 0xFFFF4343.toInt() else 0xFFFFFFFF.toInt()
+        )
+        transportRecord.alpha = 1.0f
     }
 
     /** Start / stop recording this channel (same action as MENU offers). */
@@ -559,44 +569,56 @@ class PlaybackActivity : FragmentActivity() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-    /** The groups list: All channels, Favorites, History, then playlist groups. */
+    /** The groups list: All channels, Favorites, History, then playlist groups.
+     * Builds synchronously when the playlist is already in memory. */
     private fun buildSidebarGroups() {
         sidebarTitle.setText(R.string.sidebar_groups)
         sidebarSubtitle.text = ""
         sidebarFooter.text = ""
         sidebarList.removeAllViews()
         sidebarProgrammeViews.clear()
+        val cached = PlaylistRepository.cachedPlaylist()
+        if (cached != null) {
+            renderSidebarGroups(cached)
+            return
+        }
         lifecycleScope.launch {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
             val channels = result.getOrNull() ?: emptyList()
-            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
-            val visible = channels.filter { it.id !in hidden }
-            val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
-            val recents = PlaylistRepository.recentChannelIds(this@PlaybackActivity)
-            val groups = visible.map { it.group }.distinct()
             if (sidebar.visibility != View.VISIBLE || !sidebarInGroups) return@launch
-            val items = mutableListOf<SidebarGroup>()
-            items += SidebarGroup(GROUP_ALL, getString(R.string.sidebar_all_channels), visible.size)
-            items += SidebarGroup(
-                GROUP_FAVORITES, getString(R.string.favorites),
-                visible.count { it.id in favorites }
-            )
-            items += SidebarGroup(
-                GROUP_HISTORY, getString(R.string.sidebar_history), recents.size
-            )
-            for (g in groups) {
-                items += SidebarGroup(g, g, visible.count { it.group == g })
-            }
-            for (item in items) {
-                sidebarList.addView(buildSidebarGroupRow(item))
-            }
-            if (items.isEmpty()) {
-                sidebarFooter.setText(R.string.sidebar_no_groups)
-            }
-            // Focus the "All channels" row so Up/Down works straight away.
-            sidebarList.post {
-                (sidebarList.getChildAt(0) as? View)?.requestFocus()
-            }
+            renderSidebarGroups(channels)
+        }
+    }
+
+    /** Render the groups list from a channel list. Runs on the main thread. */
+    private fun renderSidebarGroups(channels: List<Channel>) {
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val visible = channels.filter { it.id !in hidden }
+        val favorites = PlaylistRepository.favorites(this)
+        val recents = PlaylistRepository.recentChannelIds(this)
+        // Single pass for the per-group counts (was one full scan per group).
+        val groupCounts = visible.groupingBy { it.group }.eachCount()
+        val items = mutableListOf<SidebarGroup>()
+        items += SidebarGroup(GROUP_ALL, getString(R.string.sidebar_all_channels), visible.size)
+        items += SidebarGroup(
+            GROUP_FAVORITES, getString(R.string.favorites),
+            visible.count { it.id in favorites }
+        )
+        items += SidebarGroup(
+            GROUP_HISTORY, getString(R.string.sidebar_history), recents.size
+        )
+        for ((g, count) in groupCounts) {
+            items += SidebarGroup(g, g, count)
+        }
+        for (item in items) {
+            sidebarList.addView(buildSidebarGroupRow(item))
+        }
+        if (items.isEmpty()) {
+            sidebarFooter.setText(R.string.sidebar_no_groups)
+        }
+        // Focus the "All channels" row so Up/Down works straight away.
+        sidebarList.post {
+            (sidebarList.getChildAt(0) as? View)?.requestFocus()
         }
     }
 
@@ -607,7 +629,7 @@ class PlaybackActivity : FragmentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             isFocusable = true
             isFocusableInTouchMode = true
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -647,7 +669,8 @@ class PlaybackActivity : FragmentActivity() {
         return row
     }
 
-    /** The channels of one group (or a pseudo-group), capped at 200 rows. */
+    /** The channels of one group (or a pseudo-group), capped at 200 rows.
+     * Builds synchronously when the playlist is already in memory. */
     private fun buildSidebarChannels(groupKey: String) {
         val groupLabel = when (groupKey) {
             GROUP_ALL -> getString(R.string.sidebar_all_channels)
@@ -659,59 +682,89 @@ class PlaybackActivity : FragmentActivity() {
         sidebarList.removeAllViews()
         sidebarProgrammeViews.clear()
         sidebarFooter.text = ""
+        val cached = PlaylistRepository.cachedPlaylist()
+        if (cached != null) {
+            renderSidebarChannels(groupKey, cached)
+            return
+        }
         lifecycleScope.launch {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
             val channels = result.getOrNull() ?: emptyList()
-            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
-            val visible = channels.filter { it.id !in hidden }
-            val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
-            val recents = PlaylistRepository.recentChannelIds(this@PlaybackActivity)
-            val byId = channels.associateBy { it.id }
-            val list = when (groupKey) {
-                GROUP_ALL -> visible
-                GROUP_FAVORITES -> visible.filter { it.id in favorites }
-                GROUP_HISTORY -> recents.mapNotNull { byId[it] }.filter { it.id !in hidden }
-                else -> visible.filter { it.group == groupKey }
-            }
             if (sidebar.visibility != View.VISIBLE || sidebarInGroups) return@launch
-            sidebarSubtitle.text = getString(R.string.sidebar_channels_count, list.size)
-            val shown = list.take(SIDEBAR_MAX_CHANNELS)
-            for (ch in shown) {
-                sidebarList.addView(buildSidebarChannelRow(ch))
-            }
-            if (list.isEmpty()) {
-                sidebarFooter.setText(R.string.sidebar_no_channels)
-            } else if (list.size > SIDEBAR_MAX_CHANNELS) {
-                sidebarFooter.text = getString(R.string.sidebar_first_n, SIDEBAR_MAX_CHANNELS)
-            }
-            // Focus the current channel's row (or the first row) so
-            // Up/Down works straight away.
-            val currentId = channel?.id
-            sidebarList.post {
-                val target = (0 until sidebarList.childCount)
+            renderSidebarChannels(groupKey, channels)
+        }
+    }
+
+    /** Render one group's channels from a channel list. Main thread. */
+    private fun renderSidebarChannels(groupKey: String, channels: List<Channel>) {
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val visible = channels.filter { it.id !in hidden }
+        val favorites = PlaylistRepository.favorites(this)
+        val recents = PlaylistRepository.recentChannelIds(this)
+        val byId = channels.associateBy { it.id }
+        val list = when (groupKey) {
+            GROUP_ALL -> visible
+            GROUP_FAVORITES -> visible.filter { it.id in favorites }
+            GROUP_HISTORY -> recents.mapNotNull { byId[it] }.filter { it.id !in hidden }
+            else -> visible.filter { it.group == groupKey }
+        }
+        sidebarSubtitle.text = getString(R.string.sidebar_channels_count, list.size)
+        val shown = list.take(SIDEBAR_MAX_CHANNELS)
+        for (ch in shown) {
+            sidebarList.addView(buildSidebarChannelRow(ch))
+        }
+        if (list.isEmpty()) {
+            sidebarFooter.setText(R.string.sidebar_no_channels)
+        } else if (list.size > SIDEBAR_MAX_CHANNELS) {
+            sidebarFooter.text = getString(R.string.sidebar_first_n, SIDEBAR_MAX_CHANNELS)
+        }
+        // Focus the current channel's row (or the first row) so
+        // Up/Down works straight away.
+        val currentId = channel?.id
+        sidebarList.post {
+            val target = (0 until sidebarList.childCount)
+                .map { sidebarList.getChildAt(it) }
+                .firstOrNull { (it.tag as? Channel)?.id == currentId }
+                ?: sidebarList.getChildAt(0)
+            target?.requestFocus()
+            // Keep the focused row visible once the list is laid out.
+            sidebarScroll.post {
+                (0 until sidebarList.childCount)
                     .map { sidebarList.getChildAt(it) }
-                    .firstOrNull { (it.tag as? Channel)?.id == currentId }
-                    ?: sidebarList.getChildAt(0)
-                target?.requestFocus()
-                // Keep the focused row visible once the list is laid out.
-                sidebarScroll.post {
-                    (0 until sidebarList.childCount)
-                        .map { sidebarList.getChildAt(it) }
-                        .firstOrNull { it.isFocused }
-                        ?.let { sidebarScroll.scrollTo(0, it.top) }
-                }
+                    .firstOrNull { it.isFocused }
+                    ?.let { sidebarScroll.scrollTo(0, it.top) }
             }
-            // Fill in "now playing" once the EPG is in (cached after the
-            // first load, so this is usually instant).
+        }
+        fillSidebarNowPlaying(shown)
+    }
+
+    /** Fill in each shown row's "now playing" programme. Uses the cached
+     * EPG when it is already in memory; otherwise loads it once and
+     * fills in when it arrives. */
+    private fun fillSidebarNowPlaying(shown: List<Channel>) {
+        val cached = PlaylistRepository.cachedEpg()
+        if (cached != null) {
+            applySidebarEpg(cached, shown)
+            return
+        }
+        lifecycleScope.launch {
             val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
             if (sidebar.visibility != View.VISIBLE || sidebarInGroups) return@launch
-            val now = System.currentTimeMillis()
-            for (ch in shown) {
-                val view = sidebarProgrammeViews[ch.id] ?: continue
-                val programmes = epg[ch.tvgId] ?: epg[ch.name.lowercase()]
-                val current = EpgParser.nowAndNext(programmes, now).first
-                view.text = current?.title ?: getString(R.string.overlay_no_info)
-            }
+            applySidebarEpg(epg, shown)
+        }
+    }
+
+    private fun applySidebarEpg(
+        epg: Map<String, List<EpgParser.Programme>>,
+        shown: List<Channel>
+    ) {
+        val now = System.currentTimeMillis()
+        val noInfo = getString(R.string.overlay_no_info)
+        for (ch in shown) {
+            val view = sidebarProgrammeViews[ch.id] ?: continue
+            val programmes = epg[ch.tvgId] ?: epg[ch.name.lowercase()]
+            val current = EpgParser.nowAndNext(programmes, now).first
+            view.text = current?.title ?: noInfo
         }
     }
 
@@ -723,7 +776,7 @@ class PlaybackActivity : FragmentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             isFocusable = true
             isFocusableInTouchMode = true
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -740,16 +793,16 @@ class PlaybackActivity : FragmentActivity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(dp(36), LinearLayout.LayoutParams.MATCH_PARENT)
+            layoutParams = LinearLayout.LayoutParams(dp(32), LinearLayout.LayoutParams.MATCH_PARENT)
         }
         val logoView = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
-                marginEnd = dp(12)
+            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).apply {
+                marginEnd = dp(8)
             }
             scaleType = ImageView.ScaleType.FIT_CENTER
             load(ch.logo) {
-                placeholder(android.R.drawable.ic_media_play)
-                error(android.R.drawable.ic_media_play)
+                placeholder(R.drawable.ic_play)
+                error(R.drawable.ic_play)
             }
         }
         val textBlock = LinearLayout(this).apply {
@@ -806,8 +859,8 @@ class PlaybackActivity : FragmentActivity() {
         infoDateTime.text = dateTimeFormat.format(Date(now))
         infoChannelName.text = name
         infoLogo.load(ch?.logo) {
-            placeholder(android.R.drawable.ic_media_play)
-            error(android.R.drawable.ic_media_play)
+            placeholder(R.drawable.ic_play)
+            error(R.drawable.ic_play)
         }
         val nowP = nowProgramme
         if (nowP != null) {
@@ -852,22 +905,26 @@ class PlaybackActivity : FragmentActivity() {
         infoHandler.postDelayed(hideInfoRunnable, OVERLAY_TIMEOUT_MS)
     }
 
-    /** Builds the bottom strip: TV guide, History, 3 most recent channels, Clear. */
+    /** Builds the bottom strip: TV guide, History, 3 most recent channels, Clear.
+     * Common case: the playlist is already in memory, so the strip is built
+     * once, with recents — instead of building it empty and rebuilding it
+     * a frame later. When the playlist isn't cached yet, the fixed tiles
+     * show immediately and the recents fill in once it loads (skipped
+     * entirely when the recents are unchanged from the last build). */
     private fun buildStrip() {
         val noInfo = getString(R.string.overlay_no_info)
-        // Show the fixed tiles immediately; the recent channels fill in
-        // once the (cached) playlist resolves their ids.
+        val cached = PlaylistRepository.cachedPlaylist()
+        if (cached != null) {
+            buildStripStatic(stripRecents(cached), noInfo)
+            return
+        }
         buildStripStatic(emptyList(), noInfo)
         lifecycleScope.launch {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
             val channels = result.getOrNull() ?: return@launch
-            val byId = channels.associateBy { it.id }
-            val currentId = channel?.id
-            val recents = PlaylistRepository.recentChannelIds(this@PlaybackActivity)
-                .filter { it != currentId }
-                .mapNotNull { byId[it] }
-                .take(3)
+            val recents = stripRecents(channels)
             if (overlay.visibility != View.VISIBLE) return@launch
+            if (recents.map { it.id } == lastStripRecents) return@launch
             val keepFocus = stripTiles.indexOfFirst { it.isFocused }
             buildStripStatic(recents, noInfo)
             // Restore focus (or default to the first tile); deferred
@@ -879,7 +936,21 @@ class PlaybackActivity : FragmentActivity() {
         }
     }
 
-    /** The strip's fixed tiles plus the given recent channels, then Clear. */
+    /** The 3 most recent channels (not the current one) from a list. */
+    private fun stripRecents(channels: List<Channel>): List<Channel> {
+        val byId = channels.associateBy { it.id }
+        val currentId = channel?.id
+        return PlaylistRepository.recentChannelIds(this)
+            .filter { it != currentId }
+            .mapNotNull { byId[it] }
+            .take(3)
+    }
+
+    /** The strip's fixed tiles plus the given recent channels, then Clear.
+     * 4.6.1: modern look — rounded tile_bg selector (accent on focus) and
+     * fresh vector icons instead of the dated system drawables. The label
+     * and icon turn dark on the green focused tile so they stay readable;
+     * channel logos are never tinted. */
     private fun buildStripStatic(recents: List<Channel>, noInfo: String) {
         infoStrip.removeAllViews()
         stripTiles.clear()
@@ -894,27 +965,22 @@ class PlaybackActivity : FragmentActivity() {
                 layoutParams = LinearLayout.LayoutParams(dp(150), dp(110)).apply {
                     marginEnd = dp(12)
                 }
-                // 4.6.0 palette: dark-grey tile, accent highlight on focus.
-                setBackgroundColor(0xFF232629.toInt())
+                setBackgroundResource(R.drawable.tile_bg)
                 setOnClickListener { onClick() }
-                onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
-                    setBackgroundColor(if (hasFocus) 0xFF86C739.toInt() else 0xFF232629.toInt())
-                }
             }
             val icon = ImageView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 if (logoUrl != null) {
                     load(logoUrl) {
-                        placeholder(android.R.drawable.ic_media_play)
-                        error(android.R.drawable.ic_media_play)
+                        placeholder(R.drawable.ic_play)
+                        error(R.drawable.ic_play)
                     }
                 } else if (iconRes != null) {
                     setImageResource(iconRes)
                 }
             }
-            tileView.addView(icon)
-            tileView.addView(TextView(this).apply {
+            val labelView = TextView(this).apply {
                 text = label
                 setTextColor(0xFFFFFFFF.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
@@ -926,7 +992,18 @@ class PlaybackActivity : FragmentActivity() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply { topMargin = dp(6) }
-            })
+            }
+            tileView.addView(icon)
+            tileView.addView(labelView)
+            tileView.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+                // Focused tile is accent green — dark text/icon on it.
+                // Logos keep their own colours.
+                val dark = 0xFF121218.toInt()
+                labelView.setTextColor(if (hasFocus) dark else 0xFFFFFFFF.toInt())
+                if (iconRes != null) {
+                    icon.setColorFilter(if (hasFocus) dark else 0xFFFFFFFF.toInt())
+                }
+            }
             // OK is handled by the activity's dispatchKeyEvent (it calls
             // performClick on the focused tile), so no per-tile key
             // listener is needed here.
@@ -934,16 +1011,17 @@ class PlaybackActivity : FragmentActivity() {
             stripTiles += tileView
         }
 
-        tile(android.R.drawable.ic_menu_view, null, getString(R.string.tv_guide)) { openGuide() }
-        tile(android.R.drawable.ic_menu_recent_history, null, getString(R.string.overlay_history)) { openGuide() }
+        tile(R.drawable.ic_guide, null, getString(R.string.tv_guide)) { openGuide() }
+        tile(R.drawable.ic_history, null, getString(R.string.overlay_history)) { openGuide() }
         for (recent in recents) {
             tile(null, recent.logo, recent.name) { switchToChannel(recent) }
         }
-        tile(android.R.drawable.ic_menu_delete, null, getString(R.string.overlay_clear)) {
+        tile(R.drawable.ic_clear, null, getString(R.string.overlay_clear)) {
             PlaylistRepository.clearRecentChannels(this)
             Toast.makeText(this, R.string.overlay_recents_cleared, Toast.LENGTH_SHORT).show()
             hideOverlay()
         }
+        lastStripRecents = recents.map { it.id }
     }
 
     /** Move focus to the next / previous strip tile. */

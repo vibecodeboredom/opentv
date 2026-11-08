@@ -43,6 +43,24 @@ object PlaylistRepository {
     @Volatile private var playlistCache: Pair<Long, List<Channel>>? = null
     @Volatile private var epgCache: Pair<Long, Map<String, List<EpgParser.Programme>>>? = null
 
+    /** The in-memory playlist when it is already loaded and fresh, else
+     * null. Lets the overlay / sidebar build synchronously in the common
+     * case instead of hopping through a coroutine just to hit the cache. */
+    fun cachedPlaylist(): List<Channel>? {
+        val cached = playlistCache
+        return if (cached != null && System.currentTimeMillis() - cached.first < PLAYLIST_TTL_MS) {
+            cached.second
+        } else null
+    }
+
+    /** The in-memory EPG when it is already loaded and fresh, else null. */
+    fun cachedEpg(): Map<String, List<EpgParser.Programme>>? {
+        val cached = epgCache
+        return if (cached != null && System.currentTimeMillis() - cached.first < EPG_TTL_MS) {
+            cached.second
+        } else null
+    }
+
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

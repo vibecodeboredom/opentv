@@ -20,7 +20,7 @@
         android:layout_gravity="center"
         android:background="@drawable/loading_status_bg"
         android:padding="20dp"
-        android:src="@android:drawable/ic_media_play"
+        android:src="@drawable/ic_play"
         android:contentDescription="@string/play"
         android:visibility="gone" />
 
@@ -32,12 +32,12 @@
         android:background="#98000000"
         android:visibility="gone" />
 
-    <!-- Left sidebar (4.6.0, TiviMate-style): a 320dp panel docked to the
+    <!-- Left sidebar (4.6.1, TiviMate-style): a 260dp panel docked to the
          left, listing groups at the top and channels below. Rows are built
          in code (groups, then the selected group's channels). -->
     <LinearLayout
         android:id="@+id/sidebar"
-        android:layout_width="320dp"
+        android:layout_width="260dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:background="#111111"
@@ -49,8 +49,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
             android:paddingTop="20dp"
             android:paddingBottom="12dp">
 
@@ -86,8 +86,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp" />
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp" />
         </ScrollView>
 
         <!-- Footer: channel count / truncation note. -->
@@ -95,8 +95,8 @@
             android:id="@+id/sidebar_footer"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
             android:paddingTop="8dp"
             android:paddingBottom="16dp"
             android:textSize="12sp"
@@ -243,7 +243,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="@drawable/transport_button_bg"
-                android:src="@android:drawable/ic_media_previous"
+                android:src="@drawable/ic_prev"
                 android:contentDescription="@string/transport_prev_channel"
                 android:focusable="true"
                 android:focusableInTouchMode="true" />
@@ -253,7 +253,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="@drawable/transport_button_bg"
-                android:src="@android:drawable/ic_media_pause"
+                android:src="@drawable/ic_pause"
                 android:contentDescription="@string/play"
                 android:focusable="true"
                 android:focusableInTouchMode="true" />
@@ -263,7 +263,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="@drawable/transport_button_bg"
-                android:src="@android:drawable/ic_media_next"
+                android:src="@drawable/ic_next"
                 android:contentDescription="@string/transport_next_channel"
                 android:focusable="true"
                 android:focusableInTouchMode="true" />
@@ -273,7 +273,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="@drawable/transport_button_bg"
-                android:src="@android:drawable/ic_menu_save"
+                android:src="@drawable/ic_record"
                 android:contentDescription="@string/menu_record"
                 android:focusable="true"
                 android:focusableInTouchMode="true" />
@@ -283,7 +283,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="@drawable/transport_button_bg"
-                android:src="@android:drawable/btn_star_big_off"
+                android:src="@drawable/ic_star"
                 android:contentDescription="@string/menu_add_favorite"
                 android:focusable="true"
                 android:focusableInTouchMode="true" />

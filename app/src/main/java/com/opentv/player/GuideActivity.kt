@@ -18,7 +18,6 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -54,7 +53,6 @@ class GuideActivity : FragmentActivity() {
     private lateinit var container: LinearLayout
     private lateinit var loading: ProgressBar
     private lateinit var scroll: ScrollView
-    private lateinit var hscroll: HorizontalScrollView
     private lateinit var nowLine: View
     private lateinit var emptyView: TextView
 
@@ -92,7 +90,6 @@ class GuideActivity : FragmentActivity() {
         container = findViewById(R.id.guide_container)
         loading = findViewById(R.id.guide_loading)
         scroll = findViewById(R.id.guide_scroll)
-        hscroll = findViewById(R.id.guide_hscroll)
         nowLine = findViewById(R.id.guide_now_line)
         emptyView = findViewById(R.id.guide_empty)
 
@@ -203,12 +200,6 @@ class GuideActivity : FragmentActivity() {
             scroll.visibility = View.VISIBLE
             buildGuide(filtered)
         }
-    }
-
-    private fun scrollToNow() {
-        val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L
-        val targetX = channelColWidth + (nowOffsetMinutes * pxPerMinute).toInt()
-        hscroll.post { hscroll.smoothScrollTo(maxOf(targetX - dpToPx(120), 0), 0) }
     }
 
     /** Show a channel + programme in the details header. */
