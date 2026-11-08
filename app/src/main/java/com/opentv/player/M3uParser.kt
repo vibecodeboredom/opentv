@@ -1,3 +1,5 @@
+package com.opentv.player
+
 /**
  * Minimal M3U playlist parser.
  *
