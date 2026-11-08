@@ -26,6 +26,9 @@ object PlaylistRepository {
     private const val KEY_FAVORITES = "favorites"
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
+    private const val KEY_RECENT = "recent_channels"
+    /** The overlay's channel strip shows this many most recent channels. */
+    private const val MAX_RECENT = 3
     private const val CACHE_FILE = "playlist.m3u"
     private const val EPG_CACHE_PREFIX = "epg_"
     /** Playlist is re-downloaded at most every 6h; EPG at most every 12h. */
@@ -94,6 +97,27 @@ object PlaylistRepository {
 
     fun unhideAllChannels(context: Context) {
         prefs(context).edit().remove(KEY_HIDDEN).apply()
+    }
+
+    /** Most recently watched channel ids, most recent first (max 3). */
+    fun recentChannelIds(context: Context): List<String> {
+        val raw = prefs(context).getString(KEY_RECENT, "") ?: ""
+        return raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    /** Record a channel as most recently watched (deduped, max 3). */
+    fun recordRecentChannel(context: Context, channelId: String) {
+        val current = recentChannelIds(context).toMutableList()
+        current.remove(channelId)
+        current.add(0, channelId)
+        prefs(context).edit()
+            .putString(KEY_RECENT, current.take(MAX_RECENT).joinToString("\n"))
+            .apply()
+    }
+
+    /** Clear the recent-channels list (the overlay's "Clear" tile). */
+    fun clearRecentChannels(context: Context) {
+        prefs(context).edit().remove(KEY_RECENT).apply()
     }
 
     /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */

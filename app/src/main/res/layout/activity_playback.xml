@@ -10,41 +10,134 @@
         android:layout_height="match_parent"
         android:keepScreenOn="true" />
 
-    <!-- Channel info banner: shown when left/right is pressed, instead
-         of the media controller. Auto-hides after a few seconds. -->
+    <!-- Channel info overlay (TiviMate-style): shown when left/right is
+         pressed. Top: group + date/time. Middle: logo, channel name, now
+         / next with times + progress bar. Bottom: a strip of tiles —
+         TV guide, History, the 3 most recent channels, Clear. -->
     <LinearLayout
         android:id="@+id/channel_info"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="24dp"
+        android:padding="28dp"
         android:background="#CC000000"
         android:visibility="gone">
 
-        <TextView
-            android:id="@+id/info_channel_name"
-            android:layout_width="wrap_content"
+        <!-- Top bar: group (left) + date/time (right). -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            android:textColor="@android:color/white" />
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/info_now"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textSize="18sp"
-            android:textColor="#DDDDDD" />
+            <TextView
+                android:id="@+id/info_group"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/white" />
 
-        <TextView
-            android:id="@+id/info_next"
-            android:layout_width="wrap_content"
+            <TextView
+                android:id="@+id/info_datetime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/white" />
+        </LinearLayout>
+
+        <!-- Channel + programme info. -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textSize="18sp"
-            android:textColor="#AAAAAA" />
+            android:layout_marginTop="120dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <!-- Logo + channel name (left), like the reference photo. -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal">
+
+                <ImageView
+                    android:id="@+id/info_logo"
+                    android:layout_width="120dp"
+                    android:layout_height="72dp"
+                    android:scaleType="fitCenter"
+                    android:contentDescription="@string/guide_preview" />
+
+                <TextView
+                    android:id="@+id/info_channel_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="@android:color/white"
+                    android:maxLines="1" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="24dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/info_now_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="24sp"
+                    android:textStyle="bold"
+                    android:textColor="@android:color/white"
+                    android:maxLines="1" />
+
+                <TextView
+                    android:id="@+id/info_now_meta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textSize="17sp"
+                    android:textColor="#DDDDDD" />
+
+                <TextView
+                    android:id="@+id/info_next"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="17sp"
+                    android:textColor="#AAAAAA" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Current programme progress. -->
+        <ProgressBar
+            android:id="@+id/info_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="16dp"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@drawable/guide_progress_drawable" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Bottom strip: TV guide, History, recent channels, Clear.
+             Tiles are built in code (recents are dynamic). -->
+        <LinearLayout
+            android:id="@+id/info_strip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center" />
 
     </LinearLayout>
 

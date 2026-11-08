@@ -2,11 +2,17 @@ package com.opentv.player
 
 import android.app.AlertDialog
 import android.content.Intent
+import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.OptIn
@@ -20,13 +26,20 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import coil.load
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Plays one channel with ExoPlayer. The media controller is fully
- * disabled — no overlay ever pops up. OK opens the TV Guide
- * (intercepted in dispatchKeyEvent), and left/right shows a small
- * channel info banner (name, now, next) instead of the controller.
+ * disabled — no overlay ever pops up. OK opens the TV Guide, and
+ * left/right shows a TiviMate-style channel info overlay: group +
+ * date/time on top, logo + channel name, now/next with times and a
+ * progress bar, and a bottom strip of tiles (TV guide, History, the
+ * 3 most recent channels, Clear). While the overlay is up, left/right
+ * moves between the tiles and OK activates the focused one.
  *
  * - INFO toggles the channel as a favorite.
  * - MENU opens options: favorite toggle + record / stop recording.
@@ -45,20 +58,30 @@ class PlaybackActivity : FragmentActivity() {
         const val EXTRA_RETRY_COUNT = "retry_count"
         /** Dead streams are common in the playlist — auto-try another random channel this many times. */
         private const val MAX_AUTO_RETRY = 3
+        /** Overlay auto-hides after this long with no key press. */
+        private const val OVERLAY_TIMEOUT_MS = 10_000L
     }
 
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
-    private lateinit var channelInfoView: View
+    private lateinit var overlay: View
+    private lateinit var infoGroup: TextView
+    private lateinit var infoDateTime: TextView
+    private lateinit var infoLogo: ImageView
     private lateinit var infoChannelName: TextView
-    private lateinit var infoNow: TextView
+    private lateinit var infoNowTitle: TextView
+    private lateinit var infoNowMeta: TextView
     private lateinit var infoNext: TextView
-    /** Auto-hide for the channel info banner. */
+    private lateinit var infoProgress: ProgressBar
+    private lateinit var infoStrip: LinearLayout
+    /** Auto-hide for the overlay. */
     private val infoHandler = Handler(Looper.getMainLooper())
-    private val hideInfoRunnable = Runnable { channelInfoView.visibility = View.GONE }
-    /** Now / next programme titles for the info banner, filled once EPG loads. */
-    private var nowTitle: String? = null
-    private var nextTitle: String? = null
+    private val hideInfoRunnable = Runnable { hideOverlay() }
+    /** Now / next programmes, filled once EPG loads. */
+    private var nowProgramme: EpgParser.Programme? = null
+    private var nextProgramme: EpgParser.Programme? = null
+    /** The strip tiles, in order, for left/right focus movement. */
+    private val stripTiles = mutableListOf<View>()
     private var channel: Channel? = null
     private var recordingId: String? = null
     private var recordingUri: String? = null
@@ -71,16 +94,25 @@ class PlaybackActivity : FragmentActivity() {
     private var retryCount: Int = 0
     private var autoRetrying = false
 
+    private val dateTimeFormat = SimpleDateFormat("EEE, MMM d, h:mm a", Locale.US)
+    private val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_playback)
         playerView = findViewById(R.id.player_view)
-        channelInfoView = findViewById(R.id.channel_info)
+        overlay = findViewById(R.id.channel_info)
+        infoGroup = findViewById(R.id.info_group)
+        infoDateTime = findViewById(R.id.info_datetime)
+        infoLogo = findViewById(R.id.info_logo)
         infoChannelName = findViewById(R.id.info_channel_name)
-        infoNow = findViewById(R.id.info_now)
+        infoNowTitle = findViewById(R.id.info_now_title)
+        infoNowMeta = findViewById(R.id.info_now_meta)
         infoNext = findViewById(R.id.info_next)
+        infoProgress = findViewById(R.id.info_progress)
+        infoStrip = findViewById(R.id.info_strip)
         // No media controller at all — the video just plays. Left/right
-        // shows the channel info banner instead.
+        // shows the channel info overlay instead.
         playerView.useController = false
 
         val ch = intent.getSerializableExtra(EXTRA_CHANNEL) as? Channel
@@ -127,7 +159,11 @@ class PlaybackActivity : FragmentActivity() {
         sessionStartMillis = System.currentTimeMillis()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) everPlayed = true
+                if (playbackState == Player.STATE_READY && !everPlayed) {
+                    everPlayed = true
+                    // First real playback: this channel counts as watched.
+                    channel?.let { PlaylistRepository.recordRecentChannel(this@PlaybackActivity, it.id) }
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -155,8 +191,8 @@ class PlaybackActivity : FragmentActivity() {
             lifecycleScope.launch {
                 val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
                 val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
-                nowTitle = now?.title
-                nextTitle = next?.title
+                nowProgramme = now
+                nextProgramme = next
                 if (now != null || next != null) {
                     val text = buildString {
                         now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
@@ -177,37 +213,202 @@ class PlaybackActivity : FragmentActivity() {
     }
 
     /**
-     * OK (center / enter) once opens the TV Guide. Left/right shows the
-     * channel info banner instead of the (disabled) media controller.
-     * Intercepted here, before the PlayerView sees the key.
+     * OK opens the TV Guide (or activates the focused strip tile when the
+     * overlay is up). Left/right shows the overlay, and moves between the
+     * strip tiles while it is up. BACK hides the overlay. Intercepted here,
+     * before the PlayerView sees the key.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
+            val overlayUp = overlay.visibility == View.VISIBLE
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                    openGuide()
+                    if (overlayUp) activateFocusedTile() else openGuide()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    showChannelInfo()
+                    if (overlayUp) moveStripFocus(event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT)
+                    else showChannelInfo()
                     return true
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    if (overlayUp) {
+                        hideOverlay()
+                        return true
+                    }
                 }
             }
         }
         return super.dispatchKeyEvent(event)
     }
 
-    /** Shows the channel info banner (name, now, next); auto-hides after 5s. */
+    /** Shows the channel info overlay (TiviMate-style); auto-hides after 10s idle. */
     private fun showChannelInfo() {
-        val name = recordingName ?: channel?.name ?: return
+        val ch = channel
+        val name = recordingName ?: ch?.name ?: return
+        val now = System.currentTimeMillis()
+        infoGroup.text = ch?.group ?: ""
+        infoDateTime.text = dateTimeFormat.format(Date(now))
         infoChannelName.text = name
-        infoNow.text = nowTitle?.let { "${getString(R.string.now_playing)}: $it" } ?: ""
-        infoNow.visibility = if (nowTitle != null) View.VISIBLE else View.GONE
-        infoNext.text = nextTitle?.let { "${getString(R.string.next_up)}: $it" } ?: ""
-        infoNext.visibility = if (nextTitle != null) View.VISIBLE else View.GONE
-        channelInfoView.visibility = View.VISIBLE
+        infoLogo.load(ch?.logo) {
+            placeholder(android.R.drawable.ic_media_play)
+            error(android.R.drawable.ic_media_play)
+        }
+        val nowP = nowProgramme
+        if (nowP != null) {
+            infoNowTitle.text = nowP.title
+            val mins = ((nowP.stopMillis - nowP.startMillis) / 60_000).toInt()
+            val num = if (ch != null && ch.number > 0) "${ch.number} " else ""
+            infoNowMeta.text = "${timeFormat.format(Date(nowP.startMillis))} – " +
+                "${timeFormat.format(Date(nowP.stopMillis))}  •  $mins min  •  $num$name"
+            val span = (nowP.stopMillis - nowP.startMillis).coerceAtLeast(1L)
+            infoProgress.progress = ((now - nowP.startMillis) * 100 / span).toInt().coerceIn(0, 100)
+        } else {
+            infoNowTitle.text = getString(R.string.overlay_no_info)
+            infoNowMeta.text = ""
+            infoProgress.progress = 0
+        }
+        val nextP = nextProgramme
+        infoNext.text = if (nextP != null) {
+            "${timeFormat.format(Date(nextP.startMillis))} – " +
+                "${timeFormat.format(Date(nextP.stopMillis))}  •  ${nextP.title}"
+        } else {
+            getString(R.string.overlay_no_info)
+        }
+        buildStrip()
+        overlay.visibility = View.VISIBLE
+        // Focus the first tile so left/right + OK work straight away.
+        stripTiles.firstOrNull()?.requestFocus()
+        armHideTimer()
+    }
+
+    private fun hideOverlay() {
+        overlay.visibility = View.GONE
         infoHandler.removeCallbacks(hideInfoRunnable)
-        infoHandler.postDelayed(hideInfoRunnable, 5000L)
+    }
+
+    private fun armHideTimer() {
+        infoHandler.removeCallbacks(hideInfoRunnable)
+        infoHandler.postDelayed(hideInfoRunnable, OVERLAY_TIMEOUT_MS)
+    }
+
+    /** Builds the bottom strip: TV guide, History, 3 most recent channels, Clear. */
+    private fun buildStrip() {
+        val noInfo = getString(R.string.overlay_no_info)
+        // Show the fixed tiles immediately; the recent channels fill in
+        // once the (cached) playlist resolves their ids.
+        buildStripStatic(emptyList(), noInfo)
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val channels = result.getOrNull() ?: return@launch
+            val byId = channels.associateBy { it.id }
+            val currentId = channel?.id
+            val recents = PlaylistRepository.recentChannelIds(this@PlaybackActivity)
+                .filter { it != currentId }
+                .mapNotNull { byId[it] }
+                .take(3)
+            if (overlay.visibility != View.VISIBLE) return@launch
+            val keepFocus = stripTiles.indexOfFirst { it.isFocused }
+            buildStripStatic(recents, noInfo)
+            if (keepFocus in stripTiles.indices) stripTiles[keepFocus].requestFocus()
+        }
+    }
+
+    /** The strip's fixed tiles plus the given recent channels, then Clear. */
+    private fun buildStripStatic(recents: List<Channel>, noInfo: String) {
+        infoStrip.removeAllViews()
+        stripTiles.clear()
+        val dp = { v: Int -> (v * resources.displayMetrics.density).toInt() }
+
+        fun tile(iconRes: Int?, logoUrl: String?, label: String, onClick: () -> Unit) {
+            val tileView = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(8), dp(10), dp(8), dp(10))
+                layoutParams = LinearLayout.LayoutParams(dp(150), dp(110)).apply {
+                    marginEnd = dp(12)
+                }
+                setBackgroundColor(0xFF1C1C22.toInt())
+                setOnClickListener { onClick() }
+                onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+                    setBackgroundColor(if (hasFocus) 0xFF3B82F6.toInt() else 0xFF1C1C22.toInt())
+                }
+            }
+            val icon = ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                if (logoUrl != null) {
+                    load(logoUrl) {
+                        placeholder(android.R.drawable.ic_media_play)
+                        error(android.R.drawable.ic_media_play)
+                    }
+                } else if (iconRes != null) {
+                    setImageResource(iconRes)
+                }
+            }
+            tileView.addView(icon)
+            tileView.addView(TextView(this).apply {
+                text = label
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                typeface = Typeface.DEFAULT_BOLD
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(6) }
+            })
+            tileView.setOnKeyListener { _, keyCode, ev ->
+                if (ev.action == KeyEvent.ACTION_DOWN &&
+                    (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)
+                ) {
+                    onClick()
+                    true
+                } else false
+            }
+            infoStrip.addView(tileView)
+            stripTiles += tileView
+        }
+
+        tile(android.R.drawable.ic_menu_view, null, getString(R.string.tv_guide)) { openGuide() }
+        tile(android.R.drawable.ic_menu_recent_history, null, getString(R.string.overlay_history)) { openGuide() }
+        for (recent in recents) {
+            tile(null, recent.logo, recent.name) { switchToChannel(recent) }
+        }
+        tile(android.R.drawable.ic_menu_delete, null, getString(R.string.overlay_clear)) {
+            PlaylistRepository.clearRecentChannels(this)
+            Toast.makeText(this, R.string.overlay_recents_cleared, Toast.LENGTH_SHORT).show()
+            hideOverlay()
+        }
+    }
+
+    /** Move focus to the next / previous strip tile. */
+    private fun moveStripFocus(right: Boolean) {
+        if (stripTiles.isEmpty()) return
+        val current = stripTiles.indexOfFirst { it.isFocused }.takeIf { it >= 0 } ?: 0
+        val next = if (right) (current + 1).coerceAtMost(stripTiles.size - 1)
+        else (current - 1).coerceAtLeast(0)
+        stripTiles[next].requestFocus()
+        armHideTimer()
+    }
+
+    /** Activate whichever strip tile currently has focus. */
+    private fun activateFocusedTile() {
+        stripTiles.firstOrNull { it.isFocused }?.performClick()
+    }
+
+    /** Switch playback to the given channel (used by a recent-channel tile). */
+    private fun switchToChannel(pick: Channel) {
+        hideOverlay()
+        val intent = Intent(this, PlaybackActivity::class.java)
+        intent.putExtra(EXTRA_CHANNEL, pick)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivity(intent)
+        finish()
     }
 
     private fun openGuide() {
@@ -314,7 +515,7 @@ class PlaybackActivity : FragmentActivity() {
     override fun onStop() {
         super.onStop()
         infoHandler.removeCallbacks(hideInfoRunnable)
-        channelInfoView.visibility = View.GONE
+        overlay.visibility = View.GONE
         // Log the watch session (local only, never shared).
         val watchedMillis = System.currentTimeMillis() - sessionStartMillis
         if (sessionStartMillis > 0L && watchedMillis > 0L) {
