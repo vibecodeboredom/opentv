@@ -78,6 +78,30 @@ class GuideActivity : FragmentActivity() {
     private var pxPerMinute: Int = 0
     private var channelColWidth: Int = 0
 
+    /** Pinned channel-name column (4.7.2): sits beside the horizontal
+     * scroller, so the names never scroll away sideways. */
+    private lateinit var pinnedCol: LinearLayout
+
+    /** Rows currently displayed (allRows, or the search-filtered subset). */
+    private var displayRows: List<GuideData.GuideRow> = emptyList()
+    /** How many of displayRows have been built so far (one pinned cell
+     * + one programme row each). Rows are only built for what's on
+     * screen plus a buffer — the grid used to inflate all 400 rows
+     * eagerly, which was the open delay and the scroll lag. */
+    private var builtRowCount = 0
+    /** Programme-row layouts by display index, parallel to channelCells. */
+    private val programmeRowLayouts = mutableListOf<LinearLayout>()
+    /** Pinned channel-cell views by display index. */
+    private val channelCells = mutableListOf<View>()
+    /** Current search query ("" = no filter), so the EPG fill-in can
+     * respect an active search instead of clobbering it. */
+    private var currentSearchQuery: String = ""
+
+    /** First programme on now (and its card), for the details header
+     * and the initial focus. Set while rows are built. */
+    private var firstNow: Pair<Channel, EpgParser.Programme>? = null
+    private var firstNowCard: View? = null
+
     /** The programme the details header is currently showing. */
     private var detailChannelShown: Channel? = null
 
@@ -97,10 +121,16 @@ class GuideActivity : FragmentActivity() {
         setContentView(R.layout.activity_guide)
         currentChannelId = intent.getStringExtra(EXTRA_CURRENT_CHANNEL_ID)
         container = findViewById(R.id.guide_container)
+        pinnedCol = findViewById(R.id.guide_pinned_col)
         loading = findViewById(R.id.guide_loading)
         scroll = findViewById(R.id.guide_scroll)
         nowLine = findViewById(R.id.guide_now_line)
         emptyView = findViewById(R.id.guide_empty)
+
+        // Lazy rows (4.7.2): append more when the user scrolls near the
+        // bottom of what's built, so the grid never holds more than a
+        // screenful + a buffer of live views.
+        scroll.setOnScrollChangeListener { _, _, _, _, _ -> maybeAppendRows() }
 
         detailLogo = findViewById(R.id.guide_detail_logo)
         detailChannel = findViewById(R.id.guide_detail_channel)
@@ -182,16 +212,15 @@ class GuideActivity : FragmentActivity() {
                 // stays pinned at the left, like the reference photo.
                 // The red now-line marks the current time; the user scrolls
                 // right to see later programmes.
-                // EPG fills in when it arrives: rebuild the rows with the
-                // real programme data. (If it was already cached, this
-                // returns immediately and nothing visibly changes.)
-                // Skip the rebuild when the EPG came back empty — the
-                // placeholders are already showing, and rebuilding the
-                // whole grid again for nothing just freezes the UI.
+                // EPG fills in when it arrives — in place (4.7.2), not
+                // by rebuilding the whole grid. The guide used to tear
+                // down all 400 rows and rebuild them a second time here,
+                // freezing the UI again just after it first appeared.
+                // Skip the fill-in when the EPG came back empty — the
+                // placeholders are already showing.
                 epg = epgDeferred.await()
                 if (epg.isNotEmpty()) {
-                    rebuildRows()
-                    buildGuide(allRows)
+                    updateRowsWithEpg()
                 }
             }.onFailure {
                 Toast.makeText(this@GuideActivity, R.string.load_failed, Toast.LENGTH_LONG).show()
@@ -228,15 +257,41 @@ class GuideActivity : FragmentActivity() {
                         return true
                     }
                     val focused = currentFocus
-                    if (focused != null && isFirstCardInRow(focused)) {
+                    if (focused != null && channelCells.contains(focused)) {
+                        // Left from the channel name cell opens the
+                        // sidebar (4.7.2).
                         channelSidebar.show()
                         return true
+                    }
+                    if (focused != null && isFirstCardInRow(focused)) {
+                        // Left from the first programme card moves focus
+                        // to the channel name cell (4.7.2) instead of
+                        // the sidebar — the sidebar opens on the next
+                        // Left, from the name cell.
+                        val rowLayout = focused.parent as? LinearLayout
+                        val idx = rowLayout?.tag as? Int
+                        val cell = idx?.let { channelCells.getOrNull(it) }
+                        if (cell != null) {
+                            cell.requestFocus()
+                            return true
+                        }
                     }
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     if (sidebarUp) {
                         channelSidebar.activate()
                         return true
+                    }
+                    val focused = currentFocus
+                    if (focused != null && channelCells.contains(focused)) {
+                        // Right from the channel name moves focus to the
+                        // row's first programme card (4.7.2).
+                        val idx = focused.tag as? Int
+                        val card = idx?.let { firstCardOfRow(it) }
+                        if (card != null) {
+                            card.requestFocus()
+                            return true
+                        }
                     }
                 }
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -269,7 +324,7 @@ class GuideActivity : FragmentActivity() {
 
     /** True when this view is the first programme card of its guide row
      * (the left edge) — pressing Left there opens the sidebar. Cards
-     * are tagged with their programme in buildGuideRow; the channel
+     * are tagged with their programme in populateProgrammeRow; the channel
      * cell and spacers carry no tag. */
     private fun isFirstCardInRow(view: View): Boolean {
         val row = view.parent as? LinearLayout ?: return false
@@ -300,6 +355,7 @@ class GuideActivity : FragmentActivity() {
     }
 
     private fun applySearch(query: String) {
+        currentSearchQuery = query
         val q = query.trim().lowercase()
         if (q.isEmpty()) {
             buildGuide(allRows)
@@ -313,6 +369,9 @@ class GuideActivity : FragmentActivity() {
         }
         if (filtered.isEmpty()) {
             container.removeAllViews()
+            pinnedCol.removeAllViews()
+            displayRows = emptyList()
+            builtRowCount = 0
             scroll.visibility = View.GONE
             emptyView.visibility = View.VISIBLE
         } else {
@@ -363,55 +422,80 @@ class GuideActivity : FragmentActivity() {
     }
 
     /**
-     * Builds the guide grid. The grid used to be built in one synchronous
-     * pass — up to 400 rows × ~13 views each, twice (once for the
-     * placeholders, once when the EPG arrived). That blocked the main
-     * thread for seconds: the screen went black and the app ANR'd/crashed
-     * when opening the guide from the left/right overlay. Now rows are
-     * added in small chunks, posted to the main thread, so the UI stays
-     * responsive and the first rows appear quickly. A generation counter
-     * drops stale chunks when a newer build starts (search, block/hide,
-     * EPG fill-in).
+     * Builds the guide grid — lazily (4.7.2). Only the first screenful
+     * of rows is built synchronously, so the guide appears and is usable
+     * almost immediately after pressing OK; more rows are appended as
+     * the user scrolls down (maybeAppendRows) or focus nears the end.
+     * The grid used to inflate all 400 rows eagerly in 40-row chunks,
+     * which was the open delay — and it did it twice per open (once for
+     * the placeholders, once when the EPG arrived). A generation counter
+     * drops stale now-line refreshes when a newer build starts (search,
+     * block/hide, EPG fill-in).
      */
     private var guideBuildGeneration = 0
 
     private fun buildGuide(rows: List<GuideData.GuideRow>) {
         guideBuildGeneration++
-        val generation = guideBuildGeneration
+        displayRows = rows
+        builtRowCount = 0
+        programmeRowLayouts.clear()
+        channelCells.clear()
+        firstNow = null
+        firstNowCard = null
         container.removeAllViews()
+        pinnedCol.removeAllViews()
         channelNameViews.clear()
         nowLine.visibility = View.GONE
+
+        buildGuideHeader(dpToPx(CELL_HEIGHT_DP))
+        appendRows(GUIDE_INITIAL_ROWS)
+        finishGuideBuild()
+    }
+
+    /** Build the next chunk of display rows (one pinned channel cell +
+     * one programme row each) and append them. */
+    private fun appendRows(count: Int = GUIDE_APPEND_ROWS) {
+        if (builtRowCount >= displayRows.size) return
         val windowEnd = windowStart + WINDOW_HOURS * 60L * 60 * 1000
         val cellHeight = dpToPx(CELL_HEIGHT_DP)
         val cellMargin = dpToPx(CELL_MARGIN_DP)
-
-        buildGuideHeader(cellHeight)
-
-        var firstNow: Pair<Channel, EpgParser.Programme>? = null
-        var firstNowCard: View? = null
-        var index = 0
-        fun buildChunk() {
-            if (generation != guideBuildGeneration) return
-            val end = minOf(index + GUIDE_BUILD_CHUNK_ROWS, rows.size)
-            while (index < end) {
-                val row = rows[index]
-                val built = buildGuideRow(row, windowEnd, cellHeight, cellMargin)
-                container.addView(built.layout)
-                if (firstNow == null) firstNow = built.firstNow
-                if (firstNowCard == null) firstNowCard = built.firstNowCard
-                index++
-            }
-            if (index < rows.size) {
-                container.post { buildChunk() }
-            } else {
-                finishGuideBuild(firstNow, firstNowCard)
-            }
+        val end = minOf(builtRowCount + count, displayRows.size)
+        while (builtRowCount < end) {
+            buildRowViews(
+                displayRows[builtRowCount], builtRowCount,
+                windowEnd, cellHeight, cellMargin
+            )
+            builtRowCount++
         }
-        buildChunk()
+        refreshNowLine()
     }
 
-    /** The time header: date + current time, then one label per 30 minutes. */
+    /** Append more rows when the user scrolls near the bottom of what's
+     * built, so focus never runs out of rows below. */
+    private fun maybeAppendRows() {
+        if (builtRowCount >= displayRows.size) return
+        val contentHeight = scroll.getChildAt(0)?.height ?: return
+        if (contentHeight <= 0) return
+        if (scroll.scrollY + scroll.height >= contentHeight - 2 * scroll.height) {
+            appendRows()
+        }
+    }
+
+    /** The time header, split in two (4.7.2): the date cell is pinned
+     * at the top of the channel column, the 30-minute labels scroll
+     * horizontally with the programme grid. Both are one cell tall so
+     * the columns stay aligned. */
     private fun buildGuideHeader(cellHeight: Int) {
+        pinnedCol.addView(TextView(this).apply {
+            text = GuideData.formatDateTime(nowMillis)
+            setBackgroundColor(0xFF161616.toInt())
+            setTextColor(0xFFC9C9D1.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(12), 0, dpToPx(12), 0)
+            layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
+        })
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(0xFF161616.toInt())
@@ -420,15 +504,6 @@ class GuideActivity : FragmentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
-        header.addView(TextView(this).apply {
-            text = GuideData.formatDateTime(nowMillis)
-            setTextColor(0xFFC9C9D1.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(12), 0, dpToPx(12), 0)
-            layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
-        })
         for (m in 0 until WINDOW_HOURS * 60 step 30) {
             val label = TextView(this).apply {
                 text = GuideData.formatHourLabel(windowStart + m * 60L * 1000)
@@ -445,29 +520,17 @@ class GuideActivity : FragmentActivity() {
         container.addView(header)
     }
 
-    private data class BuiltGuideRow(
-        val layout: LinearLayout,
-        val firstNow: Pair<Channel, EpgParser.Programme>?,
-        val firstNowCard: View?
-    )
-
-    /** One channel row: number + logo + name, then its programme cells. */
-    private fun buildGuideRow(
+    /** One channel row (4.7.2): the channel cell goes in the pinned
+     * column, the programme cards go in the scrolling grid. The two
+     * stay aligned because both get the same height + top margin and
+     * both live in the same vertical ScrollView. */
+    private fun buildRowViews(
         row: GuideData.GuideRow,
+        index: Int,
         windowEnd: Long,
         cellHeight: Int,
         cellMargin: Int
-    ): BuiltGuideRow {
-        var firstNow: Pair<Channel, EpgParser.Programme>? = null
-        var firstNowCard: View? = null
-        val rowLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = cellMargin }
-        }
-
+    ) {
         // Channel cell: number + logo + name (no group line, like the photo).
         // 4.6.0 palette: #161616 panel; the current channel's number and
         // name are accent (#86C739), the rest 70% white / white.
@@ -477,7 +540,17 @@ class GuideActivity : FragmentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF161616.toInt())
             setPadding(dpToPx(12), 0, dpToPx(12), 0)
-            layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
+            // Focusable (4.7.2): Left from the first programme card
+            // lands here, and Left from here opens the sidebar — so
+            // the channel name is always reachable from the grid.
+            isFocusable = true
+            isFocusableInTouchMode = true
+            // Tagged with its row index, so Left/Right can find the
+            // row's programme cards and vice versa.
+            tag = index
+            layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight).apply {
+                topMargin = cellMargin
+            }
         }
         if (row.channel.number > 0) {
             channelCell.addView(TextView(this).apply {
@@ -518,8 +591,58 @@ class GuideActivity : FragmentActivity() {
         }
         channelCell.addView(nameView)
         channelNameViews[row.channel.id] = nameView
-        rowLayout.addView(channelCell)
+        channelCell.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                // Focused name turns accent, with a subtle panel
+                // highlight, and the details header shows this row's
+                // programme that's on now.
+                nameView.setTextColor(0xFF86C739.toInt())
+                channelCell.setBackgroundColor(0xFF232629.toInt())
+                val current = displayRows.getOrNull(index)
+                val nowProg = current?.programmes?.firstOrNull {
+                    nowMillis in it.startMillis until it.stopMillis
+                } ?: current?.programmes?.firstOrNull()
+                if (current != null && nowProg != null) showDetails(current.channel, nowProg)
+            } else {
+                nameView.setTextColor(
+                    if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                )
+                channelCell.setBackgroundColor(0xFF161616.toInt())
+            }
+        }
+        pinnedCol.addView(channelCell)
+        channelCells.add(channelCell)
 
+        // Programme row: cards only (the channel cell lives in the
+        // pinned column now). Tagged with its row index.
+        val rowLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            tag = index
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = cellMargin }
+        }
+        populateProgrammeRow(rowLayout, row, windowEnd, cellHeight, cellMargin, nameView)
+        container.addView(rowLayout)
+        programmeRowLayouts.add(rowLayout)
+    }
+
+    /** Fill (or re-fill) a programme row with its spacer + card views.
+     * Used for the initial build and for the in-place EPG fill-in
+     * (updateRowsWithEpg), which swaps the placeholder cards for the
+     * real ones without touching the channel cell or the row itself. */
+    private fun populateProgrammeRow(
+        rowLayout: LinearLayout,
+        row: GuideData.GuideRow,
+        windowEnd: Long,
+        cellHeight: Int,
+        cellMargin: Int,
+        nameView: TextView
+    ) {
+        rowLayout.removeAllViews()
+        val rowIndex = rowLayout.tag as? Int ?: -1
+        val isCurrentChannel = row.channel.id == currentChannelId
         // Programme cells (title only, like the photo), with spacers for gaps.
         var posMinutes = 0L
         for (programme in row.programmes) {
@@ -588,6 +711,9 @@ class GuideActivity : FragmentActivity() {
                     titleView.setTextColor(0xFF121218.toInt())
                     nameView.setTextColor(0xFF86C739.toInt())
                     showDetails(row.channel, programme)
+                    // Focus nearing the last built row: append more
+                    // rows so Down never runs out of grid below.
+                    appendRowsIfNearEnd(rowIndex)
                 } else {
                     titleView.setTextColor(
                         when {
@@ -606,14 +732,95 @@ class GuideActivity : FragmentActivity() {
             if (isNow && firstNowCard == null) firstNowCard = card
             posMinutes = layout.startOffsetMinutes + layout.widthMinutes
         }
-        return BuiltGuideRow(rowLayout, firstNow, firstNowCard)
     }
 
-    /** After all rows are in: details header, focus, and the now-line. */
-    private fun finishGuideBuild(
-        firstNow: Pair<Channel, EpgParser.Programme>?,
-        firstNowCard: View?
-    ) {
+    /** Append the next chunk when focus reaches the last few built
+     * rows, so DPAD Down never runs out of grid below (the scroll
+     * listener usually appends first; this is the safety net). */
+    private fun appendRowsIfNearEnd(rowIndex: Int) {
+        if (rowIndex >= 0 && rowIndex >= builtRowCount - GUIDE_FOCUS_BUFFER) {
+            appendRows()
+        }
+    }
+
+    /**
+     * Fill in the real EPG data without tearing the grid down (4.7.2).
+     * Only the programme cards of the rows already built are swapped
+     * in place; the channel cells, focus, and scroll position are
+     * untouched. Falls back to a full (now lazy, fast) rebuild when a
+     * search is active or the channel list itself changed.
+     */
+    private fun updateRowsWithEpg() {
+        rebuildRows()
+        val sameChannels = displayRows.size == allRows.size &&
+            displayRows.indices.all { displayRows[it].channel.id == allRows[it].channel.id }
+        if (currentSearchQuery.isNotEmpty() || !sameChannels) {
+            applySearch(currentSearchQuery)
+            return
+        }
+        // Remember the focused programme so focus survives the swap.
+        // (A focused channel cell isn't touched, so it needs nothing.)
+        val focused = currentFocus
+        val focusedProg = focused?.tag as? EpgParser.Programme
+        val focusedChannelId = if (focusedProg != null) {
+            val rowLayout = focused.parent as? LinearLayout
+            (rowLayout?.tag as? Int)?.let { displayRows.getOrNull(it)?.channel?.id }
+        } else null
+        firstNow = null
+        firstNowCard = null
+        val windowEnd = windowStart + WINDOW_HOURS * 60L * 60 * 1000
+        val cellHeight = dpToPx(CELL_HEIGHT_DP)
+        val cellMargin = dpToPx(CELL_MARGIN_DP)
+        for (i in 0 until builtRowCount) {
+            val row = allRows[i]
+            val nameView = channelNameViews[row.channel.id] ?: continue
+            populateProgrammeRow(
+                programmeRowLayouts[i], row, windowEnd, cellHeight, cellMargin, nameView
+            )
+        }
+        displayRows = allRows
+        // Restore focus: the programme airing at the same time on the
+        // same channel (the old card was a placeholder, so an exact
+        // start-time match usually won't exist), else the first now card.
+        var restored = false
+        if (focusedProg != null && focusedChannelId != null) {
+            restored = focusProgrammeAt(focusedChannelId, focusedProg.startMillis)
+        }
+        if (!restored) {
+            firstNowCard?.let { it.requestFocus() }
+        }
+        refreshNowLine()
+    }
+
+    /** Focus the card airing at [timeMillis] on the given channel, if
+     * that row is built. Returns false when nothing matched. */
+    private fun focusProgrammeAt(channelId: String, timeMillis: Long): Boolean {
+        val idx = displayRows.indexOfFirst { it.channel.id == channelId }
+        if (idx < 0 || idx >= builtRowCount) return false
+        val rowLayout = programmeRowLayouts[idx]
+        for (i in 0 until rowLayout.childCount) {
+            val card = rowLayout.getChildAt(i)
+            val prog = card.tag as? EpgParser.Programme ?: continue
+            if (timeMillis in prog.startMillis until prog.stopMillis) {
+                card.requestFocus()
+                return true
+            }
+        }
+        return false
+    }
+
+    /** First programme card of a built row, or null. */
+    private fun firstCardOfRow(index: Int): View? {
+        val rowLayout = programmeRowLayouts.getOrNull(index) ?: return null
+        for (i in 0 until rowLayout.childCount) {
+            val child = rowLayout.getChildAt(i)
+            if (child.tag is EpgParser.Programme) return child
+        }
+        return null
+    }
+
+    /** After the first rows are in: details header, focus, and the now-line. */
+    private fun finishGuideBuild() {
         // Show the first programme on now in the details header.
         firstNow?.let { (ch, prog) -> showDetails(ch, prog) }
 
@@ -625,17 +832,32 @@ class GuideActivity : FragmentActivity() {
         }
 
         // Position the red now-line at the current time, spanning all rows.
+        // (The frame now starts at the programme area, so there's no
+        // channel-column offset any more — 4.7.2.)
         val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L
-        val nowX = channelColWidth + (nowOffsetMinutes * pxPerMinute).toInt()
+        nowLine.translationX = ((nowOffsetMinutes * pxPerMinute).toInt()).toFloat()
+        nowLine.visibility = View.VISIBLE
+        refreshNowLine()
+    }
+
+    /** Keep the red now-line spanning the whole grid. The frame grows as
+     * rows are appended, so the line's height is re-set after each
+     * append (and once when the guide first opens). Stale posts from an
+     * older build are dropped via the generation counter. */
+    private fun refreshNowLine(attempts: Int = 0) {
+        val generation = guideBuildGeneration
         container.post {
+            if (generation != guideBuildGeneration) return@post
+            if (nowLine.visibility != View.VISIBLE) return@post
             val frame = findViewById<FrameLayout>(R.id.guide_frame)
-            nowLine.translationX = nowX.toFloat()
-            nowLine.layoutParams = FrameLayout.LayoutParams(
-                dpToPx(3),
-                frame.height
-            )
-            nowLine.visibility = View.VISIBLE
-            nowLine.requestLayout()
+            val h = frame.height
+            if (h > 0) {
+                nowLine.layoutParams = FrameLayout.LayoutParams(dpToPx(3), h)
+                nowLine.requestLayout()
+            } else if (attempts < 3) {
+                // Not laid out yet — try again after the next pass.
+                refreshNowLine(attempts + 1)
+            }
         }
     }
 
@@ -861,7 +1083,13 @@ class GuideActivity : FragmentActivity() {
         /** Thinner rows (was 72) so more channels fit on one TV screen. */
         private const val CELL_HEIGHT_DP = 56
         private const val CELL_MARGIN_DP = 3
-        /** Rows added per posted chunk when building the guide grid. */
-        private const val GUIDE_BUILD_CHUNK_ROWS = 40
+        /** Rows built when the guide first opens (enough for ~3
+         * screens), and rows appended per lazy chunk as the user
+         * scrolls. The grid used to inflate all 400 rows eagerly. */
+        private const val GUIDE_INITIAL_ROWS = 24
+        private const val GUIDE_APPEND_ROWS = 24
+        /** Focus reaching this close to the last built row triggers
+         * an append, so DPAD Down never runs out of grid below. */
+        private const val GUIDE_FOCUS_BUFFER = 6
     }
 }

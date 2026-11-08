@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 4.7.2: wrapped in a ScrollView — the layout used to be a plain
+     LinearLayout, so the Share playlist section and the About block
+     sat below the fold on a TV screen with no way to reach them. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="48dp"
     android:background="@android:color/black">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="48dp">
 
     <TextView
         android:layout_width="wrap_content"
@@ -158,3 +165,4 @@
         android:textSize="15sp" />
 
 </LinearLayout>
+</ScrollView>

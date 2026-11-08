@@ -140,6 +140,15 @@
         android:layout_gravity="center"
         android:layout_marginTop="48dp" />
 
+    <!-- 4.7.2: the channel column is now PINNED. It used to live inside
+         the HorizontalScrollView (one channel cell per row), so scrolling
+         right scrolled the names away — and Left on the first programme
+         card opened the sidebar, so there was no way to get them back.
+         Now the names sit in their own column beside the horizontal
+         scroller: both columns share the same vertical ScrollView, so
+         they scroll up/down together, but the names never scroll
+         sideways. The programme grid (guide_container) holds only the
+         time header and the programme cards. -->
     <ScrollView
         android:id="@+id/guide_scroll"
         android:layout_width="match_parent"
@@ -147,32 +156,45 @@
         android:layout_weight="1"
         android:visibility="gone">
 
-        <HorizontalScrollView
-            android:id="@+id/guide_hscroll"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
 
-            <FrameLayout
-                android:id="@+id/guide_frame"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content">
+            <LinearLayout
+                android:id="@+id/guide_pinned_col"
+                android:layout_width="320dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
 
-                <LinearLayout
-                    android:id="@+id/guide_container"
+            <HorizontalScrollView
+                android:id="@+id/guide_hscroll"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+
+                <FrameLayout
+                    android:id="@+id/guide_frame"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical" />
+                    android:layout_height="wrap_content">
 
-                <!-- Current-time indicator line. Positioned in code. -->
-                <View
-                    android:id="@+id/guide_now_line"
-                    android:layout_width="3dp"
-                    android:layout_height="match_parent"
-                    android:background="#FF3B30"
-                    android:visibility="gone" />
+                    <LinearLayout
+                        android:id="@+id/guide_container"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
 
-            </FrameLayout>
-        </HorizontalScrollView>
+                    <!-- Current-time indicator line. Positioned in code. -->
+                    <View
+                        android:id="@+id/guide_now_line"
+                        android:layout_width="3dp"
+                        android:layout_height="match_parent"
+                        android:background="#FF3B30"
+                        android:visibility="gone" />
+
+                </FrameLayout>
+            </HorizontalScrollView>
+        </LinearLayout>
     </ScrollView>
 
     <TextView
