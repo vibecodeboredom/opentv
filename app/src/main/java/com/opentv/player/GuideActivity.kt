@@ -134,7 +134,10 @@ class GuideActivity : FragmentActivity() {
                 }
                 buildGuide(allRows)
                 scroll.visibility = View.VISIBLE
-                scrollToNow()
+                // Don't auto-scroll: the channel column (numbers + names)
+                // stays pinned at the left, like the reference photo.
+                // The red now-line marks the current time; the user scrolls
+                // right to see later programmes.
             }.onFailure {
                 Toast.makeText(this@GuideActivity, R.string.load_failed, Toast.LENGTH_LONG).show()
                 finish()
