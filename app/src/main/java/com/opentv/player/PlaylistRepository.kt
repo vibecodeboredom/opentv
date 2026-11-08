@@ -2,10 +2,14 @@ package com.opentv.player
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Loads the M3U playlist (from the network, cached locally) and keeps the
@@ -42,6 +46,15 @@ object PlaylistRepository {
      * worst case a redundant reload, never corruption. */
     @Volatile private var playlistCache: Pair<Long, List<Channel>>? = null
     @Volatile private var epgCache: Pair<Long, Map<String, List<EpgParser.Programme>>>? = null
+
+    /**
+     * Background refresh (4.7.0): when a snapshot is stale, the fresh
+     * data is fetched on this scope so the UI never blocks on it. The
+     * flags keep two callers from launching the same refresh twice.
+     */
+    private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val playlistRefreshRunning = AtomicBoolean(false)
+    private val epgRefreshRunning = AtomicBoolean(false)
 
     /** The in-memory playlist when it is already loaded and fresh, else
      * null. Lets the overlay / sidebar build synchronously in the common
@@ -172,6 +185,13 @@ object PlaylistRepository {
      * on disk, so launching, opening the guide, or changing channel does
      * not re-download and re-parse the whole playlist every time.
      *
+     * 4.7.0 — instant loading: the parsed list is also stored in the
+     * SQLite snapshot (ParsedCache) after every parse. A cold start
+     * reads the snapshot in milliseconds instead of re-parsing the whole
+     * M3U. When the snapshot is stale (>= 6h), it is still returned
+     * immediately and the fresh data is fetched in the background, so
+     * the UI never blocks on a download or a full re-parse.
+     *
      * The disk copy is used when it is fresh (6h TTL) — a cold start
      * (app killed, or after an update) used to re-download the whole
      * M3U before any channel could play, even though the disk copy was
@@ -183,6 +203,22 @@ object PlaylistRepository {
         if (cached != null && System.currentTimeMillis() - cached.first < PLAYLIST_TTL_MS) {
             return@withContext Result.success(cached.second)
         }
+        val url = playlistUrl(context)
+        // Fast path: the parsed snapshot from the last load. The memory
+        // cache keeps the snapshot's own save time, so the TTL stays
+        // honest — a stale snapshot still triggers a background refresh
+        // on the next load, and the refresh replaces it when it lands.
+        val snapshot = ParsedCache.playlistSnapshot(context, url)
+        if (snapshot != null) {
+            val (savedAt, channels) = snapshot
+            playlistCache = savedAt to channels
+            if (System.currentTimeMillis() - savedAt >= PLAYLIST_TTL_MS) {
+                refreshPlaylistInBackground(context, url)
+            }
+            return@withContext Result.success(channels)
+        }
+        // No snapshot yet (first run, or a new playlist URL): download /
+        // parse as before, then store the snapshot for next time.
         // Fresh disk copy: parse it instead of downloading.
         val file = context.getFileStreamPath(CACHE_FILE)
         if (file.exists() &&
@@ -192,30 +228,76 @@ object PlaylistRepository {
                 val cachedText = file.bufferedReader().use { it.readText() }
                 val channels = M3uParser.parse(cachedText)
                 if (channels.isNotEmpty()) {
-                    playlistCache = System.currentTimeMillis() to channels
+                    storePlaylist(context, url, channels)
                     return@withContext Result.success(channels)
                 }
             } catch (ignored: Exception) {
                 // Fall through to a fresh download.
             }
         }
-        val url = playlistUrl(context)
         try {
             val text = fetchText(url)
             context.openFileOutput(CACHE_FILE, Context.MODE_PRIVATE).use { it.write(text.toByteArray()) }
             val channels = M3uParser.parse(text)
-            playlistCache = System.currentTimeMillis() to channels
+            storePlaylist(context, url, channels)
             Result.success(channels)
         } catch (e: Exception) {
             try {
                 val cachedText = context.openFileInput(CACHE_FILE).bufferedReader().use { it.readText() }
                 val channels = M3uParser.parse(cachedText)
                 if (channels.isNotEmpty()) {
-                    playlistCache = System.currentTimeMillis() to channels
+                    storePlaylist(context, url, channels)
                     Result.success(channels)
                 } else Result.failure(e)
             } catch (ignored: Exception) {
                 Result.failure(e)
+            }
+        }
+    }
+
+    /** Remember a parsed playlist in memory + in the disk snapshot. */
+    private fun storePlaylist(context: Context, url: String, channels: List<Channel>) {
+        playlistCache = System.currentTimeMillis() to channels
+        ParsedCache.writePlaylist(context, url, channels)
+    }
+
+    /**
+     * Re-download + re-parse the playlist in the background when the
+     * snapshot is stale. Updates the in-memory cache and the snapshot
+     * when the fresh data lands, so the next guide/playback open picks
+     * it up. A failed refresh leaves the stale snapshot in place and
+     * the next load retries it.
+     */
+    private fun refreshPlaylistInBackground(context: Context, url: String) {
+        if (!playlistRefreshRunning.compareAndSet(false, true)) return
+        refreshScope.launch {
+            try {
+                val appContext = context.applicationContext
+                val text = try {
+                    fetchText(url).also { fresh ->
+                        try {
+                            appContext.openFileOutput(CACHE_FILE, Context.MODE_PRIVATE)
+                                .use { it.write(fresh.toByteArray()) }
+                        } catch (ignored: Exception) {
+                            // Disk cache is best-effort.
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Offline: fall back to the stale disk copy, if any.
+                    try {
+                        appContext.openFileInput(CACHE_FILE).bufferedReader().use { it.readText() }
+                    } catch (ignored: Exception) {
+                        null
+                    }
+                } ?: return@launch
+                val channels = M3uParser.parse(text)
+                if (channels.isNotEmpty()) {
+                    storePlaylist(appContext, url, channels)
+                }
+            } catch (ignored: Exception) {
+                // A failed refresh just leaves the stale snapshot in place.
+            } finally {
+                playlistRefreshRunning.set(false)
             }
         }
     }
@@ -232,12 +314,69 @@ object PlaylistRepository {
      * XML on disk, so the guide and the player don't re-download and
      * re-parse the whole guide on every open. Each source is parsed in a
      * single pass (programmes + display names together).
+     *
+     * 4.7.0 — instant loading: the merged map is also stored in the
+     * SQLite snapshot (ParsedCache) after every parse. A cold start
+     * reads it in milliseconds instead of re-parsing the whole XMLTV.
+     * A stale snapshot is still returned immediately and refreshed in
+     * the background, so the guide never blocks on the EPG.
      */
     suspend fun loadEpg(context: Context): Map<String, List<EpgParser.Programme>> = withContext(Dispatchers.IO) {
         val cached = epgCache
         if (cached != null && System.currentTimeMillis() - cached.first < EPG_TTL_MS) {
             return@withContext cached.second
         }
+        val url = epgUrl(context)
+        // Fast path: the parsed snapshot from the last load. Like the
+        // playlist, the memory cache keeps the snapshot's own save time
+        // so a stale snapshot still triggers a background refresh.
+        val snapshot = ParsedCache.epgSnapshot(context, url)
+        if (snapshot != null) {
+            val (savedAt, merged) = snapshot
+            epgCache = savedAt to merged
+            if (System.currentTimeMillis() - savedAt >= EPG_TTL_MS) {
+                refreshEpgInBackground(context, url)
+            }
+            return@withContext merged
+        }
+        // No snapshot yet: fetch + parse as before, then store it.
+        val merged = loadEpgFresh(context)
+        storeEpg(context, url, merged)
+        merged
+    }
+
+    /** Remember a parsed EPG in memory + in the disk snapshot. */
+    private fun storeEpg(
+        context: Context,
+        url: String,
+        merged: Map<String, List<EpgParser.Programme>>
+    ) {
+        epgCache = System.currentTimeMillis() to merged
+        ParsedCache.writeEpg(context, url, merged)
+    }
+
+    /**
+     * Re-download + re-parse the EPG in the background when the snapshot
+     * is stale. Updates the in-memory cache and the snapshot when the
+     * fresh data lands, so the next guide open picks it up.
+     */
+    private fun refreshEpgInBackground(context: Context, url: String) {
+        if (!epgRefreshRunning.compareAndSet(false, true)) return
+        refreshScope.launch {
+            try {
+                val appContext = context.applicationContext
+                val merged = loadEpgFresh(appContext)
+                storeEpg(appContext, url, merged)
+            } catch (ignored: Exception) {
+                // A failed refresh just leaves the stale snapshot in place.
+            } finally {
+                epgRefreshRunning.set(false)
+            }
+        }
+    }
+
+    /** Fetch + parse every EPG source and merge them (the old loadEpg body). */
+    private fun loadEpgFresh(context: Context): Map<String, List<EpgParser.Programme>> {
         val merged = mutableMapOf<String, MutableList<EpgParser.Programme>>()
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
         for (url in urls) {
@@ -255,8 +394,7 @@ object PlaylistRepository {
                 // One bad source doesn't kill the rest.
             }
         }
-        epgCache = System.currentTimeMillis() to merged
-        merged
+        return merged
     }
 
     /**
