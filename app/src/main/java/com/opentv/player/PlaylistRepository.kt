@@ -14,8 +14,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Loads the M3U playlist (from the network, cached locally) and keeps the
  * user's playlist / EPG URLs and favorites in SharedPreferences.
+ *
+ * 4.8.0 — multiple playlists: the user can keep several M3U playlists
+ * (name + URL) and switch between them, TiviMate-style. Only one is
+ * active at a time; the active one's URL is what playlistUrl() returns,
+ * so every existing caller keeps working unchanged. A playlist URL may
+ * also be a local file (scheme "file:") — a playlist received from
+ * another device over the local share (4.7.1/4.8.0) is stored on disk
+ * and referenced that way.
  */
 object PlaylistRepository {
+
+    /** One playlist entry: a display name and its M3U URL (or "file:" URL). */
+    data class Playlist(val name: String, val url: String)
 
     const val DEFAULT_PLAYLIST_URL = "https://iptv-org.github.io/iptv/countries/us.m3u"
     // iptv-org's own hosted guides (epg/guides/us.xml) are gone (404) — the
@@ -26,6 +37,10 @@ object PlaylistRepository {
     private const val PREFS = "opentv"
     private const val KEY_PLAYLIST_URL = "playlist_url"
     private const val KEY_EPG_URL = "epg_url"
+    /** 4.8.0: the playlist list, one "name\u0001url" entry per line. */
+    private const val KEY_PLAYLISTS = "playlists"
+    /** 4.8.0: the URL of the currently active playlist. */
+    private const val KEY_ACTIVE_PLAYLIST = "active_playlist"
     private const val KEY_UPLOAD_URL = "upload_url"
     private const val KEY_FAVORITES = "favorites"
     private const val KEY_HIDDEN = "hidden_channels"
@@ -36,6 +51,19 @@ object PlaylistRepository {
     /** The overlay's channel strip shows this many most recent channels. */
     private const val MAX_RECENT = 3
     private const val CACHE_FILE = "playlist.m3u"
+    /**
+     * 4.8.0: a playlist stored on this device (received over the local
+     * share) is referenced as "file:<name>" — the file lives in the app's
+     * private files dir. No network fetch is ever done for these.
+     */
+    const val LOCAL_SCHEME = "file:"
+    /** Prefix for files holding playlists received over the local share. */
+    private const val SHARED_FILE_PREFIX = "shared_"
+
+    /** Per-URL disk cache file (4.8.0): the old single "playlist.m3u"
+     * would mix playlists up when switching, so each URL gets its own. */
+    private fun playlistCacheFileName(url: String): String =
+        "playlist_" + url.hashCode().toString(16) + ".m3u"
     private const val EPG_CACHE_PREFIX = "epg_"
     /** Playlist is re-downloaded at most every 6h; EPG at most every 12h. */
     private const val PLAYLIST_TTL_MS = 6L * 60 * 60 * 1000
@@ -77,8 +105,157 @@ object PlaylistRepository {
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun playlistUrl(context: Context): String =
-        prefs(context).getString(KEY_PLAYLIST_URL, DEFAULT_PLAYLIST_URL) ?: DEFAULT_PLAYLIST_URL
+    /**
+     * All playlists, in order. Migrates the old single playlist URL into
+     * a one-entry list on first use, so existing users lose nothing.
+     */
+    fun playlists(context: Context): List<Playlist> {
+        val raw = prefs(context).getString(KEY_PLAYLISTS, null)
+        if (raw != null) {
+            val list = parsePlaylists(raw)
+            if (list.isNotEmpty()) return list
+        }
+        // First run after 4.8.0 (or an empty list): migrate the legacy
+        // single URL, or the default when there is none.
+        val legacy = prefs(context).getString(KEY_PLAYLIST_URL, null)
+            ?.takeIf { it.isNotBlank() } ?: DEFAULT_PLAYLIST_URL
+        val migrated = listOf(Playlist(defaultPlaylistName(legacy), legacy))
+        savePlaylists(context, migrated)
+        prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, legacy).apply()
+        return migrated
+    }
+
+    /** The currently active playlist (first entry when none is marked). */
+    fun activePlaylist(context: Context): Playlist {
+        val list = playlists(context)
+        val activeUrl = prefs(context).getString(KEY_ACTIVE_PLAYLIST, null)
+        return list.firstOrNull { it.url == activeUrl } ?: list.first()
+    }
+
+    /** URL of the active playlist — what every loader already calls. */
+    fun playlistUrl(context: Context): String = activePlaylist(context).url
+
+    /** A playlist URL is a local file when it uses the "file:" scheme. */
+    fun isLocalPlaylist(url: String): Boolean = url.startsWith(LOCAL_SCHEME)
+
+    /**
+     * Add a playlist (name + http/https URL). A URL already in the list
+     * just gets its name updated. Returns the entry, or null when the
+     * URL is not a usable playlist URL.
+     */
+    fun addPlaylist(context: Context, name: String, url: String): Playlist? {
+        val cleanUrl = url.trim()
+        if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) return null
+        val cleanName = cleanPlaylistName(name).ifBlank { defaultPlaylistName(cleanUrl) }
+        val list = playlists(context).toMutableList()
+        val existing = list.indexOfFirst { it.url == cleanUrl }
+        val entry = Playlist(cleanName, cleanUrl)
+        if (existing >= 0) list[existing] = entry else list += entry
+        savePlaylists(context, list)
+        return entry
+    }
+
+    /** Rename a playlist (by URL). No-op when the URL is not listed. */
+    fun renamePlaylist(context: Context, url: String, newName: String) {
+        val cleanName = cleanPlaylistName(newName)
+        if (cleanName.isBlank()) return
+        val list = playlists(context)
+            .map { if (it.url == url) it.copy(name = cleanName) else it }
+        savePlaylists(context, list)
+    }
+
+    /**
+     * Remove a playlist (by URL). Refuses when it is the last one.
+     * Removing the active playlist activates the first remaining one.
+     * Returns false when nothing was removed.
+     */
+    fun removePlaylist(context: Context, url: String): Boolean {
+        val list = playlists(context).toMutableList()
+        if (list.size <= 1) return false
+        val wasActive = activePlaylist(context).url == url
+        val removed = list.removeAll { it.url == url }
+        if (!removed) return false
+        savePlaylists(context, list)
+        if (wasActive) {
+            setActivePlaylist(context, list.first().url)
+        }
+        return true
+    }
+
+    /**
+     * Make a listed playlist active. Clears the in-memory playlist cache
+     * so the next load fetches the new source (the EPG cache is global
+     * and stays — it is keyed by channel id/name either way).
+     */
+    fun setActivePlaylist(context: Context, url: String): Boolean {
+        if (playlists(context).none { it.url == url }) return false
+        prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, url).apply()
+        playlistCache = null
+        return true
+    }
+
+    /**
+     * Store an M3U text received over the local share as a local file
+     * and add it to the playlist list. Returns the new entry, or null
+     * when the text is not an M3U playlist.
+     */
+    fun saveLocalPlaylist(context: Context, name: String, text: String): Playlist? {
+        if (!text.trimStart().startsWith("#EXTM3U")) return null
+        val fileName = SHARED_FILE_PREFIX + System.currentTimeMillis() + ".m3u"
+        return try {
+            context.openFileOutput(fileName, Context.MODE_PRIVATE)
+                .use { it.write(text.toByteArray(Charsets.UTF_8)) }
+            val cleanName = cleanPlaylistName(name).ifBlank { "Shared playlist" }
+            val entry = Playlist(cleanName, LOCAL_SCHEME + fileName)
+            val list = playlists(context).toMutableList()
+            // A distinct file name per upload, so this is always an append.
+            list += entry
+            savePlaylists(context, list)
+            entry
+        } catch (ignored: Exception) {
+            null
+        }
+    }
+
+    /** The raw text of a local ("file:") playlist, or null. */
+    fun localPlaylistText(context: Context, url: String): String? {
+        if (!isLocalPlaylist(url)) return null
+        return try {
+            val file = context.getFileStreamPath(url.removePrefix(LOCAL_SCHEME))
+            if (!file.exists()) null
+            else file.bufferedReader().use { it.readText() }.takeIf { it.isNotBlank() }
+        } catch (ignored: Exception) {
+            null
+        }
+    }
+
+    private fun savePlaylists(context: Context, list: List<Playlist>) {
+        val raw = list.joinToString("\n") { "${it.name}\u0001${it.url}" }
+        prefs(context).edit().putString(KEY_PLAYLISTS, raw).apply()
+    }
+
+    private fun parsePlaylists(raw: String): List<Playlist> =
+        raw.split("\n").mapNotNull { line ->
+            val idx = line.indexOf('\u0001')
+            if (idx <= 0) null
+            else Playlist(line.substring(0, idx), line.substring(idx + 1))
+        }.filter { it.url.isNotBlank() }
+
+    /** Names never carry newlines/tabs (they would break the storage format). */
+    private fun cleanPlaylistName(name: String): String =
+        name.replace("\n", " ").replace("\r", " ").replace("\u0001", " ")
+            .replace("\t", " ").trim()
+
+    /** A readable default name for a URL: the host, or "US Playlist"
+     * for the bundled iptv-org default. */
+    private fun defaultPlaylistName(url: String): String {
+        if (url == DEFAULT_PLAYLIST_URL) return "US Playlist"
+        return try {
+            URL(url).host?.takeIf { it.isNotBlank() } ?: "Playlist"
+        } catch (e: Exception) {
+            "Playlist"
+        }
+    }
 
     fun epgUrl(context: Context): String =
         prefs(context).getString(KEY_EPG_URL, DEFAULT_EPG_URL) ?: DEFAULT_EPG_URL
@@ -87,13 +264,11 @@ object PlaylistRepository {
     fun uploadUrl(context: Context): String =
         prefs(context).getString(KEY_UPLOAD_URL, "") ?: ""
 
-    fun setUrls(context: Context, playlistUrl: String, epgUrl: String) {
+    /** Change the EPG URL (the playlist list has its own editor now). */
+    fun setEpgUrl(context: Context, epgUrl: String) {
         prefs(context).edit()
-            .putString(KEY_PLAYLIST_URL, playlistUrl.ifBlank { DEFAULT_PLAYLIST_URL })
             .putString(KEY_EPG_URL, epgUrl.ifBlank { DEFAULT_EPG_URL })
             .apply()
-        // New sources: drop the cached data so the next load uses them.
-        playlistCache = null
         epgCache = null
     }
 
@@ -101,12 +276,18 @@ object PlaylistRepository {
         prefs(context).edit().putString(KEY_UPLOAD_URL, uploadUrl.trim()).apply()
     }
 
+    /** Reset to the single default playlist + default EPG (keeps the
+     * legacy keys cleared so a later migration starts clean). */
     fun resetUrls(context: Context) {
         prefs(context).edit()
             .remove(KEY_PLAYLIST_URL)
             .remove(KEY_EPG_URL)
             .remove(KEY_UPLOAD_URL)
+            .remove(KEY_PLAYLISTS)
+            .remove(KEY_ACTIVE_PLAYLIST)
             .apply()
+        playlistCache = null
+        epgCache = null
     }
 
     fun favorites(context: Context): Set<String> =
@@ -217,10 +398,29 @@ object PlaylistRepository {
             }
             return@withContext Result.success(channels)
         }
+        // Local playlist (received over the share): the source file IS
+        // the cache — read and parse it directly, never a network fetch.
+        if (isLocalPlaylist(url)) {
+            val text = localPlaylistText(context, url)
+            if (text != null) {
+                val channels = M3uParser.parse(text)
+                if (channels.isNotEmpty()) {
+                    storePlaylist(context, url, channels)
+                    return@withContext Result.success(channels)
+                }
+            }
+            return@withContext Result.failure(
+                IllegalStateException("Local playlist missing: $url")
+            )
+        }
         // No snapshot yet (first run, or a new playlist URL): download /
         // parse as before, then store the snapshot for next time.
-        // Fresh disk copy: parse it instead of downloading.
-        val file = context.getFileStreamPath(CACHE_FILE)
+        // Fresh disk copy: parse it instead of downloading. The disk
+        // copy is per-URL (4.8.0) so switching playlists never mixes
+        // them up; the old single file is only a one-time fallback for
+        // the cache written before 4.8.0 (it belonged to the then-only
+        // playlist, which the migration made active).
+        val file = context.getFileStreamPath(playlistCacheFileName(url))
         if (file.exists() &&
             System.currentTimeMillis() - file.lastModified() < PLAYLIST_TTL_MS
         ) {
@@ -235,15 +435,32 @@ object PlaylistRepository {
                 // Fall through to a fresh download.
             }
         }
+        val legacy = context.getFileStreamPath(CACHE_FILE)
+        if (legacy.exists() &&
+            System.currentTimeMillis() - legacy.lastModified() < PLAYLIST_TTL_MS
+        ) {
+            try {
+                val cachedText = legacy.bufferedReader().use { it.readText() }
+                val channels = M3uParser.parse(cachedText)
+                if (channels.isNotEmpty()) {
+                    storePlaylist(context, url, channels)
+                    return@withContext Result.success(channels)
+                }
+            } catch (ignored: Exception) {
+                // Fall through to a fresh download.
+            }
+        }
         try {
             val text = fetchText(url)
-            context.openFileOutput(CACHE_FILE, Context.MODE_PRIVATE).use { it.write(text.toByteArray()) }
+            context.openFileOutput(playlistCacheFileName(url), Context.MODE_PRIVATE)
+                .use { it.write(text.toByteArray()) }
             val channels = M3uParser.parse(text)
             storePlaylist(context, url, channels)
             Result.success(channels)
         } catch (e: Exception) {
             try {
-                val cachedText = context.openFileInput(CACHE_FILE).bufferedReader().use { it.readText() }
+                val cachedText = context.openFileInput(playlistCacheFileName(url))
+                    .bufferedReader().use { it.readText() }
                 val channels = M3uParser.parse(cachedText)
                 if (channels.isNotEmpty()) {
                     storePlaylist(context, url, channels)
@@ -265,10 +482,17 @@ object PlaylistRepository {
      * The raw M3U text of the currently configured playlist: the cached
      * disk copy when present, otherwise a fresh fetch of the playlist URL.
      * Used by the temporary local share (4.7.1) so other devices can
-     * import exactly what this TV is playing.
+     * import exactly what this TV is playing. A local playlist is read
+     * straight from its file.
      */
     suspend fun playlistText(context: Context): Result<String> = withContext(Dispatchers.IO) {
-        val file = context.getFileStreamPath(CACHE_FILE)
+        val url = playlistUrl(context)
+        if (isLocalPlaylist(url)) {
+            val text = localPlaylistText(context, url)
+            return@withContext if (text != null) Result.success(text)
+            else Result.failure(IllegalStateException("Local playlist missing: $url"))
+        }
+        val file = context.getFileStreamPath(playlistCacheFileName(url))
         if (file.exists()) {
             try {
                 val text = file.bufferedReader().use { it.readText() }
@@ -277,7 +501,7 @@ object PlaylistRepository {
                 // Fall through to a fresh fetch.
             }
         }
-        fetchUrlText(playlistUrl(context))
+        fetchUrlText(url)
     }
 
     /** Fetch the raw text of any URL (the share's "another URL" source). */
@@ -297,6 +521,8 @@ object PlaylistRepository {
      * the next load retries it.
      */
     private fun refreshPlaylistInBackground(context: Context, url: String) {
+        // A local playlist never needs a network refresh.
+        if (isLocalPlaylist(url)) return
         if (!playlistRefreshRunning.compareAndSet(false, true)) return
         refreshScope.launch {
             try {
@@ -304,7 +530,7 @@ object PlaylistRepository {
                 val text = try {
                     fetchText(url).also { fresh ->
                         try {
-                            appContext.openFileOutput(CACHE_FILE, Context.MODE_PRIVATE)
+                            appContext.openFileOutput(playlistCacheFileName(url), Context.MODE_PRIVATE)
                                 .use { it.write(fresh.toByteArray()) }
                         } catch (ignored: Exception) {
                             // Disk cache is best-effort.
@@ -313,7 +539,8 @@ object PlaylistRepository {
                 } catch (e: Exception) {
                     // Offline: fall back to the stale disk copy, if any.
                     try {
-                        appContext.openFileInput(CACHE_FILE).bufferedReader().use { it.readText() }
+                        appContext.openFileInput(playlistCacheFileName(url))
+                            .bufferedReader().use { it.readText() }
                     } catch (ignored: Exception) {
                         null
                     }

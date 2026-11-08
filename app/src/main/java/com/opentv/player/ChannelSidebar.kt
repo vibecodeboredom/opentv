@@ -1,5 +1,7 @@
 package com.opentv.player
 
+import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Typeface
 import android.util.TypedValue
 import android.view.Gravity
@@ -8,6 +10,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import coil.load
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +59,9 @@ class ChannelSidebar(
         private const val GROUP_ALL = "ALL"
         private const val GROUP_FAVORITES = "FAV"
         private const val GROUP_HISTORY = "HIST"
+        /** 4.8.0: pseudo-group that opens the playlist picker instead
+         * of a channel list. */
+        private const val GROUP_PLAYLISTS = "PLAYLISTS"
     }
 
     /** Are we showing the groups list, and which group
@@ -93,17 +99,55 @@ class ChannelSidebar(
         }
     }
 
-    /** OK / Right inside the sidebar: open a group, or pick a channel. */
+    /** OK / Right inside the sidebar: open a group, or pick a channel.
+     * The "Playlists" row opens the playlist picker instead. */
     fun activate() {
         val focused = focusedRow() ?: return
         when (val tag = focused.tag) {
             is SidebarGroup -> {
+                if (tag.key == GROUP_PLAYLISTS) {
+                    showPlaylistPicker()
+                    return
+                }
                 inGroups = false
                 group = tag.key
                 buildChannels(tag.key)
             }
             is Channel -> onChannelSelected(tag)
         }
+    }
+
+    /** Restart the app's loading flow with the newly active playlist. */
+    private fun restartToMain() {
+        val intent = Intent(activity, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        activity.startActivity(intent)
+        activity.finish()
+    }
+
+    /** Playlist picker (4.8.0): the active playlist is marked; picking
+     * another one switches to it and reloads the app with it. */
+    private fun showPlaylistPicker() {
+        val playlists = PlaylistRepository.playlists(activity)
+        val active = PlaylistRepository.activePlaylist(activity)
+        val names = playlists.map { p ->
+            if (p.url == active.url) "● ${p.name}" else p.name
+        }.toTypedArray()
+        AlertDialog.Builder(activity)
+            .setTitle(R.string.playlists_title)
+            .setItems(names) { _, which ->
+                val picked = playlists[which]
+                if (picked.url == active.url) return@setItems
+                if (PlaylistRepository.setActivePlaylist(activity, picked.url)) {
+                    Toast.makeText(
+                        activity,
+                        activity.getString(R.string.playlist_switched, picked.name),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    restartToMain()
+                }
+            }
+            .show()
     }
 
     /** Move focus to the next / previous row (Up / Down). Used by the
@@ -168,6 +212,12 @@ class ChannelSidebar(
         // Single pass for the per-group counts (was one full scan per group).
         val groupCounts = visible.groupingBy { it.group }.eachCount()
         val items = mutableListOf<SidebarGroup>()
+        // 4.8.0: "Playlists" first — it opens the playlist picker,
+        // not a channel list.
+        items += SidebarGroup(
+            GROUP_PLAYLISTS, activity.getString(R.string.playlists_title),
+            PlaylistRepository.playlists(activity).size
+        )
         items += SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visible.size)
         items += SidebarGroup(
             GROUP_FAVORITES, activity.getString(R.string.favorites),
@@ -185,9 +235,16 @@ class ChannelSidebar(
         if (items.isEmpty()) {
             footer.setText(R.string.sidebar_no_groups)
         }
-        // Focus the "All channels" row so Up/Down works straight away.
+        // Focus the "All channels" row so Up/Down works straight away
+        // (it is the second row now — "Playlists" sits above it).
         list.post {
-            (list.getChildAt(0) as? View)?.requestFocus()
+            for (i in 0 until list.childCount) {
+                val row = list.getChildAt(i)
+                if ((row.tag as? SidebarGroup)?.key == GROUP_ALL) {
+                    row.requestFocus()
+                    break
+                }
+            }
         }
     }
 
@@ -207,6 +264,11 @@ class ChannelSidebar(
             setBackgroundResource(R.drawable.sidebar_row_bg)
             tag = item
             setOnClickListener {
+                // 4.8.0: "Playlists" opens the picker, not a channel list.
+                if (item.key == GROUP_PLAYLISTS) {
+                    showPlaylistPicker()
+                    return@setOnClickListener
+                }
                 inGroups = false
                 group = item.key
                 buildChannels(item.key)

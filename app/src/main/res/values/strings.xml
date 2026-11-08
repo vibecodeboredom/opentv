@@ -20,7 +20,6 @@
     <string name="change_playlist_desc">Set the M3U playlist URL</string>
     <string name="refresh_playlist">Refresh playlist</string>
     <string name="refresh_playlist_desc">Reload channels from the playlist</string>
-    <string name="playlist_url_label">Playlist (M3U) URL</string>
     <string name="epg_url_label">EPG (XMLTV) URL (optional)</string>
     <string name="save">Save</string>
     <string name="reset_default">Reset to default</string>
@@ -117,11 +116,11 @@
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
     <string name="share_playlist_title">Share playlist</string>
-    <string name="share_playlist_hint">Temporarily share a playlist on this TV\'s Wi-Fi. Other devices on the same network can add it for 10 minutes, then sharing turns itself off.</string>
+    <string name="share_playlist_hint">Temporarily share a playlist on this TV\'s Wi-Fi. Other devices on the same network can add it for 10 minutes, then sharing turns itself off. While sharing is on, other devices can also send a playlist to this TV.</string>
     <string name="share_not_running">Not sharing.</string>
     <string name="share_playlist">Share playlist</string>
     <string name="share_stop">Stop sharing</string>
-    <string name="share_running">Sharing at %1$s\nDownload the file at %2$s\nEnds in %3$s — Stop sharing ends it now.</string>
+    <string name="share_running">Sharing at %1$s\nDownload the file at %2$s\nSend a playlist to this TV at %3$s\nEnds in %4$s — Stop sharing ends it now.</string>
     <string name="share_source_title">Share which playlist?</string>
     <string name="share_source_current">Current playlist</string>
     <string name="share_source_url">Another URL…</string>
@@ -132,4 +131,21 @@
     <string name="share_not_m3u">That doesn\'t look like an M3U playlist.</string>
     <string name="share_file_failed">Could not read that file.</string>
     <string name="share_no_picker">No file picker on this TV — use a URL instead.</string>
+    <string name="playlists_title">Playlists</string>
+    <string name="playlists_hint">Keep several IPTV playlists and switch between them. Only one is active at a time — tapping one loads it.</string>
+    <string name="playlist_add">Add playlist</string>
+    <string name="playlist_add_title">Add playlist</string>
+    <string name="playlist_name_hint">Name (optional)</string>
+    <string name="playlist_url_hint">https://example.com/playlist.m3u</string>
+    <string name="playlist_added">Added %1$s</string>
+    <string name="playlist_switched">Switched to %1$s</string>
+    <string name="playlist_removed">Removed %1$s</string>
+    <string name="playlist_rename">Rename</string>
+    <string name="playlist_remove">Remove</string>
+    <string name="playlist_remove_confirm">Remove %1$s from your playlists?</string>
+    <string name="playlist_invalid_url">Enter a valid playlist URL (http:// or https://).</string>
+    <string name="playlist_cannot_remove_last">You need at least one playlist.</string>
+    <string name="playlist_received">Received playlist: %1$s</string>
+    <string name="playlist_import_failed">Could not import that playlist.</string>
+    <string name="playlist_active">Active</string>
 </resources>

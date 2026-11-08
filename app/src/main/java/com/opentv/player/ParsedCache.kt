@@ -21,13 +21,17 @@ import android.database.sqlite.SQLiteOpenHelper
  * Tables:
  *  - channels: one row per Channel, all fields (no primary key — a
  *    sloppy playlist can repeat a channel id, and the snapshot must
- *    round-trip the list verbatim).
+ *    round-trip the list verbatim). 4.8.0: a source_url column, so each
+ *    playlist keeps its own snapshot and switching playlists never
+ *    mixes them up.
  *  - epg: the merged EPG map verbatim — one row per programme per map
  *    key (a programme appears under both its channel id and its
  *    lowercased display-name key, exactly like the in-memory map), in
  *    write order (seq) so a round-trip preserves list order.
  *  - meta: snapshot provenance — the source URL and the save time, so a
- *    snapshot for a different playlist/EPG URL is never reused.
+ *    snapshot for a different playlist/EPG URL is never reused. 4.8.0:
+ *    the playlist save time is keyed per URL (playlist_saved_at_<hash>)
+ *    instead of a single shared key.
  *
  * Everything is best-effort: any failure returns null / does nothing and
  * the caller falls back to parsing. Writes are a single transaction, so
@@ -36,10 +40,11 @@ import android.database.sqlite.SQLiteOpenHelper
 object ParsedCache {
 
     private const val DB_NAME = "parsed_cache.db"
-    private const val DB_VERSION = 1
+    private const val DB_VERSION = 2
 
-    private const val META_PLAYLIST_URL = "playlist_url"
-    private const val META_PLAYLIST_SAVED_AT = "playlist_saved_at"
+    /** Meta key for a playlist's save time, keyed by its URL hash. */
+    private fun playlistSavedAtKey(url: String): String =
+        "playlist_saved_at_" + url.hashCode().toString(16)
     private const val META_EPG_URL = "epg_url"
     private const val META_EPG_SAVED_AT = "epg_saved_at"
 
@@ -49,7 +54,7 @@ object ParsedCache {
                 "CREATE TABLE channels (" +
                     "id TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL, " +
                     "group_name TEXT NOT NULL, logo TEXT, tvg_id TEXT, " +
-                    "number INTEGER NOT NULL)"
+                    "number INTEGER NOT NULL, source_url TEXT NOT NULL)"
             )
             db.execSQL(
                 "CREATE TABLE epg (" +
@@ -117,13 +122,12 @@ object ParsedCache {
         val db = open(context) ?: return null
         try {
             val meta = readMeta(db)
-            if (meta[META_PLAYLIST_URL] != url) return null
-            val savedAt = meta[META_PLAYLIST_SAVED_AT]?.toLongOrNull() ?: return null
+            val savedAt = meta[playlistSavedAtKey(url)]?.toLongOrNull() ?: return null
             val channels = ArrayList<Channel>(2048)
             db.rawQuery(
                 "SELECT id, name, url, group_name, logo, tvg_id, number " +
-                    "FROM channels ORDER BY number",
-                null
+                    "FROM channels WHERE source_url = ? ORDER BY number",
+                arrayOf(url)
             ).use { c ->
                 val idI = c.getColumnIndexOrThrow("id")
                 val nameI = c.getColumnIndexOrThrow("name")
@@ -152,17 +156,18 @@ object ParsedCache {
         }
     }
 
-    /** Replace the stored playlist snapshot (single transaction). */
+    /** Replace the stored playlist snapshot for this URL (single transaction).
+     * Other playlists' snapshots are left untouched. */
     fun writePlaylist(context: Context, url: String, channels: List<Channel>) {
         val db = open(context) ?: return
         try {
             db.beginTransaction()
             try {
-                db.delete("channels", null, null)
+                db.delete("channels", "source_url = ?", arrayOf(url))
                 val stmt = db.compileStatement(
                     "INSERT INTO channels " +
-                        "(id, name, url, group_name, logo, tvg_id, number) " +
-                        "VALUES (?,?,?,?,?,?,?)"
+                        "(id, name, url, group_name, logo, tvg_id, number, source_url) " +
+                        "VALUES (?,?,?,?,?,?,?,?)"
                 )
                 try {
                     for (ch in channels) {
@@ -173,13 +178,13 @@ object ParsedCache {
                         if (ch.logo == null) stmt.bindNull(5) else stmt.bindString(5, ch.logo)
                         if (ch.tvgId == null) stmt.bindNull(6) else stmt.bindString(6, ch.tvgId)
                         stmt.bindLong(7, ch.number.toLong())
+                        stmt.bindString(8, url)
                         stmt.executeInsert()
                     }
                 } finally {
                     stmt.close()
                 }
-                writeMeta(db, META_PLAYLIST_URL, url)
-                writeMeta(db, META_PLAYLIST_SAVED_AT, System.currentTimeMillis().toString())
+                writeMeta(db, playlistSavedAtKey(url), System.currentTimeMillis().toString())
                 db.setTransactionSuccessful()
             } finally {
                 db.endTransaction()

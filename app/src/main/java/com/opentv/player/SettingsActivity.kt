@@ -1,13 +1,17 @@
 package com.opentv.player
 
 import android.app.AlertDialog
+import android.content.Intent
+import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.util.TypedValue
+import android.view.Gravity
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,12 +21,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Lets the user change the M3U playlist URL, the (optional) XMLTV EPG URL,
- * and the (optional) recording upload URL. Also shows an About section
- * with the current app version, and (4.7.1) a "Share playlist" section
- * that temporarily hosts a playlist on this TV's Wi-Fi so other devices
- * on the same network can import it — the server stops itself after
- * 10 minutes. */
+/** Lets the user manage M3U playlists (4.8.0: several playlists, one
+ * active at a time), change the (optional) XMLTV EPG URL and the
+ * (optional) recording upload URL. Also shows an About section with the
+ * current app version, and (4.7.1) a "Share playlist" section that
+ * temporarily hosts a playlist on this TV's Wi-Fi so other devices on
+ * the same network can import it — the server stops itself after
+ * 10 minutes. (4.8.0) While sharing is on, other devices can also send
+ * a playlist TO this TV, which is added to the playlist list. */
 class SettingsActivity : FragmentActivity() {
 
     /** Ticks once a second while sharing, to refresh the countdown. */
@@ -56,28 +62,28 @@ class SettingsActivity : FragmentActivity() {
         findViewById<TextView>(R.id.about_version).text =
             getString(R.string.about_version, BuildConfig.VERSION_NAME)
 
-        val playlistUrl = findViewById<EditText>(R.id.playlist_url)
         val epgUrl = findViewById<EditText>(R.id.epg_url)
         val uploadUrl = findViewById<EditText>(R.id.upload_url)
-        playlistUrl.setText(PlaylistRepository.playlistUrl(this))
         epgUrl.setText(PlaylistRepository.epgUrl(this))
         uploadUrl.setText(PlaylistRepository.uploadUrl(this))
 
+        buildPlaylistsUi()
+
+        findViewById<Button>(R.id.add_playlist_button).setOnClickListener {
+            showAddPlaylistDialog()
+        }
+
         findViewById<Button>(R.id.save_button).setOnClickListener {
-            PlaylistRepository.setUrls(
-                this,
-                playlistUrl.text.toString().trim(),
-                epgUrl.text.toString().trim()
-            )
+            PlaylistRepository.setEpgUrl(this, epgUrl.text.toString().trim())
             PlaylistRepository.setUploadUrl(this, uploadUrl.text.toString().trim())
             finish()
         }
 
         findViewById<Button>(R.id.reset_button).setOnClickListener {
             PlaylistRepository.resetUrls(this)
-            playlistUrl.setText(PlaylistRepository.DEFAULT_PLAYLIST_URL)
             epgUrl.setText(PlaylistRepository.DEFAULT_EPG_URL)
             uploadUrl.setText("")
+            buildPlaylistsUi()
         }
 
         findViewById<Button>(R.id.unhide_button).setOnClickListener {
@@ -106,6 +112,188 @@ class SettingsActivity : FragmentActivity() {
         stopShareTicker()
     }
 
+    /** Restart the app's loading flow with the newly active playlist. */
+    private fun restartToMain() {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        startActivity(intent)
+        finish()
+    }
+
+    // ---- Playlists (4.8.0) -------------------------------------------------
+
+    /** One row per playlist: name + URL, the active one marked in green.
+     * Tap to activate (and reload); long-press for Rename / Remove. */
+    private fun buildPlaylistsUi() {
+        val container = findViewById<LinearLayout>(R.id.playlists_list)
+        container.removeAllViews()
+        val active = PlaylistRepository.activePlaylist(this)
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        for (playlist in PlaylistRepository.playlists(this)) {
+            val isActive = playlist.url == active.url
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.sidebar_row_bg)
+            }
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val nameView = TextView(this).apply {
+                text = playlist.name
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                typeface = Typeface.DEFAULT_BOLD
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            val urlView = TextView(this).apply {
+                text = playlist.url
+                setTextColor(0xFFAAAAAA.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            texts.addView(nameView)
+            texts.addView(urlView)
+            row.addView(texts)
+            if (isActive) {
+                val activeView = TextView(this).apply {
+                    text = getString(R.string.playlist_active)
+                    setTextColor(0xFF86C739.toInt())
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(dp(8), 0, 0, 0)
+                }
+                row.addView(activeView)
+            }
+            row.setOnClickListener {
+                if (isActive) return@setOnClickListener
+                if (PlaylistRepository.setActivePlaylist(this, playlist.url)) {
+                    Toast.makeText(
+                        this, getString(R.string.playlist_switched, playlist.name),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    restartToMain()
+                }
+            }
+            row.setOnLongClickListener {
+                showPlaylistOptionsDialog(playlist)
+                true
+            }
+            container.addView(row)
+        }
+    }
+
+    /** Rename / Remove for one playlist (long-press on its row). */
+    private fun showPlaylistOptionsDialog(playlist: PlaylistRepository.Playlist) {
+        val items = arrayOf(
+            getString(R.string.playlist_rename),
+            getString(R.string.playlist_remove)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(playlist.name)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showRenamePlaylistDialog(playlist)
+                    1 -> {
+                        AlertDialog.Builder(this)
+                            .setMessage(getString(R.string.playlist_remove_confirm, playlist.name))
+                            .setPositiveButton(R.string.playlist_remove) { _, _ ->
+                                val wasActive =
+                                    PlaylistRepository.activePlaylist(this).url == playlist.url
+                                if (PlaylistRepository.removePlaylist(this, playlist.url)) {
+                                    Toast.makeText(
+                                        this, getString(R.string.playlist_removed, playlist.name),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    // Removing the active playlist already
+                                    // activated the first remaining one.
+                                    if (wasActive) restartToMain() else buildPlaylistsUi()
+                                } else {
+                                    Toast.makeText(
+                                        this, R.string.playlist_cannot_remove_last,
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .show()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun showRenamePlaylistDialog(playlist: PlaylistRepository.Playlist) {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(playlist.name)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.playlist_rename)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                PlaylistRepository.renamePlaylist(this, playlist.url, input.text.toString())
+                buildPlaylistsUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Add a playlist: a name (optional — the host is used when blank)
+     * and an http/https M3U URL. */
+    private fun showAddPlaylistDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (16 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val nameInput = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            hint = getString(R.string.playlist_name_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        val urlInput = EditText(this).apply {
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            hint = getString(R.string.playlist_url_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        container.addView(nameInput)
+        container.addView(urlInput)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.playlist_add_title)
+            .setView(container)
+            .setPositiveButton(R.string.playlist_add) { _, _ ->
+                val entry = PlaylistRepository.addPlaylist(
+                    this, nameInput.text.toString(), urlInput.text.toString()
+                )
+                if (entry == null) {
+                    Toast.makeText(this, R.string.playlist_invalid_url, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(
+                        this, getString(R.string.playlist_added, entry.name),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    buildPlaylistsUi()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---- Share (4.7.1, 4.8.0) ----------------------------------------------
+
     /** Refresh the countdown once a second while the server is running. */
     private fun startShareTicker() {
         stopShareTicker()
@@ -126,7 +314,8 @@ class SettingsActivity : FragmentActivity() {
         shareTicker = null
     }
 
-    /** Show the share URL + countdown while running, else "Not sharing". */
+    /** Show the share URL + download URL + import URL + countdown while
+     * running, else "Not sharing". */
     private fun updateShareUi() {
         val status = findViewById<TextView>(R.id.share_status)
         val button = findViewById<Button>(R.id.share_button)
@@ -137,6 +326,7 @@ class SettingsActivity : FragmentActivity() {
                 R.string.share_running,
                 PlaylistShareServer.shareUrl ?: "",
                 PlaylistShareServer.downloadUrl ?: "",
+                PlaylistShareServer.importUrl ?: "",
                 countdown
             )
             button.setText(R.string.share_stop)
