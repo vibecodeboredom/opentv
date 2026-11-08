@@ -1,5 +1,7 @@
 # opentv
 
+> ⚠️ **Vibecoded:** this project was built by an AI agent (Muse) with a human steering it. It works, but treat it like a hobby project — expect rough edges, read the code before you trust it, and don't be surprised if something breaks.
+
 Open-source Android TV IPTV player. Native Leanback UI, M3U playlists, XMLTV EPG. Free forever — no ads, no accounts, no paid features.
 
 ## Features
