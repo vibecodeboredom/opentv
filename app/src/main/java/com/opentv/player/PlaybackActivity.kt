@@ -87,10 +87,17 @@ class PlaybackActivity : FragmentActivity() {
         const val EXTRA_RECORDING_URI = "recording_uri"
         const val EXTRA_RECORDING_NAME = "recording_name"
         const val EXTRA_RETRY_COUNT = "retry_count"
+        /** Set when this activity was started by a channel up/down press:
+         * the info overlay should flash briefly instead of the normal
+         * Left/Right duration. */
+        const val EXTRA_SHOW_BRIEF_INFO = "show_brief_info"
         /** Dead streams are common in the playlist — auto-try another random channel this many times. */
         private const val MAX_AUTO_RETRY = 3
         /** Overlay auto-hides after this long with no key press. */
         private const val OVERLAY_TIMEOUT_MS = 10_000L
+        /** Channel up/down flash: half the Left/Right overlay time, so
+         * zapping past a channel shows its info only briefly. */
+        private const val CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS = 5_000L
         /** Hold OK this long to open the context menu instead of the guide. */
         private const val LONG_PRESS_MS = 600L
     }
@@ -119,6 +126,10 @@ class PlaybackActivity : FragmentActivity() {
     /** Auto-hide for the overlay. */
     private val infoHandler = Handler(Looper.getMainLooper())
     private val hideInfoRunnable = Runnable { hideOverlay() }
+    /** True while the overlay up is a channel up/down flash (short
+     * timeout); the first Left/Right press upgrades it to the normal
+     * Left/Right timeout instead. */
+    private var overlayBrief = false
     /** Long-press OK: opens the context menu. */
     private val longPressRunnable = Runnable {
         longPressFired = true
@@ -194,6 +205,9 @@ class PlaybackActivity : FragmentActivity() {
         recordingUri = intent.getStringExtra(EXTRA_RECORDING_URI)
         recordingName = intent.getStringExtra(EXTRA_RECORDING_NAME)
         retryCount = intent.getIntExtra(EXTRA_RETRY_COUNT, 0)
+        // Started by a channel up/down press: flash the info overlay
+        // briefly once the EPG is in, instead of the now/next toast.
+        val briefInfo = intent.getBooleanExtra(EXTRA_SHOW_BRIEF_INFO, false)
 
         if (ch == null && recordingUri == null) {
             finish()
@@ -229,7 +243,19 @@ class PlaybackActivity : FragmentActivity() {
                 val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
                 nowProgramme = now
                 nextProgramme = next
-                if (now != null || next != null) {
+                if (briefInfo) {
+                    // Channel up/down: flash the info overlay briefly
+                    // with the real now/next data, instead of the toast
+                    // (the overlay shows the same info). Only if the
+                    // user hasn't already opened something else while
+                    // the EPG was loading — a late flash must not yank
+                    // the sidebar away or shorten a normal overlay.
+                    if (!channelSidebar.isVisible() &&
+                        overlay.visibility != View.VISIBLE
+                    ) {
+                        showChannelInfo(brief = true)
+                    }
+                } else if (now != null || next != null) {
                     val text = buildString {
                         now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
                         next?.let {
@@ -377,6 +403,14 @@ class PlaybackActivity : FragmentActivity() {
                         return true
                     }
                     if (overlayUp) {
+                        // A channel up/down flash upgrades to the normal
+                        // Left/Right timeout the first time the user
+                        // steers it — after that it behaves exactly like
+                        // a normal overlay (no timer reset on later keys).
+                        if (overlayBrief) {
+                            overlayBrief = false
+                            armHideTimer()
+                        }
                         // Only steer the strip when a strip tile has
                         // focus; the transport buttons below it keep
                         // normal Left/Right focus movement.
@@ -495,7 +529,10 @@ class PlaybackActivity : FragmentActivity() {
             val list = visible.ifEmpty { channels }
             val idx = list.indexOfFirst { it.id == currentId }.takeIf { it >= 0 } ?: return@launch
             val next = list[(idx + delta).mod(list.size)]
-            switchToChannel(next)
+            // Channel up/down restarts playback on the new channel and
+            // flashes its info briefly (4.7.3) instead of the normal
+            // Left/Right overlay duration.
+            switchToChannel(next, briefInfo = true)
         }
     }
 
@@ -529,8 +566,10 @@ class PlaybackActivity : FragmentActivity() {
     // Info overlay (restyled 4.6.0)
     // ------------------------------------------------------------------
 
-    /** Shows the channel info overlay; auto-hides after 10s idle. */
-    private fun showChannelInfo() {
+    /** Shows the channel info overlay; auto-hides after 10s idle.
+     * With [brief] (channel up/down), it hides after the shorter
+     * 5s flash timeout instead. */
+    private fun showChannelInfo(brief: Boolean = false) {
         hideSidebar()
         val ch = channel
         val name = recordingName ?: ch?.name ?: return
@@ -571,18 +610,21 @@ class PlaybackActivity : FragmentActivity() {
         // Focus the first tile so left/right + OK work straight away.
         // Deferred until after layout, so the focus actually sticks.
         infoStrip.post { stripTiles.firstOrNull()?.requestFocus() }
-        armHideTimer()
+        overlayBrief = brief
+        armHideTimer(brief)
     }
 
     private fun hideOverlay() {
         overlay.visibility = View.GONE
+        overlayBrief = false
         infoHandler.removeCallbacks(hideInfoRunnable)
         infoHandler.removeCallbacks(longPressRunnable)
     }
 
-    private fun armHideTimer() {
+    private fun armHideTimer(brief: Boolean = false) {
         infoHandler.removeCallbacks(hideInfoRunnable)
-        infoHandler.postDelayed(hideInfoRunnable, OVERLAY_TIMEOUT_MS)
+        val timeout = if (brief) CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS else OVERLAY_TIMEOUT_MS
+        infoHandler.postDelayed(hideInfoRunnable, timeout)
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -726,11 +768,12 @@ class PlaybackActivity : FragmentActivity() {
     }
 
     /** Switch playback to the given channel (used by a recent-channel tile). */
-    private fun switchToChannel(pick: Channel) {
+    private fun switchToChannel(pick: Channel, briefInfo: Boolean = false) {
         hideOverlay()
         hideSidebar()
         val intent = Intent(this, PlaybackActivity::class.java)
         intent.putExtra(EXTRA_CHANNEL, pick)
+        if (briefInfo) intent.putExtra(EXTRA_SHOW_BRIEF_INFO, true)
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         startActivity(intent)
         finish()
