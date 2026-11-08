@@ -243,7 +243,13 @@ class PlaybackActivity : FragmentActivity() {
                 val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
                 nowProgramme = now
                 nextProgramme = next
-                if (briefInfo) {
+                if (overlay.visibility == View.VISIBLE) {
+                    // The overlay was opened before the EPG finished
+                    // loading and still shows "No information" — refresh
+                    // it with the real now/next data, keeping its
+                    // current 5s/10s hide mode.
+                    showChannelInfo(brief = overlayBrief)
+                } else if (briefInfo) {
                     // Channel up/down: flash the info overlay briefly
                     // with the real now/next data, instead of the toast
                     // (the overlay shows the same info). Only if the
@@ -588,19 +594,24 @@ class PlaybackActivity : FragmentActivity() {
             val num = if (ch != null && ch.number > 0) "${ch.number} " else ""
             infoNowMeta.text = "${timeFormat.format(Date(nowP.startMillis))} – " +
                 "${timeFormat.format(Date(nowP.stopMillis))}  •  $mins min  •  $num$name"
+            infoNowMeta.visibility = View.VISIBLE
             val span = (nowP.stopMillis - nowP.startMillis).coerceAtLeast(1L)
             infoProgress.progress = ((now - nowP.startMillis) * 100 / span).toInt().coerceIn(0, 100)
         } else {
             infoNowTitle.text = getString(R.string.overlay_no_info)
             infoNowMeta.text = ""
+            infoNowMeta.visibility = View.GONE
             infoProgress.progress = 0
         }
         val nextP = nextProgramme
-        infoNext.text = if (nextP != null) {
-            "${timeFormat.format(Date(nextP.startMillis))} – " +
+        if (nextP != null) {
+            infoNext.text = "${timeFormat.format(Date(nextP.startMillis))} – " +
                 "${timeFormat.format(Date(nextP.stopMillis))}  •  ${nextP.title}"
+            infoNext.visibility = View.VISIBLE
         } else {
-            getString(R.string.overlay_no_info)
+            // No next programme: hide the line instead of a second
+            // "No information" under the big now-title.
+            infoNext.visibility = View.GONE
         }
         // Bottom bar title: the programme on now, or the channel name.
         transportTitle.text = nowP?.title ?: name
@@ -689,15 +700,15 @@ class PlaybackActivity : FragmentActivity() {
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isFocusableInTouchMode = true
-                setPadding(dp(4), dp(6), dp(4), dp(6))
-                layoutParams = LinearLayout.LayoutParams(dp(120), dp(60)).apply {
-                    marginEnd = dp(8)
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+                layoutParams = LinearLayout.LayoutParams(dp(100), dp(50)).apply {
+                    marginEnd = dp(6)
                 }
                 setBackgroundResource(R.drawable.tile_bg)
                 setOnClickListener { onClick() }
             }
             val icon = ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(24), dp(24))
+                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 if (logoUrl != null) {
                     load(logoUrl) {
@@ -711,7 +722,7 @@ class PlaybackActivity : FragmentActivity() {
             val labelView = TextView(this).apply {
                 text = label
                 setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -719,7 +730,7 @@ class PlaybackActivity : FragmentActivity() {
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(2) }
+                ).apply { topMargin = dp(1) }
             }
             tileView.addView(icon)
             tileView.addView(labelView)
