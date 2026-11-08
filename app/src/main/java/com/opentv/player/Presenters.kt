@@ -6,7 +6,7 @@ import androidx.leanback.widget.ImageCardView
 import androidx.leanback.widget.Presenter
 import coil.load
 
-/** Card for a channel: logo (or play icon) + name + group. */
+/** Card for a channel: logo (or play icon) + name + number + group. Rounded dark card. */
 class ChannelPresenter : Presenter() {
 
     override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
@@ -14,6 +14,7 @@ class ChannelPresenter : Presenter() {
         cardView.isFocusable = true
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
+        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
         return ViewHolder(cardView)
     }
 
@@ -21,7 +22,11 @@ class ChannelPresenter : Presenter() {
         val channel = item as Channel
         val cardView = viewHolder.view as ImageCardView
         cardView.titleText = channel.name
-        cardView.contentText = channel.group
+        cardView.contentText = if (channel.number > 0) {
+            "#${channel.number} • ${channel.group}"
+        } else {
+            channel.group
+        }
         cardView.mainImageView.load(channel.logo) {
             crossfade(true)
             placeholder(android.R.drawable.ic_media_play)
@@ -48,6 +53,7 @@ class ActionPresenter : Presenter() {
         cardView.isFocusable = true
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
+        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
         return ViewHolder(cardView)
     }
 
@@ -86,6 +92,7 @@ class RecordingPresenter : Presenter() {
         cardView.isFocusable = true
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
+        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
         return ViewHolder(cardView)
     }
 

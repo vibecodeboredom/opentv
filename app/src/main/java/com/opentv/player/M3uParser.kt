@@ -30,7 +30,8 @@ object M3uParser {
                         url = url,
                         group = attrs["group-title"]?.takeIf { it.isNotEmpty() } ?: "Other",
                         logo = attrs["tvg-logo"]?.takeIf { it.isNotEmpty() },
-                        tvgId = tvgId
+                        tvgId = tvgId,
+                        number = channels.size + 1
                     )
                     i += 2
                     continue

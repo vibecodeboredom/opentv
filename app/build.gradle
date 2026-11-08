@@ -11,8 +11,8 @@ android {
         applicationId 'com.opentv.player'
         minSdk 26
         targetSdk 35
-        versionCode 5
-        versionName '3.2.0'
+        versionCode 6
+        versionName '4.0.0'
     }
 
     // Fixed debug keystore (committed) so every CI build shares one

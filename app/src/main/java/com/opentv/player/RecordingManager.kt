@@ -1,6 +1,9 @@
 package com.opentv.player
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
@@ -121,6 +124,25 @@ object RecordingManager {
             context, RecordingService::class.java, id,
             STOP_REASON_USER_STOPPED, false
         )
+    }
+
+    /**
+     * Schedule an automatic stop for a recording (custom recording).
+     * Fires [RecordStopReceiver] at [stopAtMillis]; no exact-alarm
+     * permission needed (inexact, may land a few minutes late).
+     */
+    fun scheduleStopRecording(context: Context, channelId: String, stopAtMillis: Long) {
+        val intent = Intent(context, RecordStopReceiver::class.java).apply {
+            putExtra(RecordStopReceiver.EXTRA_CHANNEL_ID, channelId)
+        }
+        val pending = PendingIntent.getBroadcast(
+            context,
+            channelId.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, stopAtMillis, pending)
     }
 
     /** True while a channel's recording is actively downloading. */

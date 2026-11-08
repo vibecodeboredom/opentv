@@ -21,6 +21,8 @@ object PlaylistRepository {
     private const val KEY_EPG_URL = "epg_url"
     private const val KEY_UPLOAD_URL = "upload_url"
     private const val KEY_FAVORITES = "favorites"
+    private const val KEY_HIDDEN = "hidden_channels"
+    private const val KEY_EPG_OVERRIDES = "epg_overrides"
     private const val CACHE_FILE = "playlist.m3u"
 
     private fun prefs(context: Context): SharedPreferences =
@@ -62,6 +64,37 @@ object PlaylistRepository {
         val current = favorites(context).toMutableSet()
         if (current.contains(channelId)) current.remove(channelId) else current.add(channelId)
         prefs(context).edit().putStringSet(KEY_FAVORITES, current).apply()
+    }
+
+    /** Channels the user hid or blocked (by channel id). Hidden from guide + browser. */
+    fun hiddenChannels(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_HIDDEN, emptySet()) ?: emptySet()
+
+    fun hideChannel(context: Context, channelId: String) {
+        val current = hiddenChannels(context).toMutableSet()
+        current.add(channelId)
+        prefs(context).edit().putStringSet(KEY_HIDDEN, current).apply()
+    }
+
+    fun unhideAllChannels(context: Context) {
+        prefs(context).edit().remove(KEY_HIDDEN).apply()
+    }
+
+    /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */
+    fun epgOverrides(context: Context): Map<String, String> {
+        val raw = prefs(context).getString(KEY_EPG_OVERRIDES, "") ?: ""
+        if (raw.isBlank()) return emptyMap()
+        return raw.split("\n").mapNotNull { line ->
+            val idx = line.indexOf('=')
+            if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
+        }.toMap()
+    }
+
+    fun setEpgOverride(context: Context, channelId: String, tvgId: String) {
+        val current = epgOverrides(context).toMutableMap()
+        if (tvgId.isBlank()) current.remove(channelId) else current[channelId] = tvgId.trim()
+        val raw = current.entries.joinToString("\n") { "${it.key}=${it.value}" }
+        prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
     }
 
     /** Fetch the playlist from the network; fall back to the cached copy on failure. */

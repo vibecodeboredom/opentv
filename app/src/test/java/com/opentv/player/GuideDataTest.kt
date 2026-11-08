@@ -84,6 +84,60 @@ class GuideDataTest {
     }
 
     @Test
+    fun buildRowsSkipsHiddenChannels() {
+        val windowStart = 1_794_081_600_000L
+        val cnn = channel("CNN.us", "CNN")
+        val epg = mapOf(
+            "CNN.us" to listOf(
+                EpgParser.Programme("CNN.us", windowStart, windowStart + hour, "News")
+            )
+        )
+        val rows = GuideData.buildRows(
+            listOf(cnn), epg, windowStart, 6, hidden = setOf("CNN.us")
+        )
+        assertTrue(rows.isEmpty())
+    }
+
+    @Test
+    fun buildRowsUsesEpgOverride() {
+        val windowStart = 1_794_081_600_000L
+        // Channel's own tvg-id has no EPG, but the override points at one that does.
+        val ch = channel("custom.1", "Custom")
+        val epg = mapOf(
+            "CNN.us" to listOf(
+                EpgParser.Programme("CNN.us", windowStart, windowStart + hour, "News")
+            )
+        )
+        val rows = GuideData.buildRows(
+            listOf(ch), epg, windowStart, 6,
+            epgOverrides = mapOf("custom.1" to "CNN.us")
+        )
+        assertEquals(1, rows.size)
+        assertEquals("News", rows[0].programmes[0].title)
+    }
+
+    @Test
+    fun progressFractionIsHalfway() {
+        val start = 1_794_081_600_000L
+        val p = EpgParser.Programme("CNN.us", start, start + hour, "News")
+        assertEquals(0.5f, GuideData.progressFraction(p, start + hour / 2), 0.001f)
+    }
+
+    @Test
+    fun remainingMinutesCountsDown() {
+        val start = 1_794_081_600_000L
+        val p = EpgParser.Programme("CNN.us", start, start + hour, "News")
+        assertEquals(12L, GuideData.remainingMinutes(p, start + 48 * 60_000))
+    }
+
+    @Test
+    fun formatDateTimeIncludesDateAndClock() {
+        val text = GuideData.formatDateTime(1_794_081_600_000L)
+        assertTrue(text.contains("Nov"))
+        assertTrue(text.contains(":"))
+    }
+
+    @Test
     fun formatDateShowsWeekdayMonthDay() {
         // 2026-11-07 is a Saturday.
         val date = GuideData.formatDate(1_794_081_600_000L)

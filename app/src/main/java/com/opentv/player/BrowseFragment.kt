@@ -74,15 +74,17 @@ class BrowseFragment : BrowseSupportFragment() {
     private fun buildRows(channels: List<Channel>) {
         rowsAdapter.clear()
 
+        val hidden = PlaylistRepository.hiddenChannels(requireContext())
+        val visible = channels.filter { !hidden.contains(it.id) }
         val favorites = PlaylistRepository.favorites(requireContext())
-        val favoriteChannels = channels.filter { favorites.contains(it.id) }
+        val favoriteChannels = visible.filter { favorites.contains(it.id) }
         if (favoriteChannels.isNotEmpty()) {
             val favAdapter = ArrayObjectAdapter(ChannelPresenter())
             favoriteChannels.forEach { favAdapter.add(it) }
             rowsAdapter.add(ListRow(HeaderItem(getString(R.string.favorites)), favAdapter))
         }
 
-        val grouped = channels.groupBy { it.group }
+        val grouped = visible.groupBy { it.group }
         for ((group, groupChannels) in grouped) {
             val groupAdapter = ArrayObjectAdapter(ChannelPresenter())
             groupChannels.forEach { groupAdapter.add(it) }

@@ -7,7 +7,7 @@ Open-source Android TV IPTV player. Native Leanback UI, M3U playlists, XMLTV EPG
 ## Features
 
 - **Channel guide** — channels grouped by category, with logos, in a remote-first Leanback UI
-- **TV guide** — a full EPG grid like a real TV guide (channels with logos down the left, time across the top, programme cards in a timeline, a red now-line, search, and a Now button). The show on now is highlighted; pick it to start watching
+- **TV guide** — a full TiviMate-style EPG: a details header on top (preview box with the channel logo, programme title, time range, progress bar with minutes left, favorite star, category), then the grid — channel numbers, logos and names down the left, 30-minute time columns across the top, programme cards with rounded corners (the focused one turns white with dark text), and a red now-line. Long-press OK on a programme for the context menu: search, settings, open in external player, record, custom recording (auto-stops after 15/30/60/120 min), add to favorites, block/hide channel, assign EPG, channel options. Search filters channels and shows; the Now button jumps to the current time. The show on now is highlighted; pick it to start watching
 - **M3U playlists** — load any M3U URL; ships preloaded with the [iptv-org](https://github.com/iptv-org/iptv) US channels list
 - **Playback** — ExoPlayer (HLS / DASH) with the standard Android TV player controls
 - **EPG** — XMLTV now/next programme info while watching

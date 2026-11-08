@@ -36,5 +36,9 @@ class SettingsActivity : FragmentActivity() {
             epgUrl.setText(PlaylistRepository.DEFAULT_EPG_URL)
             uploadUrl.setText("")
         }
+
+        findViewById<Button>(R.id.unhide_button).setOnClickListener {
+            PlaylistRepository.unhideAllChannels(this)
+        }
     }
 }

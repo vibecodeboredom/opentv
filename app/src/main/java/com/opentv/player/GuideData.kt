@@ -27,17 +27,22 @@ object GuideData {
         return (nowMillis / hour) * hour
     }
 
-    /** Build the rows for the guide: only channels that have EPG data in the window. */
+    /** Build the rows for the guide: only channels that have EPG data in the window.
+     * Hidden channels are skipped; [epgOverrides] maps channel id -> tvg-id. */
     fun buildRows(
         channels: List<Channel>,
         epg: Map<String, List<EpgParser.Programme>>,
         windowStartMillis: Long,
-        windowHours: Int = 6
+        windowHours: Int = 6,
+        hidden: Set<String> = emptySet(),
+        epgOverrides: Map<String, String> = emptyMap()
     ): List<GuideRow> {
         val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
         val rows = mutableListOf<GuideRow>()
         for (channel in channels) {
-            val key = channel.tvgId ?: continue
+            if (hidden.contains(channel.id)) continue
+            val key = epgOverrides[channel.id]?.takeIf { it.isNotEmpty() }
+                ?: channel.tvgId ?: continue
             val programmes = (epg[key] ?: continue)
                 .filter { it.stopMillis > windowStartMillis && it.startMillis < windowEnd }
                 .sortedBy { it.startMillis }
@@ -87,6 +92,23 @@ object GuideData {
     /** Format a programme's time span as "8:00 – 9:00 PM". */
     fun formatTimeRange(startMillis: Long, stopMillis: Long): String =
         "${formatClock(startMillis)} – ${formatClock(stopMillis)}"
+
+    /** Fraction of a programme already aired (0.0–1.0) for the progress bar. */
+    fun progressFraction(
+        programme: EpgParser.Programme,
+        nowMillis: Long
+    ): Float {
+        val total = (programme.stopMillis - programme.startMillis).coerceAtLeast(1L)
+        return ((nowMillis - programme.startMillis).toFloat() / total).coerceIn(0f, 1f)
+    }
+
+    /** Whole minutes left in a programme ("48 min"). */
+    fun remainingMinutes(programme: EpgParser.Programme, nowMillis: Long): Long =
+        maxOf((programme.stopMillis - nowMillis) / 60_000L, 0L)
+
+    /** Format date + clock as "Sat, Nov 7, 10:12 PM" for the guide header. */
+    fun formatDateTime(millis: Long): String =
+        "${formatDate(millis)}, ${formatClock(millis)}"
 
     /** Format the guide date as "Sat, Nov 7". */
     fun formatDate(millis: Long): String {

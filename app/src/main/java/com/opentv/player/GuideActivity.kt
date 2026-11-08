@@ -1,13 +1,21 @@
 package com.opentv.player
 
+import android.app.AlertDialog
+import android.app.Dialog
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -24,14 +32,20 @@ import coil.load
 import kotlinx.coroutines.launch
 
 /**
- * The TV guide, built to look like a real TV guide (TiviMate / cable):
- * channels down the left with logos, time across the top, programme cards
- * in a timeline grid, a red current-time line, and a search bar.
+ * The TV guide, TiviMate style (v4.0):
+ * - Details header on top: preview box with the channel logo, programme
+ *   title, time range, progress bar with minutes left, favorite star,
+ *   and the channel's category. It follows the focused programme.
+ * - Grid: channel numbers + logos + names down the left, 30-minute time
+ *   columns across the top, programme cards with rounded corners. The
+ *   focused card turns white with dark text. Red current-time line.
+ * - Long-press OK on a programme opens the context menu (search, settings,
+ *   external player, record, custom recording, favorites, block/hide,
+ *   assign EPG, channel options).
+ * - Search filters channels and programme titles. "Now" jumps to the
+ *   current time.
  *
- * A 6-hour window starting at the top of the current hour. The show on now
- * is highlighted blue. Pick a programme that's on now to start watching;
- * a future programme shows when it starts. Search filters channels and
- * programme titles. "Now" jumps the grid to the current time.
+ * A 6-hour window starting at the top of the current hour.
  */
 class GuideActivity : FragmentActivity() {
 
@@ -43,11 +57,26 @@ class GuideActivity : FragmentActivity() {
     private lateinit var emptyView: TextView
     private lateinit var searchBox: EditText
 
+    private lateinit var detailLogo: ImageView
+    private lateinit var detailChannel: TextView
+    private lateinit var detailTitle: TextView
+    private lateinit var detailStar: TextView
+    private lateinit var detailTime: TextView
+    private lateinit var detailProgress: ProgressBar
+    private lateinit var detailRemaining: TextView
+    private lateinit var detailCategory: TextView
+
     private var allRows: List<GuideData.GuideRow> = emptyList()
+    private var allChannels: List<Channel> = emptyList()
+    private var epg: Map<String, List<EpgParser.Programme>> = emptyMap()
     private var windowStart: Long = 0L
     private var nowMillis: Long = 0L
     private var pxPerMinute: Int = 0
     private var channelColWidth: Int = 0
+
+    /** The programme the details header is currently showing. */
+    private var detailChannelShown: Channel? = null
+    private var detailProgrammeShown: EpgParser.Programme? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,11 +89,18 @@ class GuideActivity : FragmentActivity() {
         emptyView = findViewById(R.id.guide_empty)
         searchBox = findViewById(R.id.guide_search)
 
+        detailLogo = findViewById(R.id.guide_detail_logo)
+        detailChannel = findViewById(R.id.guide_detail_channel)
+        detailTitle = findViewById(R.id.guide_detail_title)
+        detailStar = findViewById(R.id.guide_detail_star)
+        detailTime = findViewById(R.id.guide_detail_time)
+        detailProgress = findViewById(R.id.guide_detail_progress)
+        detailRemaining = findViewById(R.id.guide_detail_remaining)
+        detailCategory = findViewById(R.id.guide_detail_category)
+
         pxPerMinute = dpToPx(PX_PER_MINUTE_DP)
         channelColWidth = dpToPx(CHANNEL_COL_DP)
 
-        findViewById<TextView>(R.id.guide_date).text =
-            GuideData.formatDate(System.currentTimeMillis())
         findViewById<Button>(R.id.guide_now_button).setOnClickListener { scrollToNow() }
         searchBox.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -73,15 +109,27 @@ class GuideActivity : FragmentActivity() {
                 applySearch(s?.toString().orEmpty())
             }
         })
+        detailStar.setOnClickListener {
+            val ch = detailChannelShown ?: return@setOnClickListener
+            PlaylistRepository.toggleFavorite(this, ch.id)
+            updateDetailStar(ch)
+            val added = PlaylistRepository.favorites(this).contains(ch.id)
+            Toast.makeText(
+                this,
+                if (added) R.string.menu_added_favorite else R.string.menu_removed_favorite,
+                Toast.LENGTH_SHORT
+            ).show()
+        }
 
         lifecycleScope.launch {
             val playlistResult = PlaylistRepository.loadPlaylist(this@GuideActivity)
-            val epg = PlaylistRepository.loadEpg(this@GuideActivity)
+            epg = PlaylistRepository.loadEpg(this@GuideActivity)
             loading.visibility = View.GONE
             playlistResult.onSuccess { channels ->
                 nowMillis = System.currentTimeMillis()
                 windowStart = GuideData.windowStartMillis(nowMillis)
-                allRows = GuideData.buildRows(channels, epg, windowStart, WINDOW_HOURS)
+                allChannels = channels
+                rebuildRows()
                 if (allRows.isEmpty()) {
                     Toast.makeText(
                         this@GuideActivity,
@@ -99,6 +147,14 @@ class GuideActivity : FragmentActivity() {
                 finish()
             }
         }
+    }
+
+    private fun rebuildRows() {
+        allRows = GuideData.buildRows(
+            allChannels, epg, windowStart, WINDOW_HOURS,
+            hidden = PlaylistRepository.hiddenChannels(this),
+            epgOverrides = PlaylistRepository.epgOverrides(this)
+        )
     }
 
     private fun applySearch(query: String) {
@@ -130,6 +186,47 @@ class GuideActivity : FragmentActivity() {
         hscroll.post { hscroll.smoothScrollTo(maxOf(targetX - dpToPx(120), 0), 0) }
     }
 
+    /** Show a channel + programme in the details header. */
+    private fun showDetails(channel: Channel, programme: EpgParser.Programme) {
+        detailChannelShown = channel
+        detailProgrammeShown = programme
+        detailTitle.text = programme.title
+        detailTime.text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
+        detailChannel.text = if (channel.number > 0) {
+            "${channel.number}  ${channel.name}"
+        } else {
+            channel.name
+        }
+        detailCategory.text = channel.group
+        detailLogo.load(channel.logo) {
+            placeholder(android.R.drawable.ic_media_play)
+            error(android.R.drawable.ic_media_play)
+        }
+        val isNow = nowMillis in programme.startMillis until programme.stopMillis
+        if (isNow) {
+            detailProgress.progress =
+                (GuideData.progressFraction(programme, nowMillis) * 100).toInt()
+            detailRemaining.text = getString(
+                R.string.guide_min_left,
+                GuideData.remainingMinutes(programme, nowMillis)
+            )
+            detailProgress.visibility = View.VISIBLE
+            detailRemaining.visibility = View.VISIBLE
+        } else {
+            detailProgress.visibility = View.INVISIBLE
+            detailRemaining.visibility = View.INVISIBLE
+        }
+        updateDetailStar(channel)
+    }
+
+    private fun updateDetailStar(channel: Channel) {
+        val isFav = PlaylistRepository.favorites(this).contains(channel.id)
+        detailStar.text = if (isFav) "★" else "☆"
+        detailStar.setTextColor(
+            if (isFav) 0xFFFFC107.toInt() else 0xFF7A7A85.toInt()
+        )
+    }
+
     private fun buildGuide(rows: List<GuideData.GuideRow>) {
         container.removeAllViews()
         nowLine.visibility = View.GONE
@@ -137,7 +234,7 @@ class GuideActivity : FragmentActivity() {
         val cellHeight = dpToPx(CELL_HEIGHT_DP)
         val cellMargin = dpToPx(CELL_MARGIN_DP)
 
-        // Time header: channel column spacer + one label per hour.
+        // Time header: date + current time, then one label per 30 minutes.
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(0xFF121218.toInt())
@@ -146,25 +243,32 @@ class GuideActivity : FragmentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
-        header.addView(View(this).apply {
+        header.addView(TextView(this).apply {
+            text = GuideData.formatDateTime(nowMillis)
+            setTextColor(0xFF9A9AA3.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(12), 0, dpToPx(12), 0)
             layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
         })
-        for (h in 0 until WINDOW_HOURS) {
+        for (m in 0 until WINDOW_HOURS * 60 step 30) {
             val label = TextView(this).apply {
-                text = GuideData.formatHourLabel(windowStart + h * 60L * 60 * 1000)
+                text = GuideData.formatHourLabel(windowStart + m * 60L * 1000)
                 setTextColor(0xFF9A9AA3.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
-                    (pxPerMinute * 60).toInt(), cellHeight
+                    (pxPerMinute * 30).toInt(), cellHeight
                 )
             }
             header.addView(label)
         }
         container.addView(header)
 
-        // One row per channel: logo + name, then programme cards.
+        // One row per channel: number + logo + name, then programme cards.
+        var firstNow: Pair<Channel, EpgParser.Programme>? = null
         for (row in rows) {
             val rowLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -174,13 +278,26 @@ class GuideActivity : FragmentActivity() {
                 ).apply { topMargin = cellMargin }
             }
 
-            // Channel cell: logo + name + group.
+            // Channel cell: number + logo + name + group.
             val channelCell = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setBackgroundColor(0xFF121218.toInt())
                 setPadding(dpToPx(12), 0, dpToPx(12), 0)
                 layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
+            }
+            if (row.channel.number > 0) {
+                channelCell.addView(TextView(this).apply {
+                    text = row.channel.number.toString()
+                    setTextColor(0xFF3B82F6.toInt())
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER_VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        dpToPx(44),
+                        LinearLayout.LayoutParams.MATCH_PARENT
+                    )
+                })
             }
             val logo = ImageView(this).apply {
                 layoutParams = LinearLayout.LayoutParams(dpToPx(48), dpToPx(48)).apply {
@@ -232,6 +349,7 @@ class GuideActivity : FragmentActivity() {
                 }
                 val isNow = nowMillis in programme.startMillis until programme.stopMillis
                 val isPast = programme.stopMillis <= nowMillis
+                if (isNow && firstNow == null) firstNow = row.channel to programme
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -252,27 +370,51 @@ class GuideActivity : FragmentActivity() {
                         leftMargin = cellMargin
                         rightMargin = cellMargin
                     }
-                    setOnClickListener { onProgrammeClicked(row.channel, programme) }
                 }
-                card.addView(TextView(this).apply {
+                val titleView = TextView(this).apply {
                     text = programme.title
                     setTextColor(if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt())
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                     typeface = Typeface.DEFAULT_BOLD
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
-                })
-                card.addView(TextView(this).apply {
+                }
+                val timeView = TextView(this).apply {
                     text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
                     setTextColor(if (isPast) 0xFF55555F.toInt() else 0xFFC9C9D1.toInt())
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                     maxLines = 1
-                })
+                }
+                card.addView(titleView)
+                card.addView(timeView)
+                card.setOnClickListener { onProgrammeClicked(row.channel, programme) }
+                card.setOnLongClickListener {
+                    showContextMenu(row.channel, programme)
+                    true
+                }
+                card.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
+                    if (hasFocus) {
+                        // Focused card turns white with dark text (TiviMate look).
+                        titleView.setTextColor(0xFF121218.toInt())
+                        timeView.setTextColor(0xFF55555F.toInt())
+                        showDetails(row.channel, programme)
+                    } else {
+                        titleView.setTextColor(
+                            if (isPast) 0xFF6B6B75.toInt() else 0xFFFFFFFF.toInt()
+                        )
+                        timeView.setTextColor(
+                            if (isPast) 0xFF55555F.toInt() else 0xFFC9C9D1.toInt()
+                        )
+                    }
+                }
                 rowLayout.addView(card)
                 posMinutes = layout.startOffsetMinutes + layout.widthMinutes
             }
             container.addView(rowLayout)
         }
+
+        // Show the first programme on now in the details header.
+        firstNow?.let { (ch, prog) -> showDetails(ch, prog) }
 
         // Position the red now-line at the current time, spanning all rows.
         val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L
@@ -304,6 +446,186 @@ class GuideActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * The context menu (long-press OK on a programme), TiviMate style:
+     * a rounded panel with search, settings, and programme/channel actions.
+     */
+    private fun showContextMenu(channel: Channel, programme: EpgParser.Programme) {
+        val dialog = Dialog(this)
+        dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        val view = layoutInflater.inflate(R.layout.dialog_guide_menu, null)
+        dialog.setContentView(view)
+        dialog.window?.setLayout(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+
+        val menuSearch = view.findViewById<EditText>(R.id.menu_search)
+        menuSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                applySearch(s?.toString().orEmpty())
+            }
+        })
+        menuSearch.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                dialog.dismiss()
+                true
+            } else false
+        }
+
+        view.findViewById<TextView>(R.id.menu_settings).setOnClickListener {
+            dialog.dismiss()
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        view.findViewById<TextView>(R.id.menu_programme_title).text = programme.title
+
+        view.findViewById<TextView>(R.id.menu_external_player).setOnClickListener {
+            dialog.dismiss()
+            openExternalPlayer(channel)
+        }
+
+        val recordRow = view.findViewById<TextView>(R.id.menu_record)
+        val isRecording = RecordingManager.isRecording(this, channel.id)
+        recordRow.text = getString(
+            if (isRecording) R.string.menu_stop_recording else R.string.menu_record
+        )
+        recordRow.setOnClickListener {
+            dialog.dismiss()
+            if (RecordingManager.isRecording(this, channel.id)) {
+                RecordingManager.stopRecording(this, channel.id)
+                Toast.makeText(this, R.string.recording_stopped, Toast.LENGTH_SHORT).show()
+            } else {
+                RecordingManager.startRecording(this, channel)
+                Toast.makeText(this, R.string.recording_started, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        view.findViewById<TextView>(R.id.menu_custom_recording).setOnClickListener {
+            dialog.dismiss()
+            showCustomRecordingPicker(channel)
+        }
+
+        view.findViewById<TextView>(R.id.menu_channel_name).text =
+            if (channel.number > 0) "${channel.number}  ${channel.name}" else channel.name
+
+        val favoriteRow = view.findViewById<TextView>(R.id.menu_favorite)
+        val isFav = PlaylistRepository.favorites(this).contains(channel.id)
+        favoriteRow.text = getString(
+            if (isFav) R.string.menu_remove_favorite else R.string.menu_add_favorite
+        )
+        favoriteRow.setOnClickListener {
+            dialog.dismiss()
+            PlaylistRepository.toggleFavorite(this, channel.id)
+            val added = PlaylistRepository.favorites(this).contains(channel.id)
+            Toast.makeText(
+                this,
+                if (added) R.string.menu_added_favorite else R.string.menu_removed_favorite,
+                Toast.LENGTH_SHORT
+            ).show()
+            detailChannelShown?.let { updateDetailStar(it) }
+        }
+
+        view.findViewById<TextView>(R.id.menu_block).setOnClickListener {
+            dialog.dismiss()
+            PlaylistRepository.hideChannel(this, channel.id)
+            Toast.makeText(this, R.string.menu_channel_blocked, Toast.LENGTH_SHORT).show()
+            rebuildRows()
+            buildGuide(allRows)
+        }
+
+        view.findViewById<TextView>(R.id.menu_hide).setOnClickListener {
+            dialog.dismiss()
+            PlaylistRepository.hideChannel(this, channel.id)
+            Toast.makeText(this, R.string.menu_channel_hidden, Toast.LENGTH_SHORT).show()
+            rebuildRows()
+            buildGuide(allRows)
+        }
+
+        view.findViewById<TextView>(R.id.menu_assign_epg).setOnClickListener {
+            dialog.dismiss()
+            showAssignEpgDialog(channel)
+        }
+
+        view.findViewById<TextView>(R.id.menu_channel_options).setOnClickListener {
+            dialog.dismiss()
+            showChannelOptions(channel)
+        }
+
+        dialog.show()
+    }
+
+    private fun openExternalPlayer(channel: Channel) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(Uri.parse(channel.url), "video/*")
+            }
+            startActivity(Intent.createChooser(intent, channel.name))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.menu_no_external_player, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showCustomRecordingPicker(channel: Channel) {
+        val minutes = intArrayOf(15, 30, 60, 120)
+        val labels = minutes.map { "$it min" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.menu_recording_duration)
+            .setItems(labels) { _, which ->
+                val duration = minutes[which]
+                RecordingManager.startRecording(this, channel)
+                RecordingManager.scheduleStopRecording(
+                    this, channel.id,
+                    System.currentTimeMillis() + duration * 60_000L
+                )
+                Toast.makeText(
+                    this,
+                    getString(R.string.menu_recording_for, duration),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showAssignEpgDialog(channel: Channel) {
+        val input = EditText(this).apply {
+            setText(PlaylistRepository.epgOverrides(this@GuideActivity)[channel.id]
+                ?: channel.tvgId.orEmpty())
+            hint = getString(R.string.menu_assign_epg_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.menu_assign_epg_title, channel.name))
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                PlaylistRepository.setEpgOverride(this, channel.id, input.text.toString())
+                Toast.makeText(this, R.string.menu_epg_assigned, Toast.LENGTH_SHORT).show()
+                rebuildRows()
+                buildGuide(allRows)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showChannelOptions(channel: Channel) {
+        val details = getString(
+            R.string.menu_channel_details,
+            channel.number,
+            channel.name,
+            channel.group,
+            channel.tvgId ?: "—"
+        )
+        AlertDialog.Builder(this)
+            .setTitle(channel.name)
+            .setMessage(details)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
     private fun dpToPx(dp: Int): Int =
         TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP,
@@ -314,7 +636,7 @@ class GuideActivity : FragmentActivity() {
     companion object {
         private const val WINDOW_HOURS = 6
         private const val PX_PER_MINUTE_DP = 4
-        private const val CHANNEL_COL_DP = 280
+        private const val CHANNEL_COL_DP = 320
         private const val CELL_HEIGHT_DP = 72
         private const val CELL_MARGIN_DP = 3
     }

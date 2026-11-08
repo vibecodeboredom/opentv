@@ -11,7 +11,9 @@ data class Channel(
     val url: String,
     val group: String,
     val logo: String?,
-    val tvgId: String?
+    val tvgId: String?,
+    /** Position in the playlist (1-based), shown as the channel number. */
+    val number: Int = 0
 ) : Serializable
 
 /** A small action card shown in the OpenTV row (settings / refresh). */

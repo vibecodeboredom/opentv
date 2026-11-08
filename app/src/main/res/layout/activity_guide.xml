@@ -6,40 +6,132 @@
     android:background="#0B0B0E"
     android:padding="16dp">
 
-    <!-- Top bar: title + date, search, jump-to-now. -->
+    <!-- Details header: preview box + selected programme info (TiviMate style). -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:orientation="horizontal">
+
+        <!-- Preview box: selected channel's logo. -->
+        <FrameLayout
+            android:layout_width="360dp"
+            android:layout_height="match_parent"
+            android:background="@drawable/guide_preview_bg">
+
+            <ImageView
+                android:id="@+id/guide_detail_logo"
+                android:layout_width="120dp"
+                android:layout_height="120dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/guide_preview" />
+
+            <TextView
+                android:id="@+id/guide_detail_channel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="12dp"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1" />
+        </FrameLayout>
+
+        <!-- Programme details. -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="24dp"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/guide_detail_title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="#FFFFFF"
+                    android:textSize="28sp"
+                    android:textStyle="bold"
+                    android:maxLines="1" />
+
+                <!-- Favorite star: tap to favorite/unfavorite the channel. -->
+                <TextView
+                    android:id="@+id/guide_detail_star"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:text="☆"
+                    android:textColor="#7A7A85"
+                    android:textSize="32sp"
+                    android:focusable="true"
+                    android:clickable="true"
+                    android:padding="8dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/guide_detail_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#C9C9D1"
+                    android:textSize="16sp" />
+
+                <ProgressBar
+                    android:id="@+id/guide_detail_progress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="200dp"
+                    android:layout_height="8dp"
+                    android:layout_marginStart="16dp"
+                    android:max="100"
+                    android:progress="0"
+                    android:progressDrawable="@drawable/guide_progress_drawable" />
+
+                <TextView
+                    android:id="@+id/guide_detail_remaining"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:textColor="#C9C9D1"
+                    android:textSize="16sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/guide_detail_category"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginTop="48dp"
+                android:textColor="#9A9AA3"
+                android:textSize="16sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Search + jump-to-now. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
         android:orientation="horizontal"
         android:gravity="center_vertical">
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/tv_guide"
-                android:textColor="@android:color/white"
-                android:textSize="28sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/guide_date"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="#9A9AA3"
-                android:textSize="15sp" />
-        </LinearLayout>
 
         <EditText
             android:id="@+id/guide_search"
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_weight="1"
-            android:layout_marginStart="32dp"
             android:layout_marginEnd="16dp"
             android:background="@drawable/guide_search_bg"
             android:hint="@string/guide_search_hint"
@@ -59,7 +151,6 @@
             android:text="@string/guide_now"
             android:textColor="@android:color/white"
             android:background="@drawable/guide_now_button_bg" />
-
     </LinearLayout>
 
     <ProgressBar
