@@ -28,8 +28,11 @@ import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import coil.load
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The TV guide, rebuilt from scratch (v4.0.1) to match the TiviMate
@@ -191,40 +194,59 @@ class GuideActivity : FragmentActivity() {
             val playlistDeferred = async { PlaylistRepository.loadPlaylist(this@GuideActivity) }
             val epgDeferred = async { PlaylistRepository.loadEpg(this@GuideActivity) }
             val playlistResult = playlistDeferred.await()
+            // 4.8.1 — build ONCE when the EPG is already ready. The EPG
+            // is usually in memory (playback loaded it at startup), so
+            // the old code built the grid with placeholders and then —
+            // because the EPG await returned immediately — ran the
+            // fill-in in the SAME main-thread slice, before the first
+            // frame drew. The guide did two full row computations and
+            // built every programme card twice before anything
+            // appeared. Wait a beat for the EPG (capped, so a cold
+            // start still paints placeholders fast) and build once
+            // with real data when it's there.
+            val epgReady = withTimeoutOrNull(EPG_WAIT_MS) { epgDeferred.await() }
+            if (epgReady != null) epg = epgReady
             loading.visibility = View.GONE
-            playlistResult.onSuccess { channels ->
-                nowMillis = System.currentTimeMillis()
-                windowStart = GuideData.windowStartMillis(nowMillis)
-                allChannels = channels
-                rebuildRows()
-                if (allRows.isEmpty()) {
-                    Toast.makeText(
-                        this@GuideActivity,
-                        R.string.no_guide_data,
-                        Toast.LENGTH_LONG
-                    ).show()
-                    finish()
-                    return@onSuccess
-                }
-                buildGuide(allRows)
-                scroll.visibility = View.VISIBLE
-                // Don't auto-scroll: the channel column (numbers + names)
-                // stays pinned at the left, like the reference photo.
-                // The red now-line marks the current time; the user scrolls
-                // right to see later programmes.
-                // EPG fills in when it arrives — in place (4.7.2), not
-                // by rebuilding the whole grid. The guide used to tear
-                // down all 400 rows and rebuild them a second time here,
-                // freezing the UI again just after it first appeared.
-                // Skip the fill-in when the EPG came back empty — the
-                // placeholders are already showing.
-                epg = epgDeferred.await()
-                if (epg.isNotEmpty()) {
-                    updateRowsWithEpg()
-                }
-            }.onFailure {
+            val channels = playlistResult.getOrNull()
+            if (channels == null) {
                 Toast.makeText(this@GuideActivity, R.string.load_failed, Toast.LENGTH_LONG).show()
                 finish()
+                return@launch
+            }
+            nowMillis = System.currentTimeMillis()
+            windowStart = GuideData.windowStartMillis(nowMillis)
+            allChannels = channels
+            rebuildRows()
+            if (allRows.isEmpty()) {
+                Toast.makeText(
+                    this@GuideActivity,
+                    R.string.no_guide_data,
+                    Toast.LENGTH_LONG
+                ).show()
+                finish()
+                return@launch
+            }
+            buildGuide(allRows)
+            scroll.visibility = View.VISIBLE
+            // Don't auto-scroll: the channel column (numbers + names)
+            // stays pinned at the left, like the reference photo.
+            // The red now-line marks the current time; the user scrolls
+            // right to see later programmes.
+            // EPG not in hand yet: fill it in when it lands — posted
+            // to the next frame, so the first paint (placeholders)
+            // happens BEFORE the fill-in work, not after it.
+            if (epg.isEmpty()) {
+                lifecycleScope.launch {
+                    val arrived = epgDeferred.await()
+                    if (arrived.isNotEmpty() && !isDestroyed && !isFinishing) {
+                        epg = arrived
+                        scroll.post {
+                            if (!isDestroyed && !isFinishing) {
+                                lifecycleScope.launch { updateRowsWithEpg() }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -346,12 +368,24 @@ class GuideActivity : FragmentActivity() {
         startActivity(intent)
     }
 
-    private fun rebuildRows() {
-        allRows = GuideData.buildRows(
-            allChannels, epg, windowStart, WINDOW_HOURS,
-            hidden = PlaylistRepository.hiddenChannels(this),
-            epgOverrides = PlaylistRepository.epgOverrides(this)
-        )
+    /**
+     * Recompute the guide rows for the current channels + EPG.
+     * Pure computation (GuideData is Android-free), so it runs on
+     * Dispatchers.Default — the open path used to do this on the main
+     * thread, twice per open (placeholders, then real EPG), before the
+     * first paint. The prefs reads are captured on the main thread;
+     * the filtering/sorting runs in the background.
+     */
+    private suspend fun rebuildRows() {
+        val channels = allChannels
+        val epgMap = epg
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val overrides = PlaylistRepository.epgOverrides(this)
+        allRows = withContext(Dispatchers.Default) {
+            GuideData.buildRows(
+                channels, epgMap, windowStart, WINDOW_HOURS, hidden, overrides
+            )
+        }
     }
 
     private fun applySearch(query: String) {
@@ -448,8 +482,17 @@ class GuideActivity : FragmentActivity() {
         nowLine.visibility = View.GONE
 
         buildGuideHeader(dpToPx(CELL_HEIGHT_DP))
-        appendRows(GUIDE_INITIAL_ROWS)
-        finishGuideBuild()
+        // 4.8.1: build only the first screenful synchronously — the
+        // first paint was blocked by inflating all 24 rows, and only
+        // ~6 fit on screen at once. The rest of the initial rows, plus
+        // the details header + focus, follow on the next frame.
+        appendRows(GUIDE_FIRST_PAINT_ROWS)
+        val generation = guideBuildGeneration
+        container.post {
+            if (generation != guideBuildGeneration) return@post
+            appendRows(GUIDE_INITIAL_ROWS - GUIDE_FIRST_PAINT_ROWS)
+            finishGuideBuild()
+        }
     }
 
     /** Build the next chunk of display rows (one pinned channel cell +
@@ -750,7 +793,7 @@ class GuideActivity : FragmentActivity() {
      * untouched. Falls back to a full (now lazy, fast) rebuild when a
      * search is active or the channel list itself changed.
      */
-    private fun updateRowsWithEpg() {
+    private suspend fun updateRowsWithEpg() {
         rebuildRows()
         val sameChannels = displayRows.size == allRows.size &&
             displayRows.indices.all { displayRows[it].channel.id == allRows[it].channel.id }
@@ -973,16 +1016,20 @@ class GuideActivity : FragmentActivity() {
             dialog.dismiss()
             PlaylistRepository.hideChannel(this, channel.id)
             Toast.makeText(this, R.string.menu_channel_blocked, Toast.LENGTH_SHORT).show()
-            rebuildRows()
-            buildGuide(allRows)
+            lifecycleScope.launch {
+                rebuildRows()
+                buildGuide(allRows)
+            }
         }
 
         view.findViewById<TextView>(R.id.menu_hide).setOnClickListener {
             dialog.dismiss()
             PlaylistRepository.hideChannel(this, channel.id)
             Toast.makeText(this, R.string.menu_channel_hidden, Toast.LENGTH_SHORT).show()
-            rebuildRows()
-            buildGuide(allRows)
+            lifecycleScope.launch {
+                rebuildRows()
+                buildGuide(allRows)
+            }
         }
 
         view.findViewById<TextView>(R.id.menu_assign_epg).setOnClickListener {
@@ -1045,8 +1092,10 @@ class GuideActivity : FragmentActivity() {
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 PlaylistRepository.setEpgOverride(this, channel.id, input.text.toString())
                 Toast.makeText(this, R.string.menu_epg_assigned, Toast.LENGTH_SHORT).show()
-                rebuildRows()
-                buildGuide(allRows)
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -1087,6 +1136,14 @@ class GuideActivity : FragmentActivity() {
          * screens), and rows appended per lazy chunk as the user
          * scrolls. The grid used to inflate all 400 rows eagerly. */
         private const val GUIDE_INITIAL_ROWS = 24
+        /** Rows built synchronously for the first paint (4.8.1) — only
+         * ~6 fit on screen at once, so 12 covers ~2 screens; the rest
+         * of the initial rows follow on the next frame. */
+        private const val GUIDE_FIRST_PAINT_ROWS = 12
+        /** How long the guide waits for the EPG before painting with
+         * placeholders (4.8.1). The EPG is usually in memory, so the
+         * wait is ~0ms and the guide builds once with real data. */
+        private const val EPG_WAIT_MS = 150L
         private const val GUIDE_APPEND_ROWS = 24
         /** Focus reaching this close to the last built row triggers
          * an append, so DPAD Down never runs out of grid below. */
