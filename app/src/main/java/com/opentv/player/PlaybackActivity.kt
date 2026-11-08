@@ -23,6 +23,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -171,15 +172,30 @@ class PlaybackActivity : FragmentActivity() {
         } else {
             ch?.group ?: ""
         }
+        // Start playback after a short buffer (0.5s) instead of the
+        // default 2.5s, so switching channels feels instant instead of
+        // sitting on a black screen. The min/max buffers stay generous
+        // so a slow stream doesn't rebuffer right after starting.
+        val fastStartLoadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs */ 10_000,
+                /* maxBufferMs */ 30_000,
+                /* bufferForPlaybackMs */ 500,
+                /* bufferForPlaybackAfterRebufferMs */ 1_500
+            )
+            .build()
         val player = if (recordingUri != null) {
             // Playback from the local download cache.
             val mediaSourceFactory = DefaultMediaSourceFactory(this)
                 .setDataSourceFactory(RecordingManager.cacheDataSourceFactory(this))
             ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)
+                .setLoadControl(fastStartLoadControl)
                 .build()
         } else {
-            ExoPlayer.Builder(this).build()
+            ExoPlayer.Builder(this)
+                .setLoadControl(fastStartLoadControl)
+                .build()
         }
         this.player = player
         playerView.player = player

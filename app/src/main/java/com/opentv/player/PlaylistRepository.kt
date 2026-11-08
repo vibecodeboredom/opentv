@@ -142,11 +142,33 @@ object PlaylistRepository {
      * failure. The parsed list is kept in memory (6h TTL) and the raw M3U
      * on disk, so launching, opening the guide, or changing channel does
      * not re-download and re-parse the whole playlist every time.
+     *
+     * The disk copy is used when it is fresh (6h TTL) — a cold start
+     * (app killed, or after an update) used to re-download the whole
+     * M3U before any channel could play, even though the disk copy was
+     * still good. Now it only downloads when the disk copy is missing
+     * or stale, and falls back to a stale copy when the fetch fails.
      */
     suspend fun loadPlaylist(context: Context): Result<List<Channel>> = withContext(Dispatchers.IO) {
         val cached = playlistCache
         if (cached != null && System.currentTimeMillis() - cached.first < PLAYLIST_TTL_MS) {
             return@withContext Result.success(cached.second)
+        }
+        // Fresh disk copy: parse it instead of downloading.
+        val file = context.getFileStreamPath(CACHE_FILE)
+        if (file.exists() &&
+            System.currentTimeMillis() - file.lastModified() < PLAYLIST_TTL_MS
+        ) {
+            try {
+                val cachedText = file.bufferedReader().use { it.readText() }
+                val channels = M3uParser.parse(cachedText)
+                if (channels.isNotEmpty()) {
+                    playlistCache = System.currentTimeMillis() to channels
+                    return@withContext Result.success(channels)
+                }
+            } catch (ignored: Exception) {
+                // Fall through to a fresh download.
+            }
         }
         val url = playlistUrl(context)
         try {

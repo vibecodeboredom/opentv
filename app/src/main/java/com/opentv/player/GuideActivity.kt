@@ -28,6 +28,7 @@ import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import coil.load
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 /**
@@ -120,9 +121,15 @@ class GuideActivity : FragmentActivity() {
             ).show()
         }
 
+        // Playlist and EPG load in parallel, and the guide renders as
+        // soon as the playlist is ready — channels show with "No
+        // information" placeholders, and the real programme titles fill
+        // in when the EPG arrives. Waiting for the (slow) EPG before
+        // showing anything was why the guide sat on its spinner.
         lifecycleScope.launch {
-            val playlistResult = PlaylistRepository.loadPlaylist(this@GuideActivity)
-            epg = PlaylistRepository.loadEpg(this@GuideActivity)
+            val playlistDeferred = async { PlaylistRepository.loadPlaylist(this@GuideActivity) }
+            val epgDeferred = async { PlaylistRepository.loadEpg(this@GuideActivity) }
+            val playlistResult = playlistDeferred.await()
             loading.visibility = View.GONE
             playlistResult.onSuccess { channels ->
                 nowMillis = System.currentTimeMillis()
@@ -144,6 +151,12 @@ class GuideActivity : FragmentActivity() {
                 // stays pinned at the left, like the reference photo.
                 // The red now-line marks the current time; the user scrolls
                 // right to see later programmes.
+                // EPG fills in when it arrives: rebuild the rows with the
+                // real programme data. (If it was already cached, this
+                // returns immediately and nothing visibly changes.)
+                epg = epgDeferred.await()
+                rebuildRows()
+                buildGuide(allRows)
             }.onFailure {
                 Toast.makeText(this@GuideActivity, R.string.load_failed, Toast.LENGTH_LONG).show()
                 finish()
