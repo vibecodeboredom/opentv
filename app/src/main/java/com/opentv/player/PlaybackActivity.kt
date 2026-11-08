@@ -169,7 +169,7 @@ class PlaybackActivity : FragmentActivity() {
         val subtitle = if (recordingUri != null) {
             getString(R.string.recording_label)
         } else {
-            ch.group
+            ch?.group ?: ""
         }
         val player = if (recordingUri != null) {
             // Playback from the local download cache.
