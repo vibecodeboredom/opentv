@@ -53,6 +53,11 @@
             android:exported="false"
             android:screenOrientation="landscape" />
 
+        <activity
+            android:name=".StatsActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
         <service
             android:name=".RecordingService"
             android:exported="false"

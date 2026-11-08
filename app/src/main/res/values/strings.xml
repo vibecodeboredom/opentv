@@ -50,6 +50,24 @@
     <string name="upload_started">Uploading — this can take a while for long recordings.</string>
     <string name="upload_done">Uploaded to %1$s</string>
     <string name="upload_failed">Upload failed: %1$s</string>
+    <string name="statistics">Statistics</string>
+    <string name="statistics_desc">Watch time and most-watched channels — local only</string>
+    <string name="statistics_local_note">Stored only on this TV. Nothing is shared or sent anywhere.</string>
+    <string name="clear_statistics">Clear statistics</string>
+    <string name="statistics_cleared">Statistics cleared</string>
+    <string name="stats_watching">Watching</string>
+    <string name="stats_total_watch_time">Total watch time</string>
+    <string name="stats_total_sessions">Sessions</string>
+    <string name="stats_sessions">sessions</string>
+    <string name="stats_most_watched">Most watched</string>
+    <string name="stats_library">Library</string>
+    <string name="stats_channels">Channels</string>
+    <string name="stats_favorites">Favorites</string>
+    <string name="stats_recordings">Recordings</string>
+    <string name="stats_recordings_size">Recordings size</string>
+    <string name="developer_options">Developer options</string>
+    <string name="developer_options_desc">Open the TV\'s system developer menu directly</string>
+    <string name="developer_options_unavailable">Developer options isn\'t available — enable it first in Settings &gt; About (tap Build 7 times).</string>
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
 </resources>

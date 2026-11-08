@@ -40,6 +40,7 @@ class PlaybackActivity : FragmentActivity() {
     private var recordingId: String? = null
     private var recordingUri: String? = null
     private var recordingName: String? = null
+    private var sessionStartMillis: Long = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,6 +87,7 @@ class PlaybackActivity : FragmentActivity() {
         player.setMediaItem(MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build())
         player.prepare()
         player.play()
+        sessionStartMillis = System.currentTimeMillis()
 
         // Best-effort EPG: show Now / Next for this channel once it loads.
         if (ch != null) {
@@ -177,6 +179,14 @@ class PlaybackActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Log the watch session (local only, never shared).
+        val watchedMillis = System.currentTimeMillis() - sessionStartMillis
+        if (sessionStartMillis > 0L && watchedMillis > 0L) {
+            val id = channel?.id ?: recordingId ?: "unknown"
+            val name = channel?.name ?: recordingName ?: "Unknown"
+            StatsManager.logWatchSession(this, id, name, watchedMillis)
+        }
+        sessionStartMillis = 0L
         player?.release()
         player = null
     }
