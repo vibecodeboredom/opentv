@@ -116,4 +116,20 @@
     <string name="playback_error">Couldn\'t play this channel: %1$s</string>
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
+    <string name="share_playlist_title">Share playlist</string>
+    <string name="share_playlist_hint">Temporarily share a playlist on this TV\'s Wi-Fi. Other devices on the same network can add it for 10 minutes, then sharing turns itself off.</string>
+    <string name="share_not_running">Not sharing.</string>
+    <string name="share_playlist">Share playlist</string>
+    <string name="share_stop">Stop sharing</string>
+    <string name="share_running">Sharing at %1$s\nDownload the file at %2$s\nEnds in %3$s — Stop sharing ends it now.</string>
+    <string name="share_source_title">Share which playlist?</string>
+    <string name="share_source_current">Current playlist</string>
+    <string name="share_source_url">Another URL…</string>
+    <string name="share_source_file">Local file…</string>
+    <string name="share_start">Share</string>
+    <string name="share_no_wifi">No Wi-Fi connection — connect to Wi-Fi to share a playlist.</string>
+    <string name="share_load_failed">Could not load that playlist.</string>
+    <string name="share_not_m3u">That doesn\'t look like an M3U playlist.</string>
+    <string name="share_file_failed">Could not read that file.</string>
+    <string name="share_no_picker">No file picker on this TV — use a URL instead.</string>
 </resources>

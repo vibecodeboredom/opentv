@@ -262,6 +262,34 @@ object PlaylistRepository {
     }
 
     /**
+     * The raw M3U text of the currently configured playlist: the cached
+     * disk copy when present, otherwise a fresh fetch of the playlist URL.
+     * Used by the temporary local share (4.7.1) so other devices can
+     * import exactly what this TV is playing.
+     */
+    suspend fun playlistText(context: Context): Result<String> = withContext(Dispatchers.IO) {
+        val file = context.getFileStreamPath(CACHE_FILE)
+        if (file.exists()) {
+            try {
+                val text = file.bufferedReader().use { it.readText() }
+                if (text.isNotBlank()) return@withContext Result.success(text)
+            } catch (ignored: Exception) {
+                // Fall through to a fresh fetch.
+            }
+        }
+        fetchUrlText(playlistUrl(context))
+    }
+
+    /** Fetch the raw text of any URL (the share's "another URL" source). */
+    suspend fun fetchUrlText(url: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            Result.success(fetchText(url))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Re-download + re-parse the playlist in the background when the
      * snapshot is stale. Updates the in-memory cache and the snapshot
      * when the fresh data lands, so the next guide/playback open picks

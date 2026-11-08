@@ -95,6 +95,42 @@
 
     </LinearLayout>
 
+    <!-- Share playlist (4.7.1): temporarily host a playlist on this
+         TV's Wi-Fi so other devices on the same network can import it.
+         The server stops itself after 10 minutes. -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="48dp"
+        android:text="@string/share_playlist_title"
+        android:textColor="@android:color/white"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/share_playlist_hint"
+        android:textColor="#FFAAAAAA"
+        android:textSize="15sp" />
+
+    <TextView
+        android:id="@+id/share_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/share_not_running"
+        android:textColor="@android:color/white"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/share_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/share_playlist" />
+
     <!-- About: app name, version, and a short note. -->
     <TextView
         android:layout_width="wrap_content"
