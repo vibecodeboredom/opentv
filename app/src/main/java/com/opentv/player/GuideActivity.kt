@@ -411,8 +411,11 @@ class GuideActivity : FragmentActivity() {
 
     private fun onProgrammeClicked(channel: Channel, programme: EpgParser.Programme) {
         if (nowMillis in programme.startMillis until programme.stopMillis) {
+            // CLEAR_TOP replaces the playback underneath instead of
+            // stacking a second player on top of it.
             val intent = Intent(this, PlaybackActivity::class.java)
             intent.putExtra(PlaybackActivity.EXTRA_CHANNEL, channel)
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             startActivity(intent)
         } else {
             val whenText = GuideData.formatHourLabel(programme.startMillis)

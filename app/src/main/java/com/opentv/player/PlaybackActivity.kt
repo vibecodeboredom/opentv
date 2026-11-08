@@ -1,6 +1,7 @@
 package com.opentv.player
 
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.view.KeyEvent
 import android.widget.Toast
@@ -43,6 +44,8 @@ class PlaybackActivity : FragmentActivity() {
     private var recordingUri: String? = null
     private var recordingName: String? = null
     private var sessionStartMillis: Long = 0L
+    /** Guard so a rapid double OK press doesn't stack two guides. */
+    private var guideLaunched = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -117,6 +120,33 @@ class PlaybackActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        guideLaunched = false
+    }
+
+    /**
+     * OK (center / enter) once opens the TV Guide. Intercepted here,
+     * before the PlayerView controller sees it, so OK never pauses —
+     * the remote's play/pause button still does that.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                event.keyCode == KeyEvent.KEYCODE_ENTER)
+        ) {
+            openGuide()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun openGuide() {
+        if (guideLaunched) return
+        guideLaunched = true
+        startActivity(Intent(this, GuideActivity::class.java))
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
