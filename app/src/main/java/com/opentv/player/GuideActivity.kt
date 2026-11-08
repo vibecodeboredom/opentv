@@ -13,6 +13,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -45,6 +46,10 @@ import kotlinx.coroutines.launch
  *   external player, record, custom recording, favorites, block/hide,
  *   assign EPG, channel options). Search lives in that menu, not in the
  *   guide itself.
+ * - Left sidebar (4.6.2, shared ChannelSidebar helper): pressing Left
+ *   when focus is on the first programme card of a row opens the same
+ *   groups/channels panel as playback; picking a channel starts
+ *   playback of it.
  *
  * A 6-hour window starting at the top of the current hour.
  */
@@ -80,6 +85,10 @@ class GuideActivity : FragmentActivity() {
      * its number + name are highlighted in the accent colour. */
     private var currentChannelId: String? = null
 
+    /** Left sidebar (4.6.2, shared ChannelSidebar helper) — the same
+     * groups/channels panel as playback, over the guide grid. */
+    private lateinit var channelSidebar: ChannelSidebar
+
     /** Channel name views per row, so focus can turn the name blue. */
     private val channelNameViews = mutableMapOf<String, TextView>()
 
@@ -101,6 +110,26 @@ class GuideActivity : FragmentActivity() {
         detailProgress = findViewById(R.id.guide_detail_progress)
         detailRemaining = findViewById(R.id.guide_detail_remaining)
         detailCategory = findViewById(R.id.guide_detail_category)
+
+        // Left sidebar (shared ChannelSidebar helper, 4.6.2). Picking a
+        // channel here starts playback of it, like tapping a programme
+        // that is on now. The scrim closes the sidebar on tap.
+        channelSidebar = ChannelSidebar(
+            activity = this,
+            scope = lifecycleScope,
+            scrim = findViewById(R.id.guide_sidebar_scrim),
+            panel = findViewById(R.id.guide_sidebar),
+            title = findViewById(R.id.guide_sidebar_title),
+            subtitle = findViewById(R.id.guide_sidebar_subtitle),
+            scroll = findViewById(R.id.guide_sidebar_scroll),
+            list = findViewById(R.id.guide_sidebar_list),
+            footer = findViewById(R.id.guide_sidebar_footer),
+            currentChannelId = { currentChannelId },
+            onChannelSelected = { playChannel(it) }
+        )
+        findViewById<View>(R.id.guide_sidebar_scrim).setOnClickListener {
+            channelSidebar.hide()
+        }
 
         pxPerMinute = dpToPx(PX_PER_MINUTE_DP)
         channelColWidth = dpToPx(CHANNEL_COL_DP)
@@ -169,6 +198,97 @@ class GuideActivity : FragmentActivity() {
                 finish()
             }
         }
+    }
+
+    /**
+     * Key handling for the left sidebar (4.6.2). Everything else uses
+     * the default focus navigation so programme-cell clicks and the
+     * long-press context menu keep working untouched:
+     * - Sidebar up: Left → back (channels → groups → close); Right / OK
+     *   → activate; Up/Down → move within the sidebar (the grid behind
+     *   it is also focusable, so framework focus search could jump out);
+     *   BACK → back/close. OK is handled on key-UP, mirroring playback,
+     *   and the key-DOWN is consumed so the row's click doesn't also fire.
+     * - Sidebar down + Left: opens the sidebar, but only when focus is
+     *   on the first programme card of its row (the left edge) — anywhere
+     *   else, Left keeps moving between programme cells as before.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val sidebarUp = channelSidebar.isVisible()
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    // Consume the press so the focused sidebar row's
+                    // click doesn't also fire; activate() runs on key-UP.
+                    if (sidebarUp) return true
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    if (sidebarUp) {
+                        channelSidebar.back()
+                        return true
+                    }
+                    val focused = currentFocus
+                    if (focused != null && isFirstCardInRow(focused)) {
+                        channelSidebar.show()
+                        return true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    if (sidebarUp) {
+                        channelSidebar.activate()
+                        return true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (sidebarUp) {
+                        if (channelSidebar.moveFocus(event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN)) {
+                            return true
+                        }
+                    }
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    if (sidebarUp) {
+                        channelSidebar.back()
+                        return true
+                    }
+                }
+            }
+        }
+        if (event.action == KeyEvent.ACTION_UP) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    if (sidebarUp) {
+                        channelSidebar.activate()
+                        return true
+                    }
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    /** True when this view is the first programme card of its guide row
+     * (the left edge) — pressing Left there opens the sidebar. Cards
+     * are tagged with their programme in buildGuideRow; the channel
+     * cell and spacers carry no tag. */
+    private fun isFirstCardInRow(view: View): Boolean {
+        val row = view.parent as? LinearLayout ?: return false
+        for (i in 0 until row.childCount) {
+            val child = row.getChildAt(i)
+            if (child.tag is EpgParser.Programme) {
+                return child === view
+            }
+        }
+        return false
+    }
+
+    /** Start playback of a channel picked in the sidebar (same as
+     * tapping a programme that is on now). */
+    private fun playChannel(ch: Channel) {
+        val intent = Intent(this, PlaybackActivity::class.java)
+        intent.putExtra(PlaybackActivity.EXTRA_CHANNEL, ch)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivity(intent)
     }
 
     private fun rebuildRows() {
@@ -421,6 +541,9 @@ class GuideActivity : FragmentActivity() {
                 setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
                 isFocusable = true
                 isFocusableInTouchMode = true
+                // Tagged with its programme so the sidebar's left-edge
+                // check (isFirstCardInRow) can find the first card.
+                tag = programme
                 setBackgroundResource(
                     when {
                         isNow -> R.drawable.guide_cell_now_bg
