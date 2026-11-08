@@ -7,9 +7,13 @@ import android.util.Base64
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultAssetLoaderFactory
+import androidx.media3.transformer.DefaultDecoderFactory
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.TransformationRequest
@@ -83,7 +87,12 @@ object RecordingUploader {
             .setAssetLoaderFactory(
                 DefaultAssetLoaderFactory(
                     context,
-                    RecordingManager.cacheDataSourceFactory(context)
+                    DefaultDecoderFactory(context),
+                    Clock.DEFAULT,
+                    DefaultMediaSourceFactory(context).setDataSourceFactory(
+                        RecordingManager.cacheDataSourceFactory(context)
+                    ),
+                    DataSourceBitmapLoader(context)
                 )
             )
             .setTransformationRequest(request)
