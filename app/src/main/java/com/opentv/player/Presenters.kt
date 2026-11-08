@@ -40,7 +40,7 @@ class ChannelPresenter : Presenter() {
     }
 }
 
-/** Card for a menu action (change playlist / refresh). */
+/** Card for a menu action (change playlist / refresh / guide / recordings). */
 class ActionPresenter : Presenter() {
 
     override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
@@ -59,9 +59,45 @@ class ActionPresenter : Presenter() {
         val iconRes = when (action.id) {
             "settings" -> android.R.drawable.ic_menu_preferences
             "refresh" -> android.R.drawable.ic_popup_sync
+            "guide" -> android.R.drawable.ic_menu_today
+            "recordings" -> android.R.drawable.ic_menu_save
             else -> android.R.drawable.ic_menu_more
         }
         cardView.mainImage = ContextCompat.getDrawable(cardView.context, iconRes)
+    }
+
+    override fun onUnbindViewHolder(viewHolder: ViewHolder) {
+        val cardView = viewHolder.view as ImageCardView
+        cardView.mainImage = null
+    }
+
+    companion object {
+        private const val CARD_WIDTH = 320
+        private const val CARD_HEIGHT = 180
+    }
+}
+
+/** Card for a local recording: channel name + size / date. */
+class RecordingPresenter : Presenter() {
+
+    override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
+        val cardView = ImageCardView(parent.context)
+        cardView.isFocusable = true
+        cardView.isFocusableInTouchMode = true
+        cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
+        return ViewHolder(cardView)
+    }
+
+    override fun onBindViewHolder(viewHolder: ViewHolder, item: Any) {
+        val recording = item as Recording
+        val cardView = viewHolder.view as ImageCardView
+        cardView.titleText = recording.channelName
+        cardView.contentText = RecordingManager.formatBytes(recording.bytesDownloaded) +
+            if (recording.inProgress) " • Recording…" else ""
+        cardView.mainImage = ContextCompat.getDrawable(
+            cardView.context,
+            android.R.drawable.ic_media_play
+        )
     }
 
     override fun onUnbindViewHolder(viewHolder: ViewHolder) {

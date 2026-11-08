@@ -1,0 +1,76 @@
+package com.opentv.player
+
+/**
+ * Pure helpers for the TV guide (EPG grid). Kept free of Android classes so
+ * the window math is unit-testable.
+ */
+object GuideData {
+
+    /** One row of the guide: a channel and the programmes inside the window. */
+    data class GuideRow(
+        val channel: Channel,
+        val programmes: List<EpgParser.Programme>
+    )
+
+    /** A programme cell's position in the grid, in minutes from the window start. */
+    data class CellLayout(
+        val programme: EpgParser.Programme,
+        /** Minutes from the window start to the visible start of this cell. */
+        val startOffsetMinutes: Long,
+        /** Visible width of the cell, in minutes. */
+        val widthMinutes: Long
+    )
+
+    /** Guide window: starts at the top of the current hour, spans [hours] hours. */
+    fun windowStartMillis(nowMillis: Long): Long {
+        val hour = 60L * 60 * 1000
+        return (nowMillis / hour) * hour
+    }
+
+    /** Build the rows for the guide: only channels that have EPG data in the window. */
+    fun buildRows(
+        channels: List<Channel>,
+        epg: Map<String, List<EpgParser.Programme>>,
+        windowStartMillis: Long,
+        windowHours: Int = 6
+    ): List<GuideRow> {
+        val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
+        val rows = mutableListOf<GuideRow>()
+        for (channel in channels) {
+            val key = channel.tvgId ?: continue
+            val programmes = (epg[key] ?: continue)
+                .filter { it.stopMillis > windowStartMillis && it.startMillis < windowEnd }
+                .sortedBy { it.startMillis }
+            if (programmes.isNotEmpty()) {
+                rows += GuideRow(channel, programmes)
+            }
+        }
+        return rows
+    }
+
+    /** Clamp a programme to the window and compute its cell position/width. */
+    fun layoutCell(
+        programme: EpgParser.Programme,
+        windowStartMillis: Long,
+        windowEndMillis: Long
+    ): CellLayout {
+        val visibleStart = maxOf(programme.startMillis, windowStartMillis)
+        val visibleEnd = minOf(programme.stopMillis, windowEndMillis)
+        val minute = 60_000L
+        return CellLayout(
+            programme = programme,
+            startOffsetMinutes = (visibleStart - windowStartMillis) / minute,
+            widthMinutes = maxOf((visibleEnd - visibleStart) / minute, 5L)
+        )
+    }
+
+    /** Format a time as "8 PM" / "8:30 PM" for the guide header. */
+    fun formatHourLabel(millis: Long): String {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+        val hour = cal.get(java.util.Calendar.HOUR)
+        val minute = cal.get(java.util.Calendar.MINUTE)
+        val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
+        val hour12 = if (hour == 0) 12 else hour
+        return if (minute == 0) "$hour12 $amPm" else "$hour12:${minute.toString().padStart(2, '0')} $amPm"
+    }
+}

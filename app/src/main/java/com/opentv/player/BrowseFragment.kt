@@ -50,6 +50,8 @@ class BrowseFragment : BrowseSupportFragment() {
         when (action.id) {
             "settings" -> startActivity(Intent(requireContext(), SettingsActivity::class.java))
             "refresh" -> loadPlaylist()
+            "guide" -> startActivity(Intent(requireContext(), GuideActivity::class.java))
+            "recordings" -> startActivity(Intent(requireContext(), RecordingsActivity::class.java))
         }
     }
 
@@ -87,6 +89,20 @@ class BrowseFragment : BrowseSupportFragment() {
         }
 
         val actionsAdapter = ArrayObjectAdapter(ActionPresenter())
+        actionsAdapter.add(
+            MenuAction(
+                "guide",
+                getString(R.string.tv_guide),
+                getString(R.string.tv_guide_desc)
+            )
+        )
+        actionsAdapter.add(
+            MenuAction(
+                "recordings",
+                getString(R.string.recordings),
+                getString(R.string.recordings_desc)
+            )
+        )
         actionsAdapter.add(
             MenuAction(
                 "settings",

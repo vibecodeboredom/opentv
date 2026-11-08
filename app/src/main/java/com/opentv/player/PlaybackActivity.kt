@@ -1,29 +1,45 @@
 package com.opentv.player
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.KeyEvent
 import android.widget.Toast
+import androidx.annotation.OptIn
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 
 /**
  * Plays one channel with ExoPlayer. OK pauses/resumes (PlayerView controller).
- * MENU or INFO toggles the channel as a favorite.
+ *
+ * - INFO toggles the channel as a favorite.
+ * - MENU opens options: favorite toggle + record / stop recording.
+ *
+ * Can also play back a local recording (EXTRA_RECORDING_*): the player is
+ * built with the download cache as its data source, so it reads from disk.
  */
+@OptIn(UnstableApi::class)
 class PlaybackActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_CHANNEL = "channel"
+        const val EXTRA_RECORDING_ID = "recording_id"
+        const val EXTRA_RECORDING_URI = "recording_uri"
+        const val EXTRA_RECORDING_NAME = "recording_name"
     }
 
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
     private var channel: Channel? = null
+    private var recordingId: String? = null
+    private var recordingUri: String? = null
+    private var recordingName: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,7 +47,11 @@ class PlaybackActivity : FragmentActivity() {
         playerView = findViewById(R.id.player_view)
 
         val ch = intent.getSerializableExtra(EXTRA_CHANNEL) as? Channel
-        if (ch == null) {
+        recordingId = intent.getStringExtra(EXTRA_RECORDING_ID)
+        recordingUri = intent.getStringExtra(EXTRA_RECORDING_URI)
+        recordingName = intent.getStringExtra(EXTRA_RECORDING_NAME)
+
+        if (ch == null && recordingUri == null) {
             finish()
             return
         }
@@ -39,48 +59,120 @@ class PlaybackActivity : FragmentActivity() {
 
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
 
-        val player = ExoPlayer.Builder(this).build()
+        val player = if (recordingUri != null) {
+            // Playback from the local download cache.
+            val mediaSourceFactory = DefaultMediaSourceFactory(this)
+                .setDataSourceFactory(RecordingManager.cacheDataSourceFactory(this))
+            ExoPlayer.Builder(this)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build()
+        } else {
+            ExoPlayer.Builder(this).build()
+        }
         this.player = player
         playerView.player = player
+
+        val uri = recordingUri ?: ch!!.url
+        val title = recordingName ?: ch!!.name
+        val subtitle = if (recordingUri != null) {
+            getString(R.string.recording_label)
+        } else {
+            ch!!.group
+        }
         val metadata = MediaMetadata.Builder()
-            .setTitle(ch.name)
-            .setSubtitle(ch.group)
+            .setTitle(title)
+            .setSubtitle(subtitle)
             .build()
-        player.setMediaItem(MediaItem.Builder().setUri(ch.url).setMediaMetadata(metadata).build())
+        player.setMediaItem(MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build())
         player.prepare()
         player.play()
 
         // Best-effort EPG: show Now / Next for this channel once it loads.
-        lifecycleScope.launch {
-            val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
-            val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
-            if (now != null || next != null) {
-                val text = buildString {
-                    now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
-                    next?.let {
-                        if (isNotEmpty()) append("  •  ")
-                        append("${getString(R.string.next_up)}: ${it.title}")
+        if (ch != null) {
+            lifecycleScope.launch {
+                val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
+                val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
+                if (now != null || next != null) {
+                    val text = buildString {
+                        now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
+                        next?.let {
+                            if (isNotEmpty()) append("  •  ")
+                            append("${getString(R.string.next_up)}: ${it.title}")
+                        }
                     }
+                    Toast.makeText(this@PlaybackActivity, text, Toast.LENGTH_LONG).show()
                 }
-                Toast.makeText(this@PlaybackActivity, text, Toast.LENGTH_LONG).show()
             }
         }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_MENU || keyCode == KeyEvent.KEYCODE_INFO) {
-            channel?.let {
-                PlaylistRepository.toggleFavorite(this, it.id)
-                val isFav = PlaylistRepository.favorites(this).contains(it.id)
-                Toast.makeText(
-                    this,
-                    if (isFav) "Added to favorites" else "Removed from favorites",
-                    Toast.LENGTH_SHORT
-                ).show()
+        when (keyCode) {
+            KeyEvent.KEYCODE_MENU -> {
+                showOptions()
+                return true
             }
-            return true
+            KeyEvent.KEYCODE_INFO -> {
+                toggleFavorite()
+                return true
+            }
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    private fun toggleFavorite() {
+        channel?.let {
+            PlaylistRepository.toggleFavorite(this, it.id)
+            val isFav = PlaylistRepository.favorites(this).contains(it.id)
+            Toast.makeText(
+                this,
+                if (isFav) getString(R.string.added_favorite) else getString(R.string.removed_favorite),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    private fun showOptions() {
+        val ch = channel
+        if (ch == null) {
+            // Playing a recording: no channel options.
+            return
+        }
+        val isFav = PlaylistRepository.favorites(this).contains(ch.id)
+        val isRecording = RecordingManager.isRecording(this, ch.id)
+        val hasRecording = RecordingManager.hasRecording(this, ch.id)
+        val items = mutableListOf<String>()
+        items += if (isFav) getString(R.string.remove_favorite) else getString(R.string.add_favorite)
+        items += when {
+            isRecording -> getString(R.string.stop_recording)
+            hasRecording -> getString(R.string.record_again)
+            else -> getString(R.string.record_channel)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(ch.name)
+            .setItems(items.toTypedArray()) { _, which ->
+                when (which) {
+                    0 -> toggleFavorite()
+                    1 -> {
+                        if (isRecording) {
+                            RecordingManager.stopRecording(this, ch.id)
+                            Toast.makeText(
+                                this,
+                                R.string.recording_stopped,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            RecordingManager.startRecording(this, ch)
+                            Toast.makeText(
+                                this,
+                                R.string.recording_started,
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+            }
+            .show()
     }
 
     override fun onStop() {
