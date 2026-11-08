@@ -14,7 +14,10 @@ import java.net.URL
 object PlaylistRepository {
 
     const val DEFAULT_PLAYLIST_URL = "https://iptv-org.github.io/iptv/countries/us.m3u"
-    const val DEFAULT_EPG_URL = "https://iptv-org.github.io/epg/guides/us.xml"
+    // iptv-org's own hosted guides (epg/guides/us.xml) are gone (404) — the
+    // project stopped publishing pre-made guide files. Default to a working
+    // free US guide. Separate multiple EPG URLs with commas; they merge.
+    const val DEFAULT_EPG_URL = "https://i.mjh.nz/PlutoTV/us.xml"
 
     private const val PREFS = "opentv"
     private const val KEY_PLAYLIST_URL = "playlist_url"
@@ -116,14 +119,34 @@ object PlaylistRepository {
         }
     }
 
-    /** Fetch the XMLTV EPG; returns an empty map on any failure (EPG is optional). */
+    /**
+     * Fetch the XMLTV EPG. Accepts several URLs separated by commas (or
+     * newlines) and merges them. Returns an empty map on any failure (EPG
+     * is optional — the guide fills in "No information" placeholders).
+     * Programmes are indexed by channel id AND by lowercased display name,
+     * so a playlist channel can match its EPG data by name when the ids
+     * don't align across sources.
+     */
     suspend fun loadEpg(context: Context): Map<String, List<EpgParser.Programme>> = withContext(Dispatchers.IO) {
-        try {
-            val text = fetchText(epgUrl(context))
-            EpgParser.parse(text)
-        } catch (e: Exception) {
-            emptyMap()
+        val merged = mutableMapOf<String, MutableList<EpgParser.Programme>>()
+        val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        for (url in urls) {
+            try {
+                val text = fetchText(url)
+                val parsed = EpgParser.parse(text)
+                for ((id, list) in parsed) {
+                    merged.getOrPut(id) { mutableListOf() } += list
+                }
+                val names = EpgParser.channelDisplayNames(text)
+                for ((id, name) in names) {
+                    val list = parsed[id] ?: continue
+                    merged.getOrPut(name.lowercase()) { mutableListOf() } += list
+                }
+            } catch (ignored: Exception) {
+                // One bad source doesn't kill the rest.
+            }
         }
+        merged
     }
 
     private fun fetchText(urlString: String): String {

@@ -27,8 +27,14 @@ object GuideData {
         return (nowMillis / hour) * hour
     }
 
-    /** Build the rows for the guide: only channels that have EPG data in the window.
-     * Hidden channels are skipped; [epgOverrides] maps channel id -> tvg-id. */
+    /** Build the rows for the guide. Every visible channel gets a row: channels
+     * with EPG data in the window show their real programmes; channels
+     * without any EPG data get "No information" placeholders covering the
+     * window, so the guide always renders (like TiviMate does). Hidden
+     * channels are skipped; [epgOverrides] maps channel id -> tvg-id.
+     * Capped at [MAX_GUIDE_ROWS] channels: the grid inflates every row
+     * eagerly, so showing all 1500 playlist channels at once would be
+     * too heavy. (A virtualized grid is the follow-up if he wants them all.) */
     fun buildRows(
         channels: List<Channel>,
         epg: Map<String, List<EpgParser.Programme>>,
@@ -40,18 +46,54 @@ object GuideData {
         val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
         val rows = mutableListOf<GuideRow>()
         for (channel in channels) {
+            if (rows.size >= MAX_GUIDE_ROWS) break
             if (hidden.contains(channel.id)) continue
             val key = epgOverrides[channel.id]?.takeIf { it.isNotEmpty() }
-                ?: channel.tvgId ?: continue
-            val programmes = (epg[key] ?: continue)
+                ?: channel.tvgId
+            // Try the tvg-id first, then the channel name (lowercased) —
+            // EPG sources often use different ids than the playlist.
+            val programmes = (key?.let { epg[it] }
+                ?: epg[channel.name.lowercase()]
+                ?: emptyList())
                 .filter { it.stopMillis > windowStartMillis && it.startMillis < windowEnd }
                 .sortedBy { it.startMillis }
             if (programmes.isNotEmpty()) {
                 rows += GuideRow(channel, programmes)
+            } else {
+                rows += GuideRow(
+                    channel,
+                    placeholderProgrammes(channel, windowStartMillis, windowEnd)
+                )
             }
         }
         return rows
     }
+
+    const val MAX_GUIDE_ROWS = 400
+
+    /** "No information" placeholders covering the window in 1-hour blocks. */
+    fun placeholderProgrammes(
+        channel: Channel,
+        windowStartMillis: Long,
+        windowEndMillis: Long
+    ): List<EpgParser.Programme> {
+        val hour = 60L * 60 * 1000
+        val list = mutableListOf<EpgParser.Programme>()
+        var t = windowStartMillis
+        while (t < windowEndMillis) {
+            val end = minOf(t + hour, windowEndMillis)
+            list += EpgParser.Programme(
+                channelId = channel.tvgId ?: channel.id,
+                startMillis = t,
+                stopMillis = end,
+                title = NO_INFORMATION
+            )
+            t = end
+        }
+        return list
+    }
+
+    const val NO_INFORMATION = "No information"
 
     /** Clamp a programme to the window and compute its cell position/width. */
     fun layoutCell(

@@ -55,6 +55,30 @@ object EpgParser {
         return result
     }
 
+    /** Channel id -> display name, from the <channel> elements. Used to match
+     * a playlist channel to its EPG data by name when the ids don't align. */
+    fun channelDisplayNames(xml: String): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        try {
+            val factory = DocumentBuilderFactory.newInstance()
+            val builder = factory.newDocumentBuilder()
+            val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+            val channels = doc.getElementsByTagName("channel")
+            for (i in 0 until channels.length) {
+                val el = channels.item(i) as? Element ?: continue
+                val id = el.getAttribute("id")
+                val name = el.getElementsByTagName("display-name").item(0)
+                    ?.textContent?.trim()
+                if (id.isNotEmpty() && !name.isNullOrEmpty()) {
+                    result[id] = name
+                }
+            }
+        } catch (ignored: Exception) {
+            // EPG is best-effort.
+        }
+        return result
+    }
+
     /** Returns the programme airing now and the next one, for a channel. */
     fun nowAndNext(
         programmes: List<Programme>?,

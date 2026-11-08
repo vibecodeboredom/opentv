@@ -19,24 +19,34 @@ class GuideDataTest {
     }
 
     @Test
-    fun buildRowsOnlyIncludesChannelsWithEpgInWindow() {
+    fun buildRowsGivesRealProgrammesWhenEpgExists() {
         val windowStart = 1_794_081_600_000L // 2026-11-07 20:00 UTC
         val cnn = channel("CNN.us", "CNN")
-        val espn = channel("ESPN.us", "ESPN")
         val epg = mapOf(
             "CNN.us" to listOf(
                 EpgParser.Programme("CNN.us", windowStart, windowStart + hour, "News")
             )
-            // ESPN has no EPG at all.
         )
-        val rows = GuideData.buildRows(listOf(cnn, espn), epg, windowStart, 6)
+        val rows = GuideData.buildRows(listOf(cnn), epg, windowStart, 6)
         assertEquals(1, rows.size)
         assertEquals("CNN", rows[0].channel.name)
         assertEquals("News", rows[0].programmes[0].title)
     }
 
     @Test
-    fun buildRowsExcludesProgrammesOutsideWindow() {
+    fun buildRowsFillsNoInformationWhenNoEpg() {
+        val windowStart = 1_794_081_600_000L
+        val espn = channel("ESPN.us", "ESPN")
+        // ESPN has no EPG at all: it still gets a row, with placeholders.
+        val rows = GuideData.buildRows(listOf(espn), emptyMap(), windowStart, 6)
+        assertEquals(1, rows.size)
+        assertEquals("ESPN", rows[0].channel.name)
+        assertTrue(rows[0].programmes.isNotEmpty())
+        assertTrue(rows[0].programmes.all { it.title == GuideData.NO_INFORMATION })
+    }
+
+    @Test
+    fun buildRowsFillsNoInformationWhenProgrammesOutsideWindow() {
         val windowStart = 1_794_081_600_000L
         val cnn = channel("CNN.us", "CNN")
         val epg = mapOf(
@@ -48,7 +58,19 @@ class GuideDataTest {
             )
         )
         val rows = GuideData.buildRows(listOf(cnn), epg, windowStart, 6)
-        assertTrue(rows.isEmpty())
+        assertEquals(1, rows.size)
+        assertTrue(rows[0].programmes.all { it.title == GuideData.NO_INFORMATION })
+    }
+
+    @Test
+    fun placeholdersCoverWindowInOneHourBlocks() {
+        val windowStart = 1_794_081_600_000L
+        val cnn = channel("CNN.us", "CNN")
+        val list = GuideData.placeholderProgrammes(cnn, windowStart, windowStart + 6 * hour)
+        assertEquals(6, list.size)
+        assertEquals(windowStart, list[0].startMillis)
+        assertEquals(windowStart + 6 * hour, list.last().stopMillis)
+        assertTrue(list.all { it.title == GuideData.NO_INFORMATION })
     }
 
     @Test
