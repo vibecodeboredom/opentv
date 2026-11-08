@@ -10,7 +10,6 @@ local.properties
 
 # Signing
 *.jks
-*.keystore
 
 # OS
 .DS_Store

@@ -15,7 +15,22 @@ android {
         versionName '3.2.0'
     }
 
+    // Fixed debug keystore (committed) so every CI build shares one
+    // signature and `adb install -r` updates work across versions.
+    signingConfigs {
+        debug {
+            storeFile file('../debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+            storeType 'PKCS12'
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
