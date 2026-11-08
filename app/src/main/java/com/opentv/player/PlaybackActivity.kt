@@ -9,6 +9,8 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -88,6 +90,15 @@ class PlaybackActivity : FragmentActivity() {
         player.prepare()
         player.play()
         sessionStartMillis = System.currentTimeMillis()
+        player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                Toast.makeText(
+                    this@PlaybackActivity,
+                    getString(R.string.playback_error, error.message ?: "unknown error"),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        })
 
         // Best-effort EPG: show Now / Next for this channel once it loads.
         if (ch != null) {

@@ -3,16 +3,64 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="@android:color/black"
+    android:background="#0B0B0E"
     android:padding="16dp">
 
-    <TextView
-        android:layout_width="wrap_content"
+    <!-- Top bar: title + date, search, jump-to-now. -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/tv_guide"
-        android:textColor="@android:color/white"
-        android:textSize="28sp"
-        android:textStyle="bold" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/tv_guide"
+                android:textColor="@android:color/white"
+                android:textSize="28sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/guide_date"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#9A9AA3"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/guide_search"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:layout_marginStart="32dp"
+            android:layout_marginEnd="16dp"
+            android:background="@drawable/guide_search_bg"
+            android:hint="@string/guide_search_hint"
+            android:textColor="@android:color/white"
+            android:textColorHint="#7A7A85"
+            android:textSize="16sp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:inputType="text"
+            android:singleLine="true"
+            android:imeOptions="actionSearch" />
+
+        <Button
+            android:id="@+id/guide_now_button"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:text="@string/guide_now"
+            android:textColor="@android:color/white"
+            android:background="@drawable/guide_now_button_bg" />
+
+    </LinearLayout>
 
     <ProgressBar
         android:id="@+id/guide_loading"
@@ -26,20 +74,46 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="16dp"
         android:visibility="gone">
 
         <HorizontalScrollView
+            android:id="@+id/guide_hscroll"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content">
 
-            <LinearLayout
-                android:id="@+id/guide_container"
+            <FrameLayout
+                android:id="@+id/guide_frame"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="vertical" />
+                android:layout_height="wrap_content">
 
+                <LinearLayout
+                    android:id="@+id/guide_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <!-- Current-time indicator line. Positioned in code. -->
+                <View
+                    android:id="@+id/guide_now_line"
+                    android:layout_width="3dp"
+                    android:layout_height="match_parent"
+                    android:background="#FF3B30"
+                    android:visibility="gone" />
+
+            </FrameLayout>
         </HorizontalScrollView>
     </ScrollView>
+
+    <TextView
+        android:id="@+id/guide_empty"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="48dp"
+        android:text="@string/guide_no_results"
+        android:textColor="#9A9AA3"
+        android:textSize="18sp"
+        android:visibility="gone" />
 
 </LinearLayout>

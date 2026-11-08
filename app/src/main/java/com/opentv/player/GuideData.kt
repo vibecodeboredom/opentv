@@ -73,4 +73,30 @@ object GuideData {
         val hour12 = if (hour == 0) 12 else hour
         return if (minute == 0) "$hour12 $amPm" else "$hour12:${minute.toString().padStart(2, '0')} $amPm"
     }
+
+    /** Format a clock time as "8:00 PM" (always with minutes). */
+    fun formatClock(millis: Long): String {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+        val hour = cal.get(java.util.Calendar.HOUR)
+        val minute = cal.get(java.util.Calendar.MINUTE)
+        val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
+        val hour12 = if (hour == 0) 12 else hour
+        return "$hour12:${minute.toString().padStart(2, '0')} $amPm"
+    }
+
+    /** Format a programme's time span as "8:00 – 9:00 PM". */
+    fun formatTimeRange(startMillis: Long, stopMillis: Long): String =
+        "${formatClock(startMillis)} – ${formatClock(stopMillis)}"
+
+    /** Format the guide date as "Sat, Nov 7". */
+    fun formatDate(millis: Long): String {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+        val days = arrayOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+        val months = arrayOf(
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+        )
+        return "${days[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1]}, " +
+            "${months[cal.get(java.util.Calendar.MONTH)]} ${cal.get(java.util.Calendar.DAY_OF_MONTH)}"
+    }
 }

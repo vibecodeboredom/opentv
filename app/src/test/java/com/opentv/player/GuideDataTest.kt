@@ -71,4 +71,23 @@ class GuideDataTest {
         assertEquals(60L, layout.startOffsetMinutes)
         assertEquals(60L, layout.widthMinutes)
     }
+
+    @Test
+    fun formatTimeRangeShowsStartAndEnd() {
+        // 2026-11-07 20:00 -> 21:00 UTC. (Device timezone may shift the
+        // hour, so only check the shape: two clock times joined by a dash.)
+        val start = 1_794_081_600_000L
+        val end = start + hour
+        val range = GuideData.formatTimeRange(start, end)
+        assertTrue(range.contains("–"))
+        assertTrue(range.contains(":"))
+    }
+
+    @Test
+    fun formatDateShowsWeekdayMonthDay() {
+        // 2026-11-07 is a Saturday.
+        val date = GuideData.formatDate(1_794_081_600_000L)
+        assertTrue(date.contains("Nov"))
+        assertTrue(date.contains("7"))
+    }
 }
