@@ -293,17 +293,17 @@ class GuideActivity : FragmentActivity() {
                 channelCell.addView(TextView(this).apply {
                     text = row.channel.number.toString()
                     setTextColor(0xFF3B82F6.toInt())
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
                     typeface = Typeface.DEFAULT_BOLD
                     gravity = Gravity.CENTER_VERTICAL
                     layoutParams = LinearLayout.LayoutParams(
-                        dpToPx(48),
+                        dpToPx(40),
                         LinearLayout.LayoutParams.MATCH_PARENT
                     )
                 })
             }
             val logo = ImageView(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dpToPx(48), dpToPx(48)).apply {
+                layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40)).apply {
                     marginEnd = dpToPx(12)
                 }
                 load(row.channel.logo) {
@@ -315,7 +315,7 @@ class GuideActivity : FragmentActivity() {
             val nameView = TextView(this).apply {
                 text = row.channel.name
                 setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -346,7 +346,7 @@ class GuideActivity : FragmentActivity() {
                 val card = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
+                    setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
                     isFocusable = true
                     isFocusableInTouchMode = true
                     setBackgroundResource(
@@ -641,7 +641,8 @@ class GuideActivity : FragmentActivity() {
         private const val WINDOW_HOURS = 6
         private const val PX_PER_MINUTE_DP = 4
         private const val CHANNEL_COL_DP = 320
-        private const val CELL_HEIGHT_DP = 72
+        /** Thinner rows (was 72) so more channels fit on one TV screen. */
+        private const val CELL_HEIGHT_DP = 56
         private const val CELL_MARGIN_DP = 3
     }
 }
