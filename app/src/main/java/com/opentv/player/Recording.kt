@@ -17,8 +17,12 @@ data class Recording(
     val inProgress: Boolean
 ) {
     companion object {
+        /** Compiled once — idForChannel used to recompile the pattern
+         * on every call. */
+        private val UNSAFE_CHARS = Regex("[^A-Za-z0-9_.-]")
+
         /** A download id is derived from the channel id; keep it filesystem-safe. */
         fun idForChannel(channelId: String): String =
-            "rec_" + channelId.replace(Regex("[^A-Za-z0-9_.-]"), "_").take(80)
+            "rec_" + channelId.replace(UNSAFE_CHARS, "_").take(80)
     }
 }

@@ -16,7 +16,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.launch
 import java.text.DateFormat
-import java.util.Date
 
 /**
  * The recordings screen: every local recording as a card, with the total
@@ -48,7 +47,10 @@ class RecordingsFragment : BrowseSupportFragment() {
 
     private fun loadRecordings() {
         val recordings = RecordingManager.listRecordings(requireContext())
-        val used = RecordingManager.totalBytesUsed(requireContext())
+        // Total bytes from the list already fetched — the old code
+        // called totalBytesUsed, which re-ran the whole DownloadIndex
+        // query just to sum the same rows.
+        val used = recordings.sumOf { it.bytesDownloaded }
         title = if (recordings.isEmpty()) {
             getString(R.string.recordings)
         } else {
@@ -70,7 +72,7 @@ class RecordingsFragment : BrowseSupportFragment() {
 
     private fun showRecordingOptions(recording: Recording) {
         val date = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-            .format(Date(recording.startedAtMillis))
+            .format(recording.startedAtMillis)
         val info = getString(
             R.string.recording_info,
             recording.channelName,

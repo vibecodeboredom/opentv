@@ -37,6 +37,12 @@ class SettingsActivity : FragmentActivity() {
     private val shareUiHandler = Handler(Looper.getMainLooper())
     private var shareTicker: Runnable? = null
 
+    /** Share views, cached once — updateShareUi runs once a second
+     * while sharing, and the old code did two findViewById walks per
+     * tick. */
+    private lateinit var shareStatusView: TextView
+    private lateinit var shareButtonView: Button
+
     /** Local M3U file picker for the share's "local file" source. */
     private val pickM3uFile =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -70,6 +76,9 @@ class SettingsActivity : FragmentActivity() {
         uploadUrl.setText(PlaylistRepository.uploadUrl(this))
 
         buildPlaylistsUi()
+
+        shareStatusView = findViewById(R.id.share_status)
+        shareButtonView = findViewById(R.id.share_button)
 
         findViewById<Button>(R.id.add_playlist_button).setOnClickListener {
             showAddPlaylistDialog()
@@ -371,11 +380,14 @@ class SettingsActivity : FragmentActivity() {
     /** Show the share URL + download URL + import URL + countdown while
      * running, else "Not sharing". */
     private fun updateShareUi() {
-        val status = findViewById<TextView>(R.id.share_status)
-        val button = findViewById<Button>(R.id.share_button)
+        val status = shareStatusView
+        val button = shareButtonView
         if (PlaylistShareServer.isRunning) {
             val totalSeconds = (PlaylistShareServer.remainingMillis() / 1000).toInt()
-            val countdown = "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
+            // Manual "m:ss" — String.format on every 1-second tick.
+            val seconds = totalSeconds % 60
+            val countdown = "${totalSeconds / 60}:" +
+                if (seconds < 10) "0$seconds" else "$seconds"
             status.text = getString(
                 R.string.share_running,
                 PlaylistShareServer.shareUrl ?: "",

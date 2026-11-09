@@ -75,16 +75,23 @@ class BrowseFragment : BrowseSupportFragment() {
         rowsAdapter.clear()
 
         val hidden = PlaylistRepository.hiddenChannels(requireContext())
-        val visible = channels.filter { !hidden.contains(it.id) }
         val favorites = PlaylistRepository.favorites(requireContext())
-        val favoriteChannels = visible.filter { favorites.contains(it.id) }
+        // Single pass for the favorites row and the group rows — the
+        // old code scanned the whole playlist three times (two filters
+        // + groupBy) to build the same rows.
+        val favoriteChannels = mutableListOf<Channel>()
+        val grouped = linkedMapOf<String, MutableList<Channel>>()
+        for (ch in channels) {
+            if (hidden.contains(ch.id)) continue
+            if (favorites.contains(ch.id)) favoriteChannels += ch
+            (grouped.getOrPut(ch.group) { mutableListOf() }) += ch
+        }
         if (favoriteChannels.isNotEmpty()) {
             val favAdapter = ArrayObjectAdapter(ChannelPresenter())
             favoriteChannels.forEach { favAdapter.add(it) }
             rowsAdapter.add(ListRow(HeaderItem(getString(R.string.favorites)), favAdapter))
         }
 
-        val grouped = visible.groupBy { it.group }
         for ((group, groupChannels) in grouped) {
             val groupAdapter = ArrayObjectAdapter(ChannelPresenter())
             groupChannels.forEach { groupAdapter.add(it) }

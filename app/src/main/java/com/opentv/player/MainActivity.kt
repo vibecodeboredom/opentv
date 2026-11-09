@@ -61,12 +61,18 @@ class MainActivity : FragmentActivity() {
             val result = playlistDeferred.await()
             result.onSuccess { channels ->
                 val hidden = PlaylistRepository.hiddenChannels(this@MainActivity)
-                val visible = channels.filter { it.id !in hidden }
-                val pool = visible.ifEmpty { channels }
                 // Resume the last channel that actually played; random
                 // only when there is none (or it is no longer listed).
+                // No filtered copy of the whole playlist — the launch
+                // path used to build one just to pick a channel from
+                // it. The fallback order matches the old code exactly:
+                // last visible → random visible → last (even hidden,
+                // when everything is hidden) → random of all.
                 val lastId = PlaylistRepository.lastChannelId(this@MainActivity)
-                val pick = pool.firstOrNull { it.id == lastId } ?: pool.randomOrNull()
+                val pick = channels.firstOrNull { it.id == lastId && it.id !in hidden }
+                    ?: randomVisibleChannel(channels, hidden)
+                    ?: channels.firstOrNull { it.id == lastId }
+                    ?: channels.randomOrNull()
                 if (pick == null) {
                     showBrowse()
                     return@onSuccess
@@ -114,5 +120,24 @@ class MainActivity : FragmentActivity() {
         supportFragmentManager.beginTransaction()
             .replace(R.id.browse_frame, BrowseFragment())
             .commit()
+    }
+
+    /** One random visible channel, allocation-free: counts the visible
+     * channels, picks a random index, then walks to it. Returns null
+     * when no channel is visible (the caller falls back to the full
+     * list, as the old filtered-list code did). */
+    private fun randomVisibleChannel(channels: List<Channel>, hidden: Set<String>): Channel? {
+        var visibleCount = 0
+        for (ch in channels) if (ch.id !in hidden) visibleCount++
+        if (visibleCount == 0) return null
+        val target = (0 until visibleCount).random()
+        var seen = 0
+        for (ch in channels) {
+            if (ch.id !in hidden) {
+                if (seen == target) return ch
+                seen++
+            }
+        }
+        return null
     }
 }

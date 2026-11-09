@@ -1,7 +1,6 @@
 package com.opentv.player
 
 import java.util.Calendar
-import java.util.Locale
 import java.util.TimeZone
 
 /**
@@ -101,20 +100,39 @@ object CatchUp {
     private fun substitute(template: String, programme: EpgParser.Programme): String {
         val startSec = programme.startMillis / 1000
         val stopSec = programme.stopMillis / 1000
-        val cal = utcCalendar()
-        cal.timeInMillis = programme.startMillis
         var out = template
-        out = out.replace("{utc}", startSec.toString())
-        out = out.replace("{lutc}", stopSec.toString())
-        out = out.replace("\${start}", startSec.toString())
-        out = out.replace("\${end}", stopSec.toString())
-        out = out.replace("{Y}", "%04d".format(Locale.US, cal.get(Calendar.YEAR)))
-        out = out.replace("{m}", "%02d".format(Locale.US, cal.get(Calendar.MONTH) + 1))
-        out = out.replace("{d}", "%02d".format(Locale.US, cal.get(Calendar.DAY_OF_MONTH)))
-        out = out.replace("{H}", "%02d".format(Locale.US, cal.get(Calendar.HOUR_OF_DAY)))
-        out = out.replace("{M}", "%02d".format(Locale.US, cal.get(Calendar.MINUTE)))
-        out = out.replace("{S}", "%02d".format(Locale.US, cal.get(Calendar.SECOND)))
+        // Only substitute a placeholder the template actually uses —
+        // the old code ran ten replaces (and six String.format calls)
+        // on every template, even one with a single {utc}.
+        if (out.contains("{utc}")) out = out.replace("{utc}", startSec.toString())
+        if (out.contains("{lutc}")) out = out.replace("{lutc}", stopSec.toString())
+        if (out.contains("\${start}")) out = out.replace("\${start}", startSec.toString())
+        if (out.contains("\${end}")) out = out.replace("\${end}", stopSec.toString())
+        if (out.contains("{Y}") || out.contains("{m}") || out.contains("{d}") ||
+            out.contains("{H}") || out.contains("{M}") || out.contains("{S}")
+        ) {
+            val cal = utcCalendar()
+            cal.timeInMillis = programme.startMillis
+            if (out.contains("{Y}")) out = out.replace("{Y}", pad4(cal.get(Calendar.YEAR)))
+            if (out.contains("{m}")) out = out.replace("{m}", pad2(cal.get(Calendar.MONTH) + 1))
+            if (out.contains("{d}")) out = out.replace("{d}", pad2(cal.get(Calendar.DAY_OF_MONTH)))
+            if (out.contains("{H}")) out = out.replace("{H}", pad2(cal.get(Calendar.HOUR_OF_DAY)))
+            if (out.contains("{M}")) out = out.replace("{M}", pad2(cal.get(Calendar.MINUTE)))
+            if (out.contains("{S}")) out = out.replace("{S}", pad2(cal.get(Calendar.SECOND)))
+        }
         return out
+    }
+
+    /** Zero-padded numbers without String.format (which builds a
+     * Formatter and parses the format string on every call) — identical
+     * output to "%02d" / "%04d" for non-negative values. */
+    private fun pad2(v: Int): String = if (v < 10) "0$v" else v.toString()
+
+    private fun pad4(v: Int): String = when {
+        v < 10 -> "000$v"
+        v < 100 -> "00$v"
+        v < 1000 -> "0$v"
+        else -> v.toString()
     }
 
     /** One UTC Calendar per thread, reused like GuideData's local one. */

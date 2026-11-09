@@ -85,6 +85,15 @@ class GuideActivity : FragmentActivity() {
     private var nowMillis: Long = 0L
     private var pxPerMinute: Int = 0
     private var channelColWidth: Int = 0
+    /** Pixel values for the dp sizes used in the per-row / per-card
+     * loops, computed once in onCreate. dpToPx() runs
+     * TypedValue.applyDimension on every call, and a guide build calls
+     * it ~5 times per row and twice per programme card (up to 400 rows). */
+    private var px3: Int = 0
+    private var px4: Int = 0
+    private var px12: Int = 0
+    private var px16: Int = 0
+    private var px40: Int = 0
 
     /** Pinned channel-name column (4.7.2): sits beside the horizontal
      * scroller, so the names never scroll away sideways. */
@@ -118,6 +127,16 @@ class GuideActivity : FragmentActivity() {
 
     /** The programme the details header is currently showing. */
     private var detailChannelShown: Channel? = null
+
+    /** Cached favorite ids. updateDetailStar runs on every focus
+     * change, and it used to read the favorites set out of
+     * SharedPreferences on every one. The set only changes through
+     * this activity's own star / menu toggles (which update the
+     * cache), so a cached copy is always in sync; it is refreshed
+     * on resume as a safety net. */
+    private var favoritesCache: Set<String> = emptySet()
+
+    private fun isFavorite(channelId: String): Boolean = channelId in favoritesCache
 
     /** Id of the channel playing underneath (passed by PlaybackActivity);
      * its number + name are highlighted in the accent colour. */
@@ -178,6 +197,12 @@ class GuideActivity : FragmentActivity() {
 
         pxPerMinute = dpToPx(PX_PER_MINUTE_DP)
         channelColWidth = dpToPx(CHANNEL_COL_DP)
+        px3 = dpToPx(3)
+        px4 = dpToPx(4)
+        px12 = dpToPx(12)
+        px16 = dpToPx(16)
+        px40 = dpToPx(40)
+        favoritesCache = PlaylistRepository.favorites(this)
 
         // The star is a touch target only — it must never steal DPAD
         // focus, or the guide opens with nothing in the grid focused
@@ -188,8 +213,9 @@ class GuideActivity : FragmentActivity() {
         detailStar.setOnClickListener {
             val ch = detailChannelShown ?: return@setOnClickListener
             PlaylistRepository.toggleFavorite(this, ch.id)
+            favoritesCache = PlaylistRepository.favorites(this)
             updateDetailStar(ch)
-            val added = PlaylistRepository.favorites(this).contains(ch.id)
+            val added = isFavorite(ch.id)
             Toast.makeText(
                 this,
                 if (added) R.string.menu_added_favorite else R.string.menu_removed_favorite,
@@ -263,6 +289,12 @@ class GuideActivity : FragmentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Safety net for the favorites cache (see the field comment).
+        favoritesCache = PlaylistRepository.favorites(this)
+    }
+
     /**
      * Key handling for the left sidebar (4.6.2). Everything else uses
      * the default focus navigation so programme-cell clicks and the
@@ -291,7 +323,12 @@ class GuideActivity : FragmentActivity() {
                         return true
                     }
                     val focused = currentFocus
-                    if (focused != null && channelCells.contains(focused)) {
+                    // A channel cell is tagged with its row index (an
+                    // Int); programme cards are tagged with their
+                    // Programme — so the tag alone says which one has
+                    // focus, without a linear scan of channelCells on
+                    // every Left press.
+                    if (focused != null && focused.tag is Int) {
                         // Left from the channel name cell opens the
                         // sidebar (4.7.2).
                         channelSidebar.show()
@@ -317,7 +354,8 @@ class GuideActivity : FragmentActivity() {
                         return true
                     }
                     val focused = currentFocus
-                    if (focused != null && channelCells.contains(focused)) {
+                    // Channel cell = Int tag (see the Left branch).
+                    if (focused != null && focused.tag is Int) {
                         // Right from the channel name moves focus to the
                         // row's first programme card (4.7.2).
                         val idx = focused.tag as? Int
@@ -471,8 +509,16 @@ class GuideActivity : FragmentActivity() {
             else -> 0xFFFFFFFF.toInt()
         }
 
-    /** Show a channel + programme in the details header. */
+    /** Show a channel + programme in the details header. The
+     * channel-specific fields (name, category, logo) are only set
+     * when the channel actually changed — focus moves between
+     * programmes of the SAME channel far more often than between
+     * channels, and the old code re-set those views and re-issued a
+     * Coil logo load on every single focus move. */
+    private var detailLogoUrl: String? = null
+
     private fun showDetails(channel: Channel, programme: EpgParser.Programme) {
+        val channelChanged = detailChannelShown?.id != channel.id
         detailChannelShown = channel
         // 5.0.0: a catch-up programme gets the ⏪ marker here too.
         val isCatchup = programme.stopMillis <= nowMillis &&
@@ -480,15 +526,24 @@ class GuideActivity : FragmentActivity() {
         detailTitle.text =
             if (isCatchup) "⏪ ${programme.title}" else programme.title
         detailTime.text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
-        detailChannel.text = if (channel.number > 0) {
-            "${channel.number}  ${channel.name}"
-        } else {
-            channel.name
-        }
-        detailCategory.text = channel.group
-        detailLogo.load(channel.logo) {
-            placeholder(android.R.drawable.ic_media_play)
-            error(android.R.drawable.ic_media_play)
+        if (channelChanged) {
+            detailChannel.text = if (channel.number > 0) {
+                "${channel.number}  ${channel.name}"
+            } else {
+                channel.name
+            }
+            detailCategory.text = channel.group
+            // Skip re-loading the same logo — but only for a real URL:
+            // a null logo still loads every time (Coil shows the
+            // placeholder), exactly as before.
+            val logoUrl = channel.logo
+            if (logoUrl == null || logoUrl != detailLogoUrl) {
+                detailLogoUrl = logoUrl
+                detailLogo.load(logoUrl) {
+                    placeholder(android.R.drawable.ic_media_play)
+                    error(android.R.drawable.ic_media_play)
+                }
+            }
         }
         val isNow = nowMillis in programme.startMillis until programme.stopMillis
         if (isNow) {
@@ -508,7 +563,7 @@ class GuideActivity : FragmentActivity() {
     }
 
     private fun updateDetailStar(channel: Channel) {
-        val isFav = PlaylistRepository.favorites(this).contains(channel.id)
+        val isFav = isFavorite(channel.id)
         detailStar.text = if (isFav) "★" else "☆"
         detailStar.setTextColor(
             if (isFav) 0xFFFFC107.toInt() else 0xFF7A7A85.toInt()
@@ -596,7 +651,7 @@ class GuideActivity : FragmentActivity() {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dpToPx(12), 0, dpToPx(12), 0)
+            setPadding(px12, 0, px12, 0)
             layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
         })
         val header = LinearLayout(this).apply {
@@ -642,7 +697,7 @@ class GuideActivity : FragmentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(0xFF161616.toInt())
-            setPadding(dpToPx(12), 0, dpToPx(12), 0)
+            setPadding(px12, 0, px12, 0)
             // Focusable (4.7.2): Left from the first programme card
             // lands here, and Left from here opens the sidebar — so
             // the channel name is always reachable from the grid.
@@ -665,14 +720,14 @@ class GuideActivity : FragmentActivity() {
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
-                    dpToPx(40),
+                    px40,
                     LinearLayout.LayoutParams.MATCH_PARENT
                 )
             })
         }
         val logo = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40)).apply {
-                marginEnd = dpToPx(12)
+            layoutParams = LinearLayout.LayoutParams(px40, px40).apply {
+                marginEnd = px12
             }
             load(row.channel.logo) {
                 placeholder(android.R.drawable.ic_media_play)
@@ -769,7 +824,7 @@ class GuideActivity : FragmentActivity() {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4))
+                setPadding(px12, px4, px12, px4)
                 isFocusable = true
                 isFocusableInTouchMode = true
                 // Tagged with its programme so the sidebar's left-edge
@@ -946,7 +1001,12 @@ class GuideActivity : FragmentActivity() {
     /** Keep the red now-line spanning the whole grid. The frame grows as
      * rows are appended, so the line's height is re-set after each
      * append (and once when the guide first opens). Stale posts from an
-     * older build are dropped via the generation counter. */
+     * older build are dropped via the generation counter. The height is
+     * only re-set when it actually changed — the old code built a new
+     * LayoutParams and forced a layout pass on every append even when
+     * the frame hadn't grown. */
+    private var nowLineHeight = 0
+
     private fun refreshNowLine(attempts: Int = 0) {
         val generation = guideBuildGeneration
         container.post {
@@ -954,8 +1014,11 @@ class GuideActivity : FragmentActivity() {
             if (nowLine.visibility != View.VISIBLE) return@post
             val h = guideFrame.height
             if (h > 0) {
-                nowLine.layoutParams = FrameLayout.LayoutParams(dpToPx(3), h)
-                nowLine.requestLayout()
+                if (h != nowLineHeight) {
+                    nowLineHeight = h
+                    nowLine.layoutParams = FrameLayout.LayoutParams(px3, h)
+                    nowLine.requestLayout()
+                }
             } else if (attempts < 3) {
                 // Not laid out yet — try again after the next pass.
                 refreshNowLine(attempts + 1)
@@ -1037,11 +1100,14 @@ class GuideActivity : FragmentActivity() {
         val recentList = view.findViewById<LinearLayout>(R.id.menu_recent_list)
         // Recent searches (4.9.3): shown while the field is empty, so a
         // past query can be re-run without typing. Hidden as soon as the
-        // user starts typing, so the menu doesn't jump around.
+        // user starts typing, so the menu doesn't jump around. Loaded
+        // once for this menu — the old code re-read the list out of
+        // SharedPreferences on every keystroke (the visibility check
+        // runs in afterTextChanged).
+        val recents = PlaylistRepository.recentSearches(this).toMutableList()
         val updateRecentVisibility = {
             recentContainer.visibility =
-                if (menuSearch.text.isEmpty() &&
-                    PlaylistRepository.recentSearches(this).isNotEmpty()
+                if (menuSearch.text.isEmpty() && recents.isNotEmpty()
                 ) View.VISIBLE else View.GONE
         }
         menuSearch.addTextChangedListener(object : TextWatcher {
@@ -1061,9 +1127,10 @@ class GuideActivity : FragmentActivity() {
                 true
             } else false
         }
-        populateRecentSearches(recentList, menuSearch, dialog, updateRecentVisibility)
+        populateRecentSearches(recents, recentList, menuSearch, dialog, updateRecentVisibility)
         view.findViewById<TextView>(R.id.menu_clear_recent).setOnClickListener {
             PlaylistRepository.clearRecentSearches(this)
+            recents.clear()
             recentList.removeAllViews()
             updateRecentVisibility()
         }
@@ -1106,14 +1173,15 @@ class GuideActivity : FragmentActivity() {
             if (channel.number > 0) "${channel.number}  ${channel.name}" else channel.name
 
         val favoriteRow = view.findViewById<TextView>(R.id.menu_favorite)
-        val isFav = PlaylistRepository.favorites(this).contains(channel.id)
+        val isFav = isFavorite(channel.id)
         favoriteRow.text = getString(
             if (isFav) R.string.menu_remove_favorite else R.string.menu_add_favorite
         )
         favoriteRow.setOnClickListener {
             dialog.dismiss()
             PlaylistRepository.toggleFavorite(this, channel.id)
-            val added = PlaylistRepository.favorites(this).contains(channel.id)
+            favoritesCache = PlaylistRepository.favorites(this)
+            val added = isFavorite(channel.id)
             Toast.makeText(
                 this,
                 if (added) R.string.menu_added_favorite else R.string.menu_removed_favorite,
@@ -1166,20 +1234,20 @@ class GuideActivity : FragmentActivity() {
      * closes the menu onto the results.
      */
     private fun populateRecentSearches(
+        recents: List<String>,
         recentList: LinearLayout,
         menuSearch: EditText,
         dialog: Dialog,
         updateRecentVisibility: () -> Unit
     ) {
         recentList.removeAllViews()
-        val recents = PlaylistRepository.recentSearches(this)
-            .take(MAX_RECENT_SEARCHES_SHOWN)
-        for (query in recents) {
+        val shown = recents.take(MAX_RECENT_SEARCHES_SHOWN)
+        for (query in shown) {
             recentList.addView(TextView(this).apply {
                 text = query
                 setTextColor(0xFFFFFFFF.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+                setPadding(px16, px12, px16, px12)
                 setBackgroundResource(R.drawable.guide_menu_item_bg)
                 isFocusable = true
                 isFocusableInTouchMode = true
@@ -1234,7 +1302,7 @@ class GuideActivity : FragmentActivity() {
                 ?: channel.tvgId.orEmpty())
             hint = getString(R.string.menu_assign_epg_hint)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+            setPadding(px16, px12, px16, px12)
         }
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.menu_assign_epg_title, channel.name))

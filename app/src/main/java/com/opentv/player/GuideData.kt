@@ -56,9 +56,12 @@ object GuideData {
         windowHours: Int = 6
     ): GuideRow? {
         val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
-        val inWindow = programmes
-            .filter { it.stopMillis > windowStartMillis && it.startMillis < windowEnd }
-            .sortedBy { it.startMillis }
+        // One list, sorted in place — the old filter().sortedBy()
+        // built two throwaway lists per row (400 rows per guide build).
+        val inWindow = programmes.filterTo(mutableListOf()) {
+            it.stopMillis > windowStartMillis && it.startMillis < windowEnd
+        }
+        inWindow.sortBy { it.startMillis }
         return if (inWindow.isNotEmpty()) {
             GuideRow(channel, inWindow)
         } else {
@@ -85,19 +88,26 @@ object GuideData {
             ?: emptyList()
     }
 
-    /** Split a search query into lowercase words. */
+    /** Split a search query into lowercase words. The whitespace
+     * regex is compiled once — it used to be rebuilt on every call —
+     * and the trim is folded into the empty-word filter, so no
+     * intermediate trimmed copy is made. */
     fun searchWords(query: String): List<String> =
-        query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        query.lowercase().split(WHITESPACE_REGEX).filter { it.isNotEmpty() }
 
     /** True when every word in [words] appears as a substring of [text]
      * (case-insensitive). Partial words match — typing "break" finds
      * "Breaking Bad" — and multi-word queries need every word present,
-     * in any order. An empty word list never matches. */
+     * in any order. An empty word list never matches. The case-insensitive
+     * contains() avoids lowercasing the whole text on every check — a
+     * search used to allocate a lowercase copy of every programme title
+     * in the EPG (tens of thousands) per keystroke. */
     fun matchesWords(text: String, words: List<String>): Boolean {
         if (words.isEmpty()) return false
-        val lower = text.lowercase()
-        return words.all { lower.contains(it) }
+        return words.all { text.contains(it, ignoreCase = true) }
     }
+
+    private val WHITESPACE_REGEX = Regex("\\s+")
 
     /**
      * Search the WHOLE playlist and the WHOLE EPG (4.9.0). The old
@@ -217,7 +227,7 @@ object GuideData {
         val minute = cal.get(java.util.Calendar.MINUTE)
         val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
         val hour12 = if (hour == 0) 12 else hour
-        return if (minute == 0) "$hour12 $amPm" else "$hour12:${minute.toString().padStart(2, '0')} $amPm"
+        return if (minute == 0) "$hour12 $amPm" else "$hour12:${twoDigits(minute)} $amPm"
     }
 
     /** Format a clock time as "8:00 PM" (always with minutes). */
@@ -227,8 +237,13 @@ object GuideData {
         val minute = cal.get(java.util.Calendar.MINUTE)
         val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
         val hour12 = if (hour == 0) 12 else hour
-        return "$hour12:${minute.toString().padStart(2, '0')} $amPm"
+        return "$hour12:${twoDigits(minute)} $amPm"
     }
+
+    /** Two-digit zero-padded number ("05", "30") without padStart /
+     * String.format — the format helpers run on every guide focus
+     * change, so the padding is a plain branch. */
+    private fun twoDigits(v: Int): String = if (v < 10) "0$v" else v.toString()
 
     /** Format a programme's time span as "8:00 – 9:00 PM". */
     fun formatTimeRange(startMillis: Long, stopMillis: Long): String =

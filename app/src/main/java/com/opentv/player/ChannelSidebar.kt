@@ -76,6 +76,11 @@ class ChannelSidebar(
      * rows after they are built. */
     private val programmeViews = mutableMapOf<String, TextView>()
 
+    /** Display density, cached once — dp() used to read
+     * activity.resources.displayMetrics on every call (up to ~10 per
+     * sidebar row, 200 rows per open). */
+    private val density: Float by lazy { activity.resources.displayMetrics.density }
+
     fun isVisible(): Boolean = panel.visibility == View.VISIBLE
 
     /** Open the sidebar on the groups list. 5.0.0: it slides in from
@@ -216,7 +221,7 @@ class ChannelSidebar(
 
     private data class SidebarGroup(val key: String, val label: String, val count: Int)
 
-    private fun dp(v: Int): Int = (v * activity.resources.displayMetrics.density).toInt()
+    private fun dp(v: Int): Int = (v * density).toInt()
 
     /** The groups list: All channels, Favorites, History, then playlist groups.
      * Builds synchronously when the playlist is already in memory. */
@@ -242,11 +247,21 @@ class ChannelSidebar(
     /** Render the groups list from a channel list. Runs on the main thread. */
     private fun renderGroups(channels: List<Channel>) {
         val hidden = PlaylistRepository.hiddenChannels(activity)
-        val visible = channels.filter { it.id !in hidden }
         val favorites = PlaylistRepository.favorites(activity)
         val recents = PlaylistRepository.recentChannelIds(activity)
-        // Single pass for the per-group counts (was one full scan per group).
-        val groupCounts = visible.groupingBy { it.group }.eachCount()
+        // Single pass for the visible count, the per-group counts and
+        // the favorites count — the old code built a filtered copy of
+        // the whole playlist, then scanned it once per group (groupingBy)
+        // and once more for favorites.
+        val groupCounts = mutableMapOf<String, Int>()
+        var visibleCount = 0
+        var favoriteCount = 0
+        for (ch in channels) {
+            if (ch.id in hidden) continue
+            visibleCount++
+            groupCounts[ch.group] = (groupCounts[ch.group] ?: 0) + 1
+            if (ch.id in favorites) favoriteCount++
+        }
         val items = mutableListOf<SidebarGroup>()
         // 4.8.0: "Playlists" first — it opens the playlist picker,
         // not a channel list. The count is the enabled (switchable)
@@ -255,10 +270,10 @@ class ChannelSidebar(
             GROUP_PLAYLISTS, activity.getString(R.string.playlists_title),
             PlaylistRepository.enabledPlaylists(activity).size
         )
-        items += SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visible.size)
+        items += SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visibleCount)
         items += SidebarGroup(
             GROUP_FAVORITES, activity.getString(R.string.favorites),
-            visible.count { it.id in favorites }
+            favoriteCount
         )
         items += SidebarGroup(
             GROUP_HISTORY, activity.getString(R.string.sidebar_history), recents.size
@@ -366,15 +381,39 @@ class ChannelSidebar(
     /** Render one group's channels from a channel list. Main thread. */
     private fun renderChannels(groupKey: String, channels: List<Channel>) {
         val hidden = PlaylistRepository.hiddenChannels(activity)
-        val visible = channels.filter { it.id !in hidden }
-        val favorites = PlaylistRepository.favorites(activity)
-        val recents = PlaylistRepository.recentChannelIds(activity)
-        val byId = channels.associateBy { it.id }
-        val channelList = when (groupKey) {
-            GROUP_ALL -> visible
-            GROUP_FAVORITES -> visible.filter { it.id in favorites }
-            GROUP_HISTORY -> recents.mapNotNull { byId[it] }.filter { it.id !in hidden }
-            else -> visible.filter { it.group == groupKey }
+        // Single pass, no filtered copy of the whole playlist — the
+        // old code built one, then filtered it a second time for the
+        // group. The id map is only built for History, the one group
+        // that looks channels up by id (the old code built a ~1500
+        // entry map on every group open, even for All channels).
+        val channelList: List<Channel> = when (groupKey) {
+            GROUP_HISTORY -> {
+                val byId = channels.associateBy { it.id }
+                val recents = PlaylistRepository.recentChannelIds(activity)
+                recents.mapNotNull { byId[it] }.filter { it.id !in hidden }
+            }
+            GROUP_FAVORITES -> {
+                val favorites = PlaylistRepository.favorites(activity)
+                val list = mutableListOf<Channel>()
+                for (ch in channels) {
+                    if (ch.id !in hidden && ch.id in favorites) list += ch
+                }
+                list
+            }
+            GROUP_ALL -> {
+                val list = mutableListOf<Channel>()
+                for (ch in channels) {
+                    if (ch.id !in hidden) list += ch
+                }
+                list
+            }
+            else -> {
+                val list = mutableListOf<Channel>()
+                for (ch in channels) {
+                    if (ch.id !in hidden && ch.group == groupKey) list += ch
+                }
+                list
+            }
         }
         subtitle.text = activity.getString(R.string.sidebar_channels_count, channelList.size)
         val shown = channelList.take(SIDEBAR_MAX_CHANNELS)

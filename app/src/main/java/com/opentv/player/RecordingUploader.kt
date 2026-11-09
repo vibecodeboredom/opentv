@@ -47,6 +47,10 @@ import kotlin.coroutines.resume
 @OptIn(UnstableApi::class)
 object RecordingUploader {
 
+    /** Compiled once — putFile used to recompile the pattern on every
+     * upload. */
+    private val UNSAFE_CHARS = Regex("[^A-Za-z0-9_.-]")
+
     /** Upload a recording. Returns the destination URL on success. */
     suspend fun upload(context: Context, recording: Recording): Result<String> =
         withContext(Dispatchers.IO) {
@@ -124,7 +128,7 @@ object RecordingUploader {
 
     private fun putFile(baseUrl: String, recording: Recording, file: File): String {
         val safeName = recording.channelName
-            .replace(Regex("[^A-Za-z0-9_.-]"), "_")
+            .replace(UNSAFE_CHARS, "_")
             .take(60)
             .ifBlank { "recording" }
         val date = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US)

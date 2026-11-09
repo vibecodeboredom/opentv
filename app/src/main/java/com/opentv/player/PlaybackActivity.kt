@@ -31,7 +31,6 @@ import androidx.media3.ui.PlayerView
 import coil.load
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /**
@@ -175,6 +174,17 @@ class PlaybackActivity : FragmentActivity() {
     private var catchupStopMillis: Long = 0L
     /** True once a failed catch-up has already fallen back to live. */
     private var catchupFallbackTried = false
+    /** Cached favorite ids (see GuideActivity — same pattern). The
+     * transport icons read favorites on every play/pause change and
+     * every overlay open, and the old code read the set out of
+     * SharedPreferences on each one. Refreshed on resume (the user
+     * may have favorited from the guide) and after every toggle
+     * made here. */
+    private var favoritesCache: Set<String> = emptySet()
+    /** Last logo URL loaded into the info overlay — showChannelInfo
+     * re-runs when the EPG lands, and the old code re-issued a Coil
+     * load of the same logo on every one. */
+    private var infoLogoUrl: String? = null
     /** The strip tiles, in order, for left/right focus movement. */
     private val stripTiles = mutableListOf<View>()
     private var channel: Channel? = null
@@ -268,6 +278,7 @@ class PlaybackActivity : FragmentActivity() {
         }
         pausedCluster.setOnClickListener { togglePlayPause() }
         findViewById<View>(R.id.sidebar_scrim).setOnClickListener { hideSidebar() }
+        favoritesCache = PlaylistRepository.favorites(this)
         updateTransportIcons()
 
         // Best-effort EPG: show Now / Next for this channel once it loads.
@@ -465,6 +476,8 @@ class PlaybackActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         guideLaunched = false
+        // The user may have favorited this channel from the guide.
+        favoritesCache = PlaylistRepository.favorites(this)
     }
 
     /**
@@ -581,7 +594,7 @@ class PlaybackActivity : FragmentActivity() {
             else R.drawable.ic_pause
         )
         val ch = channel
-        val isFav = ch != null && PlaylistRepository.favorites(this).contains(ch.id)
+        val isFav = ch != null && ch.id in favoritesCache
         transportFavorite.setImageResource(
             if (isFav) R.drawable.ic_star_filled
             else R.drawable.ic_star
@@ -696,11 +709,20 @@ class PlaybackActivity : FragmentActivity() {
         val name = recordingName ?: ch?.name ?: return
         val now = System.currentTimeMillis()
         infoGroup.text = ch?.group ?: ""
-        infoDateTime.text = dateTimeFormat.format(Date(now))
+        // DateFormat.format(long) takes the millis directly — the old
+        // code wrapped each one in a throwaway Date (3 per overlay open).
+        infoDateTime.text = dateTimeFormat.format(now)
         infoChannelName.text = name
-        infoLogo.load(ch?.logo) {
-            placeholder(R.drawable.ic_play)
-            error(R.drawable.ic_play)
+        // Skip re-loading the same logo — but only for a real URL: a
+        // null logo (recording playback) still loads every time (Coil
+        // shows the placeholder), exactly as before.
+        val logoUrl = ch?.logo
+        if (logoUrl == null || logoUrl != infoLogoUrl) {
+            infoLogoUrl = logoUrl
+            infoLogo.load(logoUrl) {
+                placeholder(R.drawable.ic_play)
+                error(R.drawable.ic_play)
+            }
         }
         val nowP = nowProgramme
         if (nowP != null) {
@@ -712,8 +734,8 @@ class PlaybackActivity : FragmentActivity() {
                 if (catchupUrl != null) "⏪ ${nowP.title}" else nowP.title
             val mins = ((nowP.stopMillis - nowP.startMillis) / 60_000).toInt()
             val num = if (ch != null && ch.number > 0) "${ch.number} " else ""
-            infoNowMeta.text = "${timeFormat.format(Date(nowP.startMillis))} – " +
-                "${timeFormat.format(Date(nowP.stopMillis))}  •  $mins min  •  $num$name" +
+            infoNowMeta.text = "${timeFormat.format(nowP.startMillis)} – " +
+                "${timeFormat.format(nowP.stopMillis)}  •  $mins min  •  $num$name" +
                 if (catchupUrl != null) "  •  ⏪ ${getString(R.string.catchup_label)}" else ""
             infoNowMeta.visibility = View.VISIBLE
             val span = (nowP.stopMillis - nowP.startMillis).coerceAtLeast(1L)
@@ -727,8 +749,8 @@ class PlaybackActivity : FragmentActivity() {
         }
         val nextP = nextProgramme
         if (nextP != null) {
-            infoNext.text = "${timeFormat.format(Date(nextP.startMillis))} – " +
-                "${timeFormat.format(Date(nextP.stopMillis))}  •  ${nextP.title}"
+            infoNext.text = "${timeFormat.format(nextP.startMillis)} – " +
+                "${timeFormat.format(nextP.stopMillis)}  •  ${nextP.title}"
             infoNext.visibility = View.VISIBLE
         } else {
             // No next programme: hide the line instead of a second
@@ -765,7 +787,12 @@ class PlaybackActivity : FragmentActivity() {
         infoHandler.postDelayed(hideInfoRunnable, timeout)
     }
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    /** Display density, cached once — dp() used to read
+     * resources.displayMetrics on every call (up to ~90 calls per
+     * strip build). */
+    private val density: Float by lazy { resources.displayMetrics.density }
+
+    private fun dp(v: Int): Int = (v * density).toInt()
 
     /** Builds the bottom strip: TV guide, History, 3 most recent channels, Clear.
      * Common case: the playlist is already in memory, so the strip is built
@@ -963,14 +990,39 @@ class PlaybackActivity : FragmentActivity() {
         startActivity(intent)
     }
 
-    /** Pick a different random channel and restart playback with it. */
+    /** Pick a different random channel and restart playback with it.
+     * Allocation-free (same two-pass pattern 4.9.5 used for channel
+     * up/down): the old code built a filtered copy of the whole
+     * playlist just to pick one random channel from it. */
     private fun tryAnotherChannel() {
         val currentId = channel?.id
         lifecycleScope.launch {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
-            val pick = result.getOrNull()
-                ?.filter { it.id != currentId && it.id !in PlaylistRepository.hiddenChannels(this@PlaybackActivity) }
-                ?.randomOrNull()
+            val channels = result.getOrNull()
+            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            var visibleCount = 0
+            if (channels != null) {
+                for (ch in channels) {
+                    if (ch.id != currentId && ch.id !in hidden) visibleCount++
+                }
+            }
+            val pick: Channel? = if (visibleCount == 0 || channels == null) {
+                null
+            } else {
+                val target = (0 until visibleCount).random()
+                var seen = 0
+                var found: Channel? = null
+                for (ch in channels) {
+                    if (ch.id != currentId && ch.id !in hidden) {
+                        if (seen == target) {
+                            found = ch
+                            break
+                        }
+                        seen++
+                    }
+                }
+                found
+            }
             if (pick != null) {
                 val intent = Intent(this@PlaybackActivity, PlaybackActivity::class.java)
                 intent.putExtra(EXTRA_CHANNEL, pick)
@@ -1007,7 +1059,8 @@ class PlaybackActivity : FragmentActivity() {
     private fun toggleFavorite() {
         channel?.let {
             PlaylistRepository.toggleFavorite(this, it.id)
-            val isFav = PlaylistRepository.favorites(this).contains(it.id)
+            favoritesCache = PlaylistRepository.favorites(this)
+            val isFav = it.id in favoritesCache
             Toast.makeText(
                 this,
                 if (isFav) getString(R.string.added_favorite) else getString(R.string.removed_favorite),
@@ -1022,7 +1075,7 @@ class PlaybackActivity : FragmentActivity() {
             // Playing a recording: no channel options.
             return
         }
-        val isFav = PlaylistRepository.favorites(this).contains(ch.id)
+        val isFav = ch.id in favoritesCache
         val isRecording = RecordingManager.isRecording(this, ch.id)
         val hasRecording = RecordingManager.hasRecording(this, ch.id)
         val items = mutableListOf<String>()

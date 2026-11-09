@@ -33,9 +33,9 @@ object M3uParser {
             val line = rawLine.trim()
             if (line.isEmpty()) continue
             if (line.startsWith("#EXTM3U")) {
-                headerCatchupType = attr(line, "catchup")
-                headerCatchupDays = attr(line, "catchup-days")?.toIntOrNull()
-                headerCatchupSource = attr(line, "catchup-source")
+                headerCatchupType = attr(line, KEY_CATCHUP)
+                headerCatchupDays = attr(line, KEY_CATCHUP_DAYS)?.toIntOrNull()
+                headerCatchupSource = attr(line, KEY_CATCHUP_SOURCE)
                     ?.takeIf { it.isNotEmpty() }
                 continue
             }
@@ -49,32 +49,44 @@ object M3uParser {
             if (line.startsWith("#")) continue
             val url = line
             val name = extinf.substringAfter(",", "").trim()
-                .ifEmpty { attr(extinf, "tvg-name") ?: "Unknown" }
-            val tvgId = attr(extinf, "tvg-id")
+                .ifEmpty { attr(extinf, KEY_TVG_NAME) ?: "Unknown" }
+            val tvgId = attr(extinf, KEY_TVG_ID)
             val id = tvgId?.takeIf { it.isNotEmpty() } ?: "$name|$url"
             channels += Channel(
                 id = id,
                 name = name,
                 url = url,
-                group = attr(extinf, "group-title")?.takeIf { it.isNotEmpty() } ?: "Other",
-                logo = attr(extinf, "tvg-logo")?.takeIf { it.isNotEmpty() },
+                group = attr(extinf, KEY_GROUP_TITLE)?.takeIf { it.isNotEmpty() } ?: "Other",
+                logo = attr(extinf, KEY_TVG_LOGO)?.takeIf { it.isNotEmpty() },
                 tvgId = tvgId,
                 number = channels.size + 1,
-                catchupType = attr(extinf, "catchup") ?: headerCatchupType,
-                catchupDays = attr(extinf, "catchup-days")?.toIntOrNull()
+                catchupType = attr(extinf, KEY_CATCHUP) ?: headerCatchupType,
+                catchupDays = attr(extinf, KEY_CATCHUP_DAYS)?.toIntOrNull()
                     ?: headerCatchupDays,
-                catchupSource = attr(extinf, "catchup-source")
+                catchupSource = attr(extinf, KEY_CATCHUP_SOURCE)
                     ?.takeIf { it.isNotEmpty() } ?: headerCatchupSource
             )
         }
         return channels
     }
 
-    /** Value of key="..." in an #EXTINF line, or null when absent. */
-    private fun attr(line: String, key: String): String? {
-        val start = line.indexOf("$key=\"")
+    /** The full `key="` search tokens, as constants — attr() used to
+     * rebuild one (a string-template allocation) for every attribute
+     * of every channel, ~10k throwaway strings per playlist parse. */
+    private const val KEY_TVG_ID = "tvg-id=\""
+    private const val KEY_TVG_NAME = "tvg-name=\""
+    private const val KEY_TVG_LOGO = "tvg-logo=\""
+    private const val KEY_GROUP_TITLE = "group-title=\""
+    private const val KEY_CATCHUP = "catchup=\""
+    private const val KEY_CATCHUP_DAYS = "catchup-days=\""
+    private const val KEY_CATCHUP_SOURCE = "catchup-source=\""
+
+    /** Value of key="..." in an #EXTINF line, or null when absent.
+     * [token] is the full `key="` prefix (one of the constants above). */
+    private fun attr(line: String, token: String): String? {
+        val start = line.indexOf(token)
         if (start < 0) return null
-        val valueStart = start + key.length + 2
+        val valueStart = start + token.length
         val end = line.indexOf('"', valueStart)
         if (end < 0) return null
         return line.substring(valueStart, end)

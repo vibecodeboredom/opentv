@@ -46,37 +46,40 @@ class StatsActivity : FragmentActivity() {
             val channels = playlistResult.getOrNull() ?: emptyList()
             val favorites = PlaylistRepository.favorites(this@StatsActivity).size
             val recordings = RecordingManager.listRecordings(this@StatsActivity)
-            val recordingsBytes = RecordingManager.totalBytesUsed(this@StatsActivity)
+            // Total bytes from the list already fetched — totalBytesUsed
+            // re-runs the whole DownloadIndex query to sum the same rows.
+            val recordingsBytes = recordings.sumOf { it.bytesDownloaded }
 
-            runOnUiThread {
-                addSection(getString(R.string.stats_watching))
-                addRow(
-                    getString(R.string.stats_total_watch_time),
-                    StatsManager.formatDuration(stats.totalWatchMillis)
-                )
-                addRow(
-                    getString(R.string.stats_total_sessions),
-                    stats.totalSessions.toString()
-                )
-                if (stats.topChannels.isNotEmpty()) {
-                    addSection(getString(R.string.stats_most_watched))
-                    stats.topChannels.take(5).forEachIndexed { index, channel ->
-                        addRow(
-                            "${index + 1}. ${channel.name}",
-                            "${StatsManager.formatDuration(channel.watchMillis)} • ${channel.sessions} ${getString(R.string.stats_sessions)}"
-                        )
-                    }
+            // Already on the main thread (lifecycleScope is Main, and
+            // loadPlaylist does its I/O inside withContext(IO)) — the
+            // old runOnUiThread wrapper just posted a redundant hop.
+            addSection(getString(R.string.stats_watching))
+            addRow(
+                getString(R.string.stats_total_watch_time),
+                StatsManager.formatDuration(stats.totalWatchMillis)
+            )
+            addRow(
+                getString(R.string.stats_total_sessions),
+                stats.totalSessions.toString()
+            )
+            if (stats.topChannels.isNotEmpty()) {
+                addSection(getString(R.string.stats_most_watched))
+                stats.topChannels.take(5).forEachIndexed { index, channel ->
+                    addRow(
+                        "${index + 1}. ${channel.name}",
+                        "${StatsManager.formatDuration(channel.watchMillis)} • ${channel.sessions} ${getString(R.string.stats_sessions)}"
+                    )
                 }
-
-                addSection(getString(R.string.stats_library))
-                addRow(getString(R.string.stats_channels), channels.size.toString())
-                addRow(getString(R.string.stats_favorites), favorites.toString())
-                addRow(getString(R.string.stats_recordings), recordings.size.toString())
-                addRow(
-                    getString(R.string.stats_recordings_size),
-                    RecordingManager.formatBytes(recordingsBytes)
-                )
             }
+
+            addSection(getString(R.string.stats_library))
+            addRow(getString(R.string.stats_channels), channels.size.toString())
+            addRow(getString(R.string.stats_favorites), favorites.toString())
+            addRow(getString(R.string.stats_recordings), recordings.size.toString())
+            addRow(
+                getString(R.string.stats_recordings_size),
+                RecordingManager.formatBytes(recordingsBytes)
+            )
         }
     }
 

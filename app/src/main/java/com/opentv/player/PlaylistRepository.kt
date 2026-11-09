@@ -85,6 +85,18 @@ object PlaylistRepository {
     @Volatile private var playlistCache: Pair<Long, List<Channel>>? = null
     @Volatile private var epgCache: Pair<Long, Map<String, List<EpgParser.Programme>>>? = null
 
+    /** Parsed playlist list, cached so every activePlaylist() /
+     * enabledPlaylists() call doesn't re-split the stored string and
+     * rebuild the entries. The list only ever changes through
+     * savePlaylists() / resetUrls(), which invalidate it — and every
+     * caller copies before mutating, so the cached instance is never
+     * modified in place. */
+    @Volatile private var playlistsCache: List<Playlist>? = null
+
+    /** Parsed EPG-overrides map, cached the same way. Only
+     * setEpgOverride() changes it, and it invalidates the cache. */
+    @Volatile private var epgOverridesCache: Map<String, String>? = null
+
     /**
      * Background refresh (4.7.0): when a snapshot is stale, the fresh
      * data is fetched on this scope so the UI never blocks on it. The
@@ -120,10 +132,14 @@ object PlaylistRepository {
      * a one-entry list on first use, so existing users lose nothing.
      */
     fun playlists(context: Context): List<Playlist> {
+        playlistsCache?.let { return it }
         val raw = prefs(context).getString(KEY_PLAYLISTS, null)
         if (raw != null) {
             val list = parsePlaylists(raw)
-            if (list.isNotEmpty()) return list
+            if (list.isNotEmpty()) {
+                playlistsCache = list
+                return list
+            }
         }
         // First run after 4.8.0 (or an empty list): migrate the legacy
         // single URL, or the default when there is none.
@@ -132,6 +148,7 @@ object PlaylistRepository {
         val migrated = listOf(Playlist(defaultPlaylistName(legacy), legacy))
         savePlaylists(context, migrated)
         prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, legacy).apply()
+        playlistsCache = migrated
         return migrated
     }
 
@@ -290,6 +307,7 @@ object PlaylistRepository {
     }
 
     private fun savePlaylists(context: Context, list: List<Playlist>) {
+        playlistsCache = null
         val raw = list.joinToString("\n") {
             "${it.name}\u0001${it.url}\u0001${if (it.enabled) "1" else "0"}"
         }
@@ -343,6 +361,8 @@ object PlaylistRepository {
     /** Reset to the single default playlist + default EPG (keeps the
      * legacy keys cleared so a later migration starts clean). */
     fun resetUrls(context: Context) {
+        playlistsCache = null
+        epgOverridesCache = null
         prefs(context).edit()
             .remove(KEY_PLAYLIST_URL)
             .remove(KEY_EPG_URL)
@@ -440,12 +460,18 @@ object PlaylistRepository {
 
     /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */
     fun epgOverrides(context: Context): Map<String, String> {
+        epgOverridesCache?.let { return it }
         val raw = prefs(context).getString(KEY_EPG_OVERRIDES, "") ?: ""
-        if (raw.isBlank()) return emptyMap()
-        return raw.split("\n").mapNotNull { line ->
+        if (raw.isBlank()) {
+            epgOverridesCache = emptyMap()
+            return emptyMap()
+        }
+        val map = raw.split("\n").mapNotNull { line ->
             val idx = line.indexOf('=')
             if (idx <= 0) null else line.substring(0, idx) to line.substring(idx + 1)
         }.toMap()
+        epgOverridesCache = map
+        return map
     }
 
     fun setEpgOverride(context: Context, channelId: String, tvgId: String) {
@@ -453,6 +479,7 @@ object PlaylistRepository {
         if (tvgId.isBlank()) current.remove(channelId) else current[channelId] = tvgId.trim()
         val raw = current.entries.joinToString("\n") { "${it.key}=${it.value}" }
         prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
+        epgOverridesCache = null
     }
 
     /**

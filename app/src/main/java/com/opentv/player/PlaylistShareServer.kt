@@ -55,6 +55,10 @@ object PlaylistShareServer {
     /** Uploads larger than this are refused (an M3U is normally < 5 MB). */
     private const val MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
+    /** Compiled once — parseMultipart used to recompile it for every
+     * part of every upload. */
+    private val FILENAME_REGEX = Regex("filename=\"([^\"]*)\"")
+
     @Volatile var isRunning = false
         private set
     /** http://<tv-ip>:<port>/playlist.m3u — add this URL on the other device. */
@@ -418,7 +422,7 @@ object PlaylistShareServer {
             val fileName = partHeaders.lines()
                 .firstOrNull { it.trim().startsWith("Content-Disposition:", ignoreCase = true) }
                 ?.let { header ->
-                    Regex("filename=\"([^\"]*)\"").find(header)?.groupValues?.getOrNull(1)
+                    FILENAME_REGEX.find(header)?.groupValues?.getOrNull(1)
                 }
             val partBytes = body.copyOfRange(contentStart, contentEnd)
             if (!fileName.isNullOrBlank()) return fileName to partBytes
