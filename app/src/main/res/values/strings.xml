@@ -161,4 +161,10 @@
     <string name="playlist_activated">Activated %1$s</string>
     <string name="playlist_cannot_deactivate_last">You need at least one active playlist.</string>
     <string name="playlist_disabled_hint">This playlist is disabled — long-press it to activate it.</string>
+    <!-- Mobile (6.0.0-rc1): touch home screen + playback. -->
+    <string name="mobile_continue_watching">▶  Continue watching</string>
+    <string name="mobile_refresh">↻ Refresh</string>
+    <string name="mobile_retry">Retry</string>
+    <string name="mobile_results">Results (%1$d)</string>
+    <string name="mobile_channels">☰ Channels</string>
 </resources>

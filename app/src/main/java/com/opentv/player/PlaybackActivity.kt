@@ -7,8 +7,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -120,10 +122,14 @@ class PlaybackActivity : FragmentActivity() {
     private lateinit var infoProgress: ProgressBar
     private lateinit var infoStrip: LinearLayout
     /** Bottom transport bar: title + icon-only buttons. */
+    private lateinit var transportBar: LinearLayout
     private lateinit var transportTitle: TextView
     private lateinit var transportPlayPause: ImageButton
     private lateinit var transportRecord: ImageButton
     private lateinit var transportFavorite: ImageButton
+    /** 6.0.0-rc1: "Channels" button, mobile only — opens the sidebar
+     * (there is no Left key on a phone). */
+    private lateinit var channelsButton: TextView
     /** Centred play icon shown while paused. */
     private lateinit var pausedCluster: ImageView
     /** Left sidebar (4.6.2: shared ChannelSidebar helper). */
@@ -204,6 +210,8 @@ class PlaybackActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
+        DeviceType.applyOrientation(this)
         setContentView(R.layout.activity_playback)
         playerView = findViewById(R.id.player_view)
         overlay = findViewById(R.id.channel_info)
@@ -216,11 +224,13 @@ class PlaybackActivity : FragmentActivity() {
         infoNext = findViewById(R.id.info_next)
         infoProgress = findViewById(R.id.info_progress)
         infoStrip = findViewById(R.id.info_strip)
+        transportBar = findViewById(R.id.transport_bar)
         transportTitle = findViewById(R.id.transport_title)
         transportPlayPause = findViewById(R.id.transport_play_pause)
         transportRecord = findViewById(R.id.transport_record)
         transportFavorite = findViewById(R.id.transport_favorite)
         pausedCluster = findViewById(R.id.paused_cluster)
+        channelsButton = findViewById(R.id.mobile_channels_button)
         // Left sidebar (shared ChannelSidebar helper, 4.6.2).
         channelSidebar = ChannelSidebar(
             activity = this,
@@ -280,6 +290,9 @@ class PlaybackActivity : FragmentActivity() {
         findViewById<View>(R.id.sidebar_scrim).setOnClickListener { hideSidebar() }
         favoritesCache = PlaylistRepository.favorites(this)
         updateTransportIcons()
+        // 6.0.0-rc1: touch controls on mobile (tap to toggle the
+        // overlay, swipe to change channel, big transport buttons).
+        if (DeviceType.isMobile(this)) setupMobileTouch()
 
         // Best-effort EPG: show Now / Next for this channel once it loads.
         if (ch != null) {
@@ -332,6 +345,63 @@ class PlaybackActivity : FragmentActivity() {
                     Toast.makeText(this@PlaybackActivity, text, Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    /**
+     * Touch controls for mobile (6.0.0-rc1). TV is untouched — this
+     * only runs on phones/tablets:
+     * - The "Channels" button appears (there is no Left key to open
+     *   the sidebar with).
+     * - The transport bar and its buttons grow to finger size.
+     * - Tapping the video toggles the info overlay; a horizontal
+     *   fling changes channel. The tap/fling detector sits on the
+     *   PlayerView, so taps on the overlay or sidebar never reach it.
+     */
+    private fun setupMobileTouch() {
+        channelsButton.visibility = View.VISIBLE
+        channelsButton.setOnClickListener { showSidebar() }
+        transportBar.layoutParams.height = dp(56)
+        for (id in listOf(
+            R.id.transport_prev, R.id.transport_play_pause, R.id.transport_next,
+            R.id.transport_record, R.id.transport_favorite
+        )) {
+            val button = findViewById<ImageButton>(id)
+            button.layoutParams.width = dp(48)
+            button.layoutParams.height = dp(48)
+        }
+        // Mutating LayoutParams fields does not schedule a layout
+        // pass by itself — ask for one (the overlay is hidden until
+        // first shown, so this is belt-and-braces).
+        transportBar.requestLayout()
+        val gestures = GestureDetector(this,
+            object : GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    if (channelSidebar.isVisible()) hideSidebar()
+                    else if (overlay.visibility == View.VISIBLE) hideOverlay()
+                    else showChannelInfo()
+                    return true
+                }
+
+                override fun onFling(
+                    e1: MotionEvent?, e2: MotionEvent,
+                    velocityX: Float, velocityY: Float
+                ): Boolean {
+                    if (e1 == null) return false
+                    val dx = e2.x - e1.x
+                    val dy = e2.y - e1.y
+                    if (kotlin.math.abs(dx) > kotlin.math.abs(dy) &&
+                        kotlin.math.abs(dx) > dp(80)
+                    ) {
+                        switchToAdjacentChannel(if (dx < 0) 1 else -1)
+                        return true
+                    }
+                    return false
+                }
+            })
+        playerView.setOnTouchListener { _, event ->
+            gestures.onTouchEvent(event)
+            false
         }
     }
 
@@ -862,13 +932,17 @@ class PlaybackActivity : FragmentActivity() {
         stripTiles.clear()
 
         fun tile(iconRes: Int?, logoUrl: String?, label: String, onClick: () -> Unit) {
+            // 6.0.0-rc1: tiles are bigger on mobile (finger targets).
+            val tileWidth = if (DeviceType.isMobile(this)) dp(120) else dp(100)
+            val tileHeight = if (DeviceType.isMobile(this)) dp(64) else dp(50)
+            val labelSize = if (DeviceType.isMobile(this)) 12f else 10f
             val tileView = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 isFocusable = true
                 isFocusableInTouchMode = true
                 setPadding(dp(4), dp(4), dp(4), dp(4))
-                layoutParams = LinearLayout.LayoutParams(dp(100), dp(50)).apply {
+                layoutParams = LinearLayout.LayoutParams(tileWidth, tileHeight).apply {
                     marginEnd = dp(6)
                 }
                 setBackgroundResource(R.drawable.tile_bg)
@@ -889,7 +963,7 @@ class PlaybackActivity : FragmentActivity() {
             val labelView = TextView(this).apply {
                 text = label
                 setTextColor(0xFFFFFFFF.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, labelSize)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END

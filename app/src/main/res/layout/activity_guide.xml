@@ -14,8 +14,11 @@
         android:orientation="vertical">
 
     <!-- Details header: preview box + selected programme info.
-         Kept compact so more channel rows fit on screen. -->
+         Kept compact so more channel rows fit on screen.
+         6.0.0-rc1: on mobile the header shrinks in code (see
+         GuideActivity) so it fits a phone screen. -->
     <LinearLayout
+        android:id="@+id/guide_header"
         android:layout_width="match_parent"
         android:layout_height="180dp"
         android:orientation="horizontal"
@@ -23,6 +26,7 @@
 
         <!-- Preview box: selected channel's logo. -->
         <FrameLayout
+            android:id="@+id/guide_preview_box"
             android:layout_width="300dp"
             android:layout_height="match_parent"
             android:background="@drawable/guide_preview_bg">

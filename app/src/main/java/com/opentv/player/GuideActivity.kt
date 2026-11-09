@@ -68,6 +68,10 @@ class GuideActivity : FragmentActivity() {
     /** The frame the now-line spans — cached (4.9.5) instead of
      * re-finding it on every row append. */
     private lateinit var guideFrame: FrameLayout
+    /** 6.0.0-rc1: details header + preview box, resized on mobile so
+     * the header fits a phone screen. */
+    private lateinit var guideHeader: LinearLayout
+    private lateinit var guidePreviewBox: FrameLayout
 
     private lateinit var detailLogo: ImageView
     private lateinit var detailChannel: TextView
@@ -151,6 +155,8 @@ class GuideActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
+        DeviceType.applyOrientation(this)
         setContentView(R.layout.activity_guide)
         currentChannelId = intent.getStringExtra(EXTRA_CURRENT_CHANNEL_ID)
         container = findViewById(R.id.guide_container)
@@ -159,6 +165,8 @@ class GuideActivity : FragmentActivity() {
         scroll = findViewById(R.id.guide_scroll)
         nowLine = findViewById(R.id.guide_now_line)
         guideFrame = findViewById(R.id.guide_frame)
+        guideHeader = findViewById(R.id.guide_header)
+        guidePreviewBox = findViewById(R.id.guide_preview_box)
         emptyView = findViewById(R.id.guide_empty)
 
         // Lazy rows (4.7.2): append more when the user scrolls near the
@@ -203,6 +211,22 @@ class GuideActivity : FragmentActivity() {
         px16 = dpToPx(16)
         px40 = dpToPx(40)
         favoritesCache = PlaylistRepository.favorites(this)
+
+        // 6.0.0-rc1: the TV grid is built for a wide screen (320dp
+        // channel column, 180dp details header with a 300dp preview
+        // box) — on a phone that leaves no room for the programmes.
+        // Narrow the pinned column to 160dp and shrink the header to
+        // 120dp with a 120dp preview box. The grid itself keeps its
+        // 4dp/minute scale (a 30-minute show stays readable) and
+        // scrolls horizontally by touch, as before. Cards, long-press
+        // menu, and the sidebar already work with touch — no other
+        // guide change was needed.
+        if (DeviceType.isMobile(this)) {
+            channelColWidth = dpToPx(MOBILE_CHANNEL_COL_DP)
+            pinnedCol.layoutParams.width = channelColWidth
+            guideHeader.layoutParams.height = dpToPx(MOBILE_HEADER_HEIGHT_DP)
+            guidePreviewBox.layoutParams.width = dpToPx(MOBILE_PREVIEW_WIDTH_DP)
+        }
 
         // The star is a touch target only — it must never steal DPAD
         // focus, or the guide opens with nothing in the grid focused
@@ -1090,8 +1114,11 @@ class GuideActivity : FragmentActivity() {
         dialog.window?.setWindowAnimations(R.style.GuideMenuAnimation)
         val view = layoutInflater.inflate(R.layout.dialog_guide_menu, null)
         dialog.setContentView(view)
+        // 6.0.0-rc1: the menu content is 480dp wide — wider than a
+        // phone screen. On mobile it spans the full width instead.
         dialog.window?.setLayout(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
+            if (DeviceType.isMobile(this)) ViewGroup.LayoutParams.MATCH_PARENT
+            else ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
 
@@ -1373,5 +1400,11 @@ class GuideActivity : FragmentActivity() {
          * scanning (4.9.5) — typing used to launch a full
          * playlist + EPG scan on every keystroke. */
         private const val SEARCH_DEBOUNCE_MS = 250L
+        /** 6.0.0-rc1: mobile guide sizes — the pinned channel column
+         * and details header shrink so the programme grid fits a
+         * phone screen (TV keeps CHANNEL_COL_DP / 180dp / 300dp). */
+        private const val MOBILE_CHANNEL_COL_DP = 160
+        private const val MOBILE_HEADER_HEIGHT_DP = 120
+        private const val MOBILE_PREVIEW_WIDTH_DP = 120
     }
 }

@@ -24,6 +24,25 @@
         android:contentDescription="@string/play"
         android:visibility="gone" />
 
+    <!-- 6.0.0-rc1: "Channels" button, mobile only (there is no Left
+         key on a phone to open the sidebar). Hidden on TV. -->
+    <TextView
+        android:id="@+id/mobile_channels_button"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/loading_status_bg"
+        android:gravity="center"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:text="@string/mobile_channels"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
     <!-- Left sidebar scrim (4.6.0): 60% black over the video. -->
     <View
         android:id="@+id/sidebar_scrim"
@@ -222,8 +241,10 @@
             android:gravity="center" />
 
         <!-- Bottom transport bar: 30dp, 12sp bold title left, icon-only
-             transport buttons right. -->
+             transport buttons right. 6.0.0-rc1: on mobile the bar and
+             buttons grow to finger size in code (see setupMobileTouch). -->
         <LinearLayout
+            android:id="@+id/transport_bar"
             android:layout_width="match_parent"
             android:layout_height="30dp"
             android:layout_marginTop="4dp"

@@ -44,6 +44,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
+        DeviceType.applyOrientation(this)
         setContentView(R.layout.activity_main)
         loadingContent = findViewById(R.id.loading_content)
         browseFrame = findViewById(R.id.browse_frame)
@@ -75,6 +77,17 @@ class MainActivity : FragmentActivity() {
                     ?: channels.randomOrNull()
                 if (pick == null) {
                     showBrowse()
+                    return@onSuccess
+                }
+                // 6.0.0-rc1: mobile does NOT auto-play on launch (that
+                // would blast sound + data the moment the app opens).
+                // It goes to the touch home screen instead; the
+                // playlist is already warm in the cache, so the list
+                // is instant. The EPG warm-up wait is skipped too —
+                // the guide loads it on demand.
+                if (DeviceType.isMobile(this@MainActivity)) {
+                    startActivity(Intent(this@MainActivity, MobileHomeActivity::class.java))
+                    finish()
                     return@onSuccess
                 }
                 // Warm the guide cache, briefly — never stall launch on it.
@@ -112,6 +125,14 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun showBrowse() {
+        // 6.0.0-rc1: on mobile the fallback is the touch home screen
+        // (it loads the playlist itself and shows its own error +
+        // retry); the Leanback browse menu is TV-only.
+        if (DeviceType.isMobile(this)) {
+            startActivity(Intent(this, MobileHomeActivity::class.java))
+            finish()
+            return
+        }
         // The browse fragment goes in its own container; the loading
         // content hides, and the error banner (a sibling of both) stays
         // visible over the browse menu when loading failed.

@@ -22,14 +22,17 @@
         android:theme="@style/Theme.OpenTV"
         android:usesCleartextTraffic="true">
 
+        <!-- 6.0.0-rc1: screen orientation is NOT forced here any more.
+             DeviceType.applyOrientation() locks each activity to
+             landscape on a TV and leaves it free (portrait allowed)
+             on a phone/tablet — see DeviceType.kt. -->
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:screenOrientation="landscape">
-            <!-- EXPERIMENTAL (4.9.4): the LAUNCHER category lets the app appear in
-                 phone launchers too, so it can be opened on a phone at all.
-                 There is NO full mobile support yet — the UI is TV-oriented
-                 (landscape, leanback navigation, remote-focused). -->
+            android:exported="true">
+            <!-- 6.0.0-rc1: first mobile-capable release. The LAUNCHER
+                 category lets the app appear in phone launchers; on a
+                 phone it opens the touch home screen (MobileHomeActivity),
+                 on a TV it auto-plays as before. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
@@ -37,31 +40,32 @@
             </intent-filter>
         </activity>
 
+        <!-- Touch-first home screen (6.0.0-rc1): phones/tablets only.
+             MainActivity routes mobile here instead of auto-playing. -->
+        <activity
+            android:name=".MobileHomeActivity"
+            android:exported="false" />
+
         <activity
             android:name=".PlaybackActivity"
             android:exported="false"
-            android:screenOrientation="landscape"
             android:theme="@style/Theme.OpenTV.Playback" />
 
         <activity
             android:name=".SettingsActivity"
-            android:exported="false"
-            android:screenOrientation="landscape" />
+            android:exported="false" />
 
         <activity
             android:name=".GuideActivity"
-            android:exported="false"
-            android:screenOrientation="landscape" />
+            android:exported="false" />
 
         <activity
             android:name=".RecordingsActivity"
-            android:exported="false"
-            android:screenOrientation="landscape" />
+            android:exported="false" />
 
         <activity
             android:name=".StatsActivity"
-            android:exported="false"
-            android:screenOrientation="landscape" />
+            android:exported="false" />
 
         <service
             android:name=".RecordingService"

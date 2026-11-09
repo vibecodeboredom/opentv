@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mobile home screen (6.0.0-rc1): touch-first, portrait-friendly.
+     Title, search, quick actions (Guide / Recordings / Settings /
+     Refresh), a "Continue watching" card when there is a last channel,
+     then the channel list grouped by category (RecyclerView). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#080808"
+    android:orientation="vertical">
+
+    <!-- Title bar. -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="16dp"
+        android:text="@string/app_name"
+        android:textColor="@android:color/white"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <!-- Search. -->
+    <EditText
+        android:id="@+id/mobile_search"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/settings_input_bg"
+        android:hint="@string/guide_search_hint"
+        android:inputType="text"
+        android:maxLines="1"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:singleLine="true"
+        android:textColor="@android:color/white"
+        android:textColorHint="#FF7A7A85"
+        android:textSize="16sp" />
+
+    <!-- Quick actions: Guide / Recordings / Settings / Refresh. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/mobile_guide_button"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:background="@drawable/settings_button_bg"
+            android:text="@string/tv_guide"
+            android:textColor="@color/settings_button_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/mobile_recordings_button"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/settings_button_bg"
+            android:text="@string/recordings"
+            android:textColor="@color/settings_button_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/mobile_settings_button"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/settings_button_bg"
+            android:text="@string/menu_settings"
+            android:textColor="@color/settings_button_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/mobile_refresh_button"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/settings_button_bg"
+            android:text="@string/mobile_refresh"
+            android:textColor="@color/settings_button_text"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Continue watching: the last channel that actually played.
+         Hidden when there is none. -->
+    <LinearLayout
+        android:id="@+id/mobile_continue_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/card_rounded_bg"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/mobile_continue_watching"
+            android:textColor="#86C739"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/mobile_continue_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+    </LinearLayout>
+
+    <!-- Channel list, grouped by category (RecyclerView). -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/mobile_channel_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp"
+        android:clipToPadding="false"
+        android:paddingBottom="16dp" />
+
+    <!-- Loading spinner. -->
+    <ProgressBar
+        android:id="@+id/mobile_loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="48dp"
+        android:visibility="gone" />
+
+    <!-- Empty / error state + retry. -->
+    <LinearLayout
+        android:id="@+id/mobile_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="48dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/mobile_empty_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/guide_no_results"
+            android:textColor="#9A9AA3"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/mobile_retry_button"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/settings_button_bg"
+            android:text="@string/mobile_retry"
+            android:textColor="@color/settings_button_text"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+</LinearLayout>
