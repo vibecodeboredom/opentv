@@ -43,6 +43,86 @@
         android:textStyle="bold"
         android:visibility="gone" />
 
+    <!-- 6.0.0-rc3: "Guide" button, mobile only, top-right (mirrors the
+         Channels button top-left). Part of the auto-hiding overlay
+         group — it fades away with the overlay after 5s idle and
+         comes back when the video is tapped. Hidden on TV. -->
+    <TextView
+        android:id="@+id/mobile_guide_button"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/loading_status_bg"
+        android:gravity="center"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:text="@string/mobile_guide"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!-- 6.0.0-rc3: centred channel info, mobile only. Channel
+         number + name + logo and now/next, shown while the overlay
+         is up and fading away with it after 5s idle. Drawn under
+         the bottom overlay (which comes later in this file), so in
+         landscape — where the two would overlap — the overlay wins
+         and the logo + channel name above it stay visible. The panel
+         is not clickable, so taps pass through to the video (or the
+         centred play icon while paused). While paused the panel
+         hides entirely and the play icon owns the middle. -->
+    <LinearLayout
+        android:id="@+id/mobile_center_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:background="@drawable/loading_status_bg"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/mobile_center_logo"
+            android:layout_width="72dp"
+            android:layout_height="40dp"
+            android:scaleType="fitCenter"
+            android:contentDescription="@string/guide_preview" />
+
+        <TextView
+            android:id="@+id/mobile_center_channel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/mobile_center_now"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textSize="13sp"
+            android:textColor="#B3FFFFFF"
+            android:maxLines="1" />
+
+        <TextView
+            android:id="@+id/mobile_center_next"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:textSize="13sp"
+            android:textColor="#B3FFFFFF"
+            android:maxLines="1" />
+    </LinearLayout>
+
     <!-- Left sidebar scrim (4.6.0): 60% black over the video. -->
     <View
         android:id="@+id/sidebar_scrim"

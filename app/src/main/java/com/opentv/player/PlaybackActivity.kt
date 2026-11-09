@@ -102,6 +102,11 @@ class PlaybackActivity : FragmentActivity() {
         private const val MAX_AUTO_RETRY = 3
         /** Overlay auto-hides after this long with no key press. */
         private const val OVERLAY_TIMEOUT_MS = 10_000L
+        /** 6.0.0-rc3: mobile overlay auto-hide — 5s idle, then it
+         * fades away. TV keeps the 10s timeout above. */
+        private const val MOBILE_OVERLAY_TIMEOUT_MS = 5_000L
+        /** 6.0.0-rc3: mobile overlay fade-out duration. */
+        private const val OVERLAY_FADE_MS = 200L
         /** Channel up/down flash: half the Left/Right overlay time, so
          * zapping past a channel shows its info only briefly. */
         private const val CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS = 5_000L
@@ -130,6 +135,16 @@ class PlaybackActivity : FragmentActivity() {
     /** 6.0.0-rc1: "Channels" button, mobile only — opens the sidebar
      * (there is no Left key on a phone). */
     private lateinit var channelsButton: TextView
+    /** 6.0.0-rc3: mobile-only top "Guide" button + centred channel
+     * info. Both are part of the auto-hiding overlay group on
+     * mobile: they show and fade with the bottom overlay, and never
+     * appear on TV. */
+    private lateinit var mobileGuideButton: TextView
+    private lateinit var mobileCenterInfo: LinearLayout
+    private lateinit var mobileCenterLogo: ImageView
+    private lateinit var mobileCenterChannel: TextView
+    private lateinit var mobileCenterNow: TextView
+    private lateinit var mobileCenterNext: TextView
     /** Centred play icon shown while paused. */
     private lateinit var pausedCluster: ImageView
     /** Left sidebar (4.6.2: shared ChannelSidebar helper). */
@@ -231,6 +246,15 @@ class PlaybackActivity : FragmentActivity() {
         transportFavorite = findViewById(R.id.transport_favorite)
         pausedCluster = findViewById(R.id.paused_cluster)
         channelsButton = findViewById(R.id.mobile_channels_button)
+        // 6.0.0-rc3: mobile-only overlay group (top Guide button +
+        // centred channel info). Bound here but only ever shown on
+        // mobile — TV never touches them.
+        mobileGuideButton = findViewById(R.id.mobile_guide_button)
+        mobileCenterInfo = findViewById(R.id.mobile_center_info)
+        mobileCenterLogo = findViewById(R.id.mobile_center_logo)
+        mobileCenterChannel = findViewById(R.id.mobile_center_channel)
+        mobileCenterNow = findViewById(R.id.mobile_center_now)
+        mobileCenterNext = findViewById(R.id.mobile_center_next)
         // Left sidebar (shared ChannelSidebar helper, 4.6.2).
         channelSidebar = ChannelSidebar(
             activity = this,
@@ -356,10 +380,18 @@ class PlaybackActivity : FragmentActivity() {
      * - Tapping the video toggles the info overlay; a horizontal
      *   fling changes channel. The tap/fling detector sits on the
      *   PlayerView, so taps on the overlay or sidebar never reach it.
+     * 6.0.0-rc3: the overlay (bottom info + top Guide button +
+     * centred channel info) auto-hides 5s after the last touch
+     * (see armHideTimer + dispatchTouchEvent); tapping the video
+     * shows it again.
      */
     private fun setupMobileTouch() {
         channelsButton.visibility = View.VISIBLE
         channelsButton.setOnClickListener { showSidebar() }
+        // 6.0.0-rc3: the top Guide button is part of the overlay
+        // group — it only shows while the overlay is up (see
+        // showChannelInfo / hideOverlay). Its click opens the guide.
+        mobileGuideButton.setOnClickListener { openGuide() }
         transportBar.layoutParams.height = dp(56)
         for (id in listOf(
             R.id.transport_prev, R.id.transport_play_pause, R.id.transport_next,
@@ -491,6 +523,21 @@ class PlaybackActivity : FragmentActivity() {
                 // Paused: show the centred play cluster; playing: hide it.
                 // The transport play/pause icon follows the same state.
                 pausedCluster.visibility = if (isPlaying) View.GONE else View.VISIBLE
+                // 6.0.0-rc3: while paused the big centre play icon owns
+                // the middle of the screen, so the centred info panel
+                // steps aside; it returns when playback resumes, but
+                // only if the overlay is still up.
+                if (DeviceType.isMobile(this@PlaybackActivity)) {
+                    if (isPlaying) {
+                        if (overlay.visibility == View.VISIBLE) {
+                            showMobileView(mobileCenterInfo)
+                        }
+                    } else {
+                        mobileCenterInfo.animate().cancel()
+                        mobileCenterInfo.visibility = View.GONE
+                        mobileCenterInfo.alpha = 1f
+                    }
+                }
                 updateTransportIcons()
             }
 
@@ -646,6 +693,25 @@ class PlaybackActivity : FragmentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    /**
+     * 6.0.0-rc3, mobile only: any touch while the overlay is up
+     * restarts the 5s auto-hide timer — tapping a transport button,
+     * a strip tile, or the guide button counts as interaction just
+     * like tapping the video. TV is untouched (its 10s timer is
+     * key-driven). The sidebar/guide paths never reach this with
+     * the overlay visible: showSidebar hides the overlay first,
+     * and opening the guide stops the activity (onStop removes the
+     * callbacks), so the timer can't fire while either is open.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (DeviceType.isMobile(this) && ev.action == MotionEvent.ACTION_DOWN &&
+            overlay.visibility == View.VISIBLE
+        ) {
+            armHideTimer(overlayBrief)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     /** Pause / resume, and keep the cluster + transport icon in sync. */
     private fun togglePlayPause() {
         val p = player ?: return
@@ -771,7 +837,9 @@ class PlaybackActivity : FragmentActivity() {
 
     /** Shows the channel info overlay; auto-hides after 10s idle.
      * With [brief] (channel up/down), it hides after the shorter
-     * 5s flash timeout instead. */
+     * 5s flash timeout instead. 6.0.0-rc3: on mobile the timeout is
+     * always 5s, and the top Guide button + centred channel info
+     * show with it. */
     private fun showChannelInfo(brief: Boolean = false) {
         hideSidebar()
         val ch = channel
@@ -834,8 +902,17 @@ class PlaybackActivity : FragmentActivity() {
         // 5.0.0 — neat animations: the overlay fades in quickly
         // (150ms) instead of popping in, so channel switches feel
         // smoother. Fast enough to never delay the info itself.
+        // Cancel any fade-out in flight first, or its end action
+        // would hide the overlay again after this show.
+        overlay.animate().cancel()
         overlay.alpha = 0f
         overlay.animate().alpha(1f).setDuration(150).start()
+        // 6.0.0-rc3: on mobile the top Guide button and centred
+        // channel info show and fade with the overlay.
+        if (DeviceType.isMobile(this)) {
+            updateMobileCenterInfo()
+            showMobileOverlayViews()
+        }
         // Focus the first tile so left/right + OK work straight away.
         // Deferred until after layout, so the focus actually sticks.
         infoStrip.post { stripTiles.firstOrNull()?.requestFocus() }
@@ -844,15 +921,92 @@ class PlaybackActivity : FragmentActivity() {
     }
 
     private fun hideOverlay() {
-        overlay.visibility = View.GONE
         overlayBrief = false
         infoHandler.removeCallbacks(hideInfoRunnable)
         infoHandler.removeCallbacks(longPressRunnable)
+        if (DeviceType.isMobile(this)) {
+            // 6.0.0-rc3: the overlay fades out (200ms) instead of
+            // popping off, and the top Guide button + centred info
+            // fade with it. TV keeps the instant hide.
+            fadeOutOverlayView(overlay)
+            fadeOutOverlayView(mobileGuideButton)
+            fadeOutOverlayView(mobileCenterInfo)
+        } else {
+            overlay.visibility = View.GONE
+        }
+    }
+
+    /** 6.0.0-rc3: fade a mobile overlay view out, then hide it.
+     * Cancelling a fade-out in flight (a re-show does this) never
+     * runs its end action, so a re-shown view can't be hidden again
+     * by a stale fade. Alpha is reset so the next show starts clean. */
+    private fun fadeOutOverlayView(view: View) {
+        if (view.visibility != View.VISIBLE) return
+        view.animate().cancel()
+        view.animate().alpha(0f).setDuration(OVERLAY_FADE_MS).withEndAction {
+            view.visibility = View.GONE
+            view.alpha = 1f
+        }.start()
+    }
+
+    /** 6.0.0-rc3: show the mobile-only overlay group (top Guide
+     * button + centred channel info) with the same 150ms fade-in
+     * as the bottom overlay. The centred panel steps aside while
+     * paused — the big centre play icon owns the middle of the
+     * screen then (see onIsPlayingChanged). */
+    private fun showMobileOverlayViews() {
+        showMobileView(mobileGuideButton)
+        if (player?.isPlaying != false) showMobileView(mobileCenterInfo)
+    }
+
+    /** 6.0.0-rc3: fade one mobile overlay view in (150ms). */
+    private fun showMobileView(view: View) {
+        view.animate().cancel()
+        view.visibility = View.VISIBLE
+        view.alpha = 0f
+        view.animate().alpha(1f).setDuration(150).start()
+    }
+
+    /** 6.0.0-rc3: fill the mobile-only centred info panel from the
+     * same data as the bottom overlay (channel + now/next), so the
+     * two never disagree. Called on every overlay show, including
+     * the EPG-landing refresh. */
+    private fun updateMobileCenterInfo() {
+        val ch = channel
+        val name = recordingName ?: ch?.name ?: return
+        val num = if (ch != null && ch.number > 0) "${ch.number}  " else ""
+        mobileCenterChannel.text = "$num$name"
+        val logoUrl = ch?.logo
+        mobileCenterLogo.load(logoUrl) {
+            placeholder(R.drawable.ic_play)
+            error(R.drawable.ic_play)
+        }
+        val nowP = nowProgramme
+        if (nowP != null) {
+            val title = if (catchupUrl != null) "⏪ ${nowP.title}" else nowP.title
+            mobileCenterNow.text = "${getString(R.string.now_playing)}: $title"
+            mobileCenterNow.visibility = View.VISIBLE
+        } else {
+            mobileCenterNow.text = getString(R.string.overlay_no_info)
+            mobileCenterNow.visibility = View.VISIBLE
+        }
+        val nextP = nextProgramme
+        if (nextP != null) {
+            mobileCenterNext.text = "${getString(R.string.next_up)}: ${nextP.title}"
+            mobileCenterNext.visibility = View.VISIBLE
+        } else {
+            mobileCenterNext.visibility = View.GONE
+        }
     }
 
     private fun armHideTimer(brief: Boolean = false) {
         infoHandler.removeCallbacks(hideInfoRunnable)
-        val timeout = if (brief) CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS else OVERLAY_TIMEOUT_MS
+        val timeout = when {
+            // 6.0.0-rc3: mobile auto-hides after 5s idle.
+            DeviceType.isMobile(this) -> MOBILE_OVERLAY_TIMEOUT_MS
+            brief -> CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS
+            else -> OVERLAY_TIMEOUT_MS
+        }
         infoHandler.postDelayed(hideInfoRunnable, timeout)
     }
 
@@ -1194,6 +1348,17 @@ class PlaybackActivity : FragmentActivity() {
         infoHandler.removeCallbacks(hideInfoRunnable)
         infoHandler.removeCallbacks(longPressRunnable)
         overlay.visibility = View.GONE
+        // 6.0.0-rc3: the mobile overlay group hides instantly here
+        // (no fade — the activity is leaving). Otherwise the Guide
+        // button / centre info could sit visible with no timer
+        // running when the user comes back from the guide.
+        if (DeviceType.isMobile(this)) {
+            for (view in listOf(mobileGuideButton, mobileCenterInfo)) {
+                view.animate().cancel()
+                view.visibility = View.GONE
+                view.alpha = 1f
+            }
+        }
         hideSidebar()
         // Log the watch session (local only, never shared).
         val watchedMillis = System.currentTimeMillis() - sessionStartMillis

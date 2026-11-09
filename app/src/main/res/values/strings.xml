@@ -167,4 +167,5 @@
     <string name="mobile_retry">Retry</string>
     <string name="mobile_results">Results (%1$d)</string>
     <string name="mobile_channels">☰ Channels</string>
+    <string name="mobile_guide">Guide</string>
 </resources>
