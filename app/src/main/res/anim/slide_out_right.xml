@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 5.0.0: guide hold-OK menu exit — slides back out to the right. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:anim/accelerate_interpolator">
+    <translate
+        android:fromXDelta="0"
+        android:toXDelta="100%"
+        android:duration="200" />
+</set>

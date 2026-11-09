@@ -40,7 +40,10 @@ import android.database.sqlite.SQLiteOpenHelper
 object ParsedCache {
 
     private const val DB_NAME = "parsed_cache.db"
-    private const val DB_VERSION = 2
+    /** 5.0.0: catch-up columns on the channels table (catchup_type,
+     * catchup_days, catchup_source). onUpgrade drops and recreates,
+     * so the snapshot is just re-parsed on the next load. */
+    private const val DB_VERSION = 3
 
     /** Meta key for a playlist's save time, keyed by its URL hash. */
     private fun playlistSavedAtKey(url: String): String =
@@ -54,7 +57,8 @@ object ParsedCache {
                 "CREATE TABLE channels (" +
                     "id TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL, " +
                     "group_name TEXT NOT NULL, logo TEXT, tvg_id TEXT, " +
-                    "number INTEGER NOT NULL, source_url TEXT NOT NULL)"
+                    "number INTEGER NOT NULL, source_url TEXT NOT NULL, " +
+                    "catchup_type TEXT, catchup_days INTEGER, catchup_source TEXT)"
             )
             db.execSQL(
                 "CREATE TABLE epg (" +
@@ -125,7 +129,8 @@ object ParsedCache {
             val savedAt = meta[playlistSavedAtKey(url)]?.toLongOrNull() ?: return null
             val channels = ArrayList<Channel>(2048)
             db.rawQuery(
-                "SELECT id, name, url, group_name, logo, tvg_id, number " +
+                "SELECT id, name, url, group_name, logo, tvg_id, number, " +
+                    "catchup_type, catchup_days, catchup_source " +
                     "FROM channels WHERE source_url = ? ORDER BY number",
                 arrayOf(url)
             ).use { c ->
@@ -136,6 +141,9 @@ object ParsedCache {
                 val logoI = c.getColumnIndexOrThrow("logo")
                 val tvgIdI = c.getColumnIndexOrThrow("tvg_id")
                 val numberI = c.getColumnIndexOrThrow("number")
+                val catchupTypeI = c.getColumnIndexOrThrow("catchup_type")
+                val catchupDaysI = c.getColumnIndexOrThrow("catchup_days")
+                val catchupSourceI = c.getColumnIndexOrThrow("catchup_source")
                 while (c.moveToNext()) {
                     channels += Channel(
                         id = c.getString(idI),
@@ -144,7 +152,10 @@ object ParsedCache {
                         group = c.getString(groupI),
                         logo = if (c.isNull(logoI)) null else c.getString(logoI),
                         tvgId = if (c.isNull(tvgIdI)) null else c.getString(tvgIdI),
-                        number = c.getInt(numberI)
+                        number = c.getInt(numberI),
+                        catchupType = if (c.isNull(catchupTypeI)) null else c.getString(catchupTypeI),
+                        catchupDays = if (c.isNull(catchupDaysI)) null else c.getInt(catchupDaysI),
+                        catchupSource = if (c.isNull(catchupSourceI)) null else c.getString(catchupSourceI)
                     )
                 }
             }
@@ -166,8 +177,9 @@ object ParsedCache {
                 db.delete("channels", "source_url = ?", arrayOf(url))
                 val stmt = db.compileStatement(
                     "INSERT INTO channels " +
-                        "(id, name, url, group_name, logo, tvg_id, number, source_url) " +
-                        "VALUES (?,?,?,?,?,?,?,?)"
+                        "(id, name, url, group_name, logo, tvg_id, number, source_url, " +
+                        "catchup_type, catchup_days, catchup_source) " +
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)"
                 )
                 try {
                     for (ch in channels) {
@@ -179,6 +191,9 @@ object ParsedCache {
                         if (ch.tvgId == null) stmt.bindNull(6) else stmt.bindString(6, ch.tvgId)
                         stmt.bindLong(7, ch.number.toLong())
                         stmt.bindString(8, url)
+                        if (ch.catchupType == null) stmt.bindNull(9) else stmt.bindString(9, ch.catchupType)
+                        if (ch.catchupDays == null) stmt.bindNull(10) else stmt.bindLong(10, ch.catchupDays.toLong())
+                        if (ch.catchupSource == null) stmt.bindNull(11) else stmt.bindString(11, ch.catchupSource)
                         stmt.executeInsert()
                     }
                 } finally {

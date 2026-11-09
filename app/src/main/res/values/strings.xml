@@ -118,6 +118,10 @@
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
     <string name="share_playlist_title">Share playlist</string>
+    <string name="catchup_label">Catch-up</string>
+    <string name="catchup_playing">⏪ Catch-up: %1$s</string>
+    <string name="catchup_failed_live">Catch-up failed — playing live instead</string>
+    <string name="catchup_go_live">Go live</string>
     <string name="share_playlist_hint">Temporarily share a playlist on this TV\'s Wi-Fi. Other devices on the same network can add it for 10 minutes, then sharing turns itself off. While sharing is on, other devices can also send a playlist to this TV.</string>
     <string name="share_not_running">Not sharing.</string>
     <string name="share_playlist">Share playlist</string>

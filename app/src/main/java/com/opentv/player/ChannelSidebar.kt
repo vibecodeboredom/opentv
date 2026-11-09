@@ -68,24 +68,52 @@ class ChannelSidebar(
      * (GROUP_ALL / GROUP_FAVORITES / GROUP_HISTORY / a group name). */
     private var inGroups = true
     private var group = GROUP_ALL
+    /** 5.0.0 — neat animations: guards the hide slide-out's end
+     * action, so a show() mid-slide can't be undone by the stale
+     * hide finishing after it. */
+    private var hideGeneration = 0
     /** Channel id -> "now playing" TextView, so the EPG fill-in can update
      * rows after they are built. */
     private val programmeViews = mutableMapOf<String, TextView>()
 
     fun isVisible(): Boolean = panel.visibility == View.VISIBLE
 
-    /** Open the sidebar on the groups list. */
+    /** Open the sidebar on the groups list. 5.0.0: it slides in from
+     * the left (200ms) with the scrim fading in, instead of popping
+     * in — fast enough to never delay navigation. */
     fun show() {
+        hideGeneration++
         inGroups = true
         group = GROUP_ALL
         scrim.visibility = View.VISIBLE
         panel.visibility = View.VISIBLE
+        panel.animate().cancel()
+        scrim.animate().cancel()
+        val width = panel.width.takeIf { it > 0 } ?: dp(260)
+        panel.translationX = -width.toFloat()
+        scrim.alpha = 0f
+        panel.animate().translationX(0f).setDuration(200).start()
+        scrim.animate().alpha(1f).setDuration(200).start()
         buildGroups()
     }
 
+    /** 5.0.0: slides back out to the left (180ms); the views hide
+     * when the slide finishes. */
     fun hide() {
-        panel.visibility = View.GONE
-        scrim.visibility = View.GONE
+        if (panel.visibility != View.VISIBLE) return
+        val generation = ++hideGeneration
+        panel.animate().cancel()
+        scrim.animate().cancel()
+        val width = panel.width.takeIf { it > 0 } ?: dp(260)
+        panel.animate().translationX(-width.toFloat()).setDuration(180)
+            .withEndAction {
+                if (generation != hideGeneration) return@withEndAction
+                panel.visibility = View.GONE
+                scrim.visibility = View.GONE
+                panel.translationX = 0f
+                scrim.alpha = 1f
+            }.start()
+        scrim.animate().alpha(0f).setDuration(180).start()
         programmeViews.clear()
     }
 

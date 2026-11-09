@@ -87,6 +87,12 @@ class PlaybackActivity : FragmentActivity() {
         const val EXTRA_RECORDING_URI = "recording_uri"
         const val EXTRA_RECORDING_NAME = "recording_name"
         const val EXTRA_RETRY_COUNT = "retry_count"
+        /** 5.0.0 — catch-up: the resolved catch-up URL plus the
+         * programme it replays (title + window), from the guide. */
+        const val EXTRA_CATCHUP_URL = "catchup_url"
+        const val EXTRA_CATCHUP_TITLE = "catchup_title"
+        const val EXTRA_CATCHUP_START_MS = "catchup_start_ms"
+        const val EXTRA_CATCHUP_STOP_MS = "catchup_stop_ms"
         /** Set when this activity was started by a channel up/down press:
          * the info overlay should flash briefly instead of the normal
          * Left/Right duration. */
@@ -139,6 +145,10 @@ class PlaybackActivity : FragmentActivity() {
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
+    /** Whether the strip was last built in catch-up mode (5.0.0): the
+     * Go-live tile appears/disappears with it, so a mode change must
+     * rebuild even when the recents are unchanged. */
+    private var lastStripCatchup: Boolean = false
     /** Channel id -> Channel for the strip's recents (4.9.5): the map
      * used to be rebuilt from the whole playlist on every overlay
      * open. It is rebuilt only when the playlist list itself changes
@@ -152,6 +162,19 @@ class PlaybackActivity : FragmentActivity() {
     /** Now / next programmes, filled once EPG loads. */
     private var nowProgramme: EpgParser.Programme? = null
     private var nextProgramme: EpgParser.Programme? = null
+    /** Live now / next from the EPG, kept separately (5.0.0): a
+     * catch-up session shows the replayed programme as "now" and the
+     * live programme as "next", and needs the live pair to fall back
+     * to when catch-up fails or the user goes live. */
+    private var liveNow: EpgParser.Programme? = null
+    private var liveNext: EpgParser.Programme? = null
+    /** 5.0.0 — catch-up session state (all null = live playback). */
+    private var catchupUrl: String? = null
+    private var catchupTitle: String? = null
+    private var catchupStartMillis: Long = 0L
+    private var catchupStopMillis: Long = 0L
+    /** True once a failed catch-up has already fallen back to live. */
+    private var catchupFallbackTried = false
     /** The strip tiles, in order, for left/right focus movement. */
     private val stripTiles = mutableListOf<View>()
     private var channel: Channel? = null
@@ -210,6 +233,11 @@ class PlaybackActivity : FragmentActivity() {
         recordingId = intent.getStringExtra(EXTRA_RECORDING_ID)
         recordingUri = intent.getStringExtra(EXTRA_RECORDING_URI)
         recordingName = intent.getStringExtra(EXTRA_RECORDING_NAME)
+        // 5.0.0 — catch-up: a resolved replay URL + its programme.
+        catchupUrl = intent.getStringExtra(EXTRA_CATCHUP_URL)
+        catchupTitle = intent.getStringExtra(EXTRA_CATCHUP_TITLE)
+        catchupStartMillis = intent.getLongExtra(EXTRA_CATCHUP_START_MS, 0L)
+        catchupStopMillis = intent.getLongExtra(EXTRA_CATCHUP_STOP_MS, 0L)
         retryCount = intent.getIntExtra(EXTRA_RETRY_COUNT, 0)
         // Started by a channel up/down press: flash the info overlay
         // briefly once the EPG is in, instead of the now/next toast.
@@ -247,8 +275,17 @@ class PlaybackActivity : FragmentActivity() {
             lifecycleScope.launch {
                 val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
                 val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
-                nowProgramme = now
-                nextProgramme = next
+                liveNow = now
+                liveNext = next
+                // 5.0.0 — catch-up: the replayed programme is "now" and
+                // the live programme is "next" (the way back to live).
+                if (catchupUrl != null) {
+                    nowProgramme = catchupProgramme()
+                    nextProgramme = now
+                } else {
+                    nowProgramme = now
+                    nextProgramme = next
+                }
                 if (overlay.visibility == View.VISIBLE) {
                     // The overlay was opened before the EPG finished
                     // loading and still shows "No information" — refresh
@@ -267,6 +304,12 @@ class PlaybackActivity : FragmentActivity() {
                     ) {
                         showChannelInfo(brief = true)
                     }
+                } else if (catchupUrl != null) {
+                    Toast.makeText(
+                        this@PlaybackActivity,
+                        getString(R.string.catchup_playing, catchupTitle ?: ""),
+                        Toast.LENGTH_LONG
+                    ).show()
                 } else if (now != null || next != null) {
                     val text = buildString {
                         now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
@@ -281,6 +324,19 @@ class PlaybackActivity : FragmentActivity() {
         }
     }
 
+    /** 5.0.0: the replayed programme as a synthetic Programme, so the
+     * info panel can show it as "now" with its real time window. */
+    private fun catchupProgramme(): EpgParser.Programme? {
+        val title = catchupTitle ?: return null
+        if (catchupStartMillis <= 0L || catchupStopMillis <= catchupStartMillis) return null
+        return EpgParser.Programme(
+            channelId = channel?.tvgId ?: channel?.id ?: "",
+            startMillis = catchupStartMillis,
+            stopMillis = catchupStopMillis,
+            title = title
+        )
+    }
+
     /**
      * (Re)creates the player and starts playback. Called from onStart so
      * returning from the guide (which stops this activity and releases the
@@ -291,9 +347,12 @@ class PlaybackActivity : FragmentActivity() {
     private fun initializePlayer() {
         if (player != null) return
         val ch = channel
-        val uri = recordingUri ?: ch?.url ?: return
-        val title = recordingName ?: ch?.name ?: return
-        val subtitle = if (recordingUri != null) {
+        // 5.0.0 — catch-up: the replay URL wins over the live one.
+        val uri = catchupUrl ?: recordingUri ?: ch?.url ?: return
+        val title = catchupTitle ?: recordingName ?: ch?.name ?: return
+        val subtitle = if (catchupUrl != null) {
+            getString(R.string.catchup_label)
+        } else if (recordingUri != null) {
             getString(R.string.recording_label)
         } else {
             ch?.group ?: ""
@@ -356,6 +415,26 @@ class PlaybackActivity : FragmentActivity() {
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // 5.0.0 — catch-up that never played: fall back to the
+                // live stream ONCE instead of jumping to a random
+                // channel. If the live stream fails too, the normal
+                // auto-retry below applies (catchupUrl is null now).
+                if (catchupUrl != null && !everPlayed && !catchupFallbackTried) {
+                    catchupFallbackTried = true
+                    catchupUrl = null
+                    catchupTitle = null
+                    nowProgramme = liveNow
+                    nextProgramme = liveNext
+                    player?.release()
+                    player = null
+                    Toast.makeText(
+                        this@PlaybackActivity,
+                        R.string.catchup_failed_live,
+                        Toast.LENGTH_LONG
+                    ).show()
+                    initializePlayer()
+                    return
+                }
                 // Dead stream that never played: quietly try another
                 // random channel instead of leaving a black screen.
                 // Once a stream has played, or retries are spent, just
@@ -625,14 +704,21 @@ class PlaybackActivity : FragmentActivity() {
         }
         val nowP = nowProgramme
         if (nowP != null) {
-            infoNowTitle.text = nowP.title
+            // 5.0.0 — catch-up: the replayed programme gets the ⏪
+            // marker, and the meta line says so. The progress bar is
+            // wall-clock based, so it hides during catch-up — a full
+            // bar under a finished show would be misleading.
+            infoNowTitle.text =
+                if (catchupUrl != null) "⏪ ${nowP.title}" else nowP.title
             val mins = ((nowP.stopMillis - nowP.startMillis) / 60_000).toInt()
             val num = if (ch != null && ch.number > 0) "${ch.number} " else ""
             infoNowMeta.text = "${timeFormat.format(Date(nowP.startMillis))} – " +
-                "${timeFormat.format(Date(nowP.stopMillis))}  •  $mins min  •  $num$name"
+                "${timeFormat.format(Date(nowP.stopMillis))}  •  $mins min  •  $num$name" +
+                if (catchupUrl != null) "  •  ⏪ ${getString(R.string.catchup_label)}" else ""
             infoNowMeta.visibility = View.VISIBLE
             val span = (nowP.stopMillis - nowP.startMillis).coerceAtLeast(1L)
             infoProgress.progress = ((now - nowP.startMillis) * 100 / span).toInt().coerceIn(0, 100)
+            infoProgress.visibility = if (catchupUrl != null) View.GONE else View.VISIBLE
         } else {
             infoNowTitle.text = getString(R.string.overlay_no_info)
             infoNowMeta.text = ""
@@ -654,6 +740,11 @@ class PlaybackActivity : FragmentActivity() {
         updateTransportIcons()
         buildStrip()
         overlay.visibility = View.VISIBLE
+        // 5.0.0 — neat animations: the overlay fades in quickly
+        // (150ms) instead of popping in, so channel switches feel
+        // smoother. Fast enough to never delay the info itself.
+        overlay.alpha = 0f
+        overlay.animate().alpha(1f).setDuration(150).start()
         // Focus the first tile so left/right + OK work straight away.
         // Deferred until after layout, so the focus actually sticks.
         infoStrip.post { stripTiles.firstOrNull()?.requestFocus() }
@@ -691,7 +782,9 @@ class PlaybackActivity : FragmentActivity() {
         val cached = PlaylistRepository.cachedPlaylist()
         if (cached != null) {
             val recents = stripRecents(cached)
-            if (recents.map { it.id } == lastStripRecents && stripTiles.isNotEmpty()) return
+            if (recents.map { it.id } == lastStripRecents &&
+                (catchupUrl != null) == lastStripCatchup && stripTiles.isNotEmpty()
+            ) return
             buildStripStatic(recents, noInfo)
             return
         }
@@ -701,7 +794,9 @@ class PlaybackActivity : FragmentActivity() {
             val channels = result.getOrNull() ?: return@launch
             val recents = stripRecents(channels)
             if (overlay.visibility != View.VISIBLE) return@launch
-            if (recents.map { it.id } == lastStripRecents) return@launch
+            if (recents.map { it.id } == lastStripRecents &&
+                (catchupUrl != null) == lastStripCatchup
+            ) return@launch
             val keepFocus = stripTiles.indexOfFirst { it.isFocused }
             buildStripStatic(recents, noInfo)
             // Restore focus (or default to the first tile); deferred
@@ -797,6 +892,13 @@ class PlaybackActivity : FragmentActivity() {
 
         tile(R.drawable.ic_guide, null, getString(R.string.tv_guide)) { openGuide() }
         tile(R.drawable.ic_history, null, getString(R.string.overlay_history)) { openGuide() }
+        // 5.0.0 — catch-up: a "Go live" tile first in the strip, so the
+        // way back to the live stream is one OK press away. (CH+/CH-,
+        // the sidebar, and tapping the live programme in the guide all
+        // go live too — they start a fresh playback without catch-up.)
+        if (catchupUrl != null) {
+            tile(R.drawable.ic_play, null, getString(R.string.catchup_go_live)) { goLive() }
+        }
         for (recent in recents) {
             tile(null, recent.logo, recent.name) { switchToChannel(recent) }
         }
@@ -806,6 +908,7 @@ class PlaybackActivity : FragmentActivity() {
             hideOverlay()
         }
         lastStripRecents = recents.map { it.id }
+        lastStripCatchup = catchupUrl != null
     }
 
     /** Move focus to the next / previous strip tile. */
@@ -833,6 +936,22 @@ class PlaybackActivity : FragmentActivity() {
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         startActivity(intent)
         finish()
+    }
+
+    /** 5.0.0: leave a catch-up replay and return to the live stream
+     * of the same channel (the strip's "Go live" tile). Rebuilds the
+     * player on the live URL and shows the live info panel. */
+    private fun goLive() {
+        if (channel == null) return
+        catchupUrl = null
+        catchupTitle = null
+        nowProgramme = liveNow
+        nextProgramme = liveNext
+        player?.release()
+        player = null
+        hideOverlay()
+        initializePlayer()
+        showChannelInfo()
     }
 
     private fun openGuide() {

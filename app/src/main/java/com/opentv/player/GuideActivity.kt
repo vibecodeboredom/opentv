@@ -459,10 +459,26 @@ class GuideActivity : FragmentActivity() {
         }
     }
 
+    /** Title colour for a programme cell (5.0.0): "now" is dark on the
+     * accent background, plain past cells are muted grey, catch-up
+     * cells are brighter than past ones — they can be played — and
+     * future cells are white. */
+    private fun programmeTitleColor(isNow: Boolean, isPast: Boolean, isCatchup: Boolean): Int =
+        when {
+            isNow -> 0xFF080808.toInt()
+            isCatchup -> 0xFFC9C9D1.toInt()
+            isPast -> 0xFF6B6B75.toInt()
+            else -> 0xFFFFFFFF.toInt()
+        }
+
     /** Show a channel + programme in the details header. */
     private fun showDetails(channel: Channel, programme: EpgParser.Programme) {
         detailChannelShown = channel
-        detailTitle.text = programme.title
+        // 5.0.0: a catch-up programme gets the ⏪ marker here too.
+        val isCatchup = programme.stopMillis <= nowMillis &&
+            CatchUp.isAvailable(channel, programme, nowMillis)
+        detailTitle.text =
+            if (isCatchup) "⏪ ${programme.title}" else programme.title
         detailTime.text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
         detailChannel.text = if (channel.number > 0) {
             "${channel.number}  ${channel.name}"
@@ -744,6 +760,11 @@ class GuideActivity : FragmentActivity() {
             }
             val isNow = nowMillis in programme.startMillis until programme.stopMillis
             val isPast = programme.stopMillis <= nowMillis
+            // 5.0.0 — catch-up: a past programme on a catch-up channel
+            // can be replayed. It gets a ⏪ prefix and a brighter title
+            // than a plain past cell, so it's obvious it's playable.
+            val isCatchup = isPast &&
+                CatchUp.isAvailable(row.channel, programme, nowMillis)
             if (isNow && firstNow == null) firstNow = row.channel to programme
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -770,16 +791,11 @@ class GuideActivity : FragmentActivity() {
                 }
             }
             val titleView = TextView(this).apply {
-                text = programme.title
+                text = if (isCatchup) "⏪ ${programme.title}" else programme.title
                 // "Now" cells sit on the accent background, so their text
-                // is dark for contrast; past cells are muted grey.
-                setTextColor(
-                    when {
-                        isNow -> 0xFF080808.toInt()
-                        isPast -> 0xFF6B6B75.toInt()
-                        else -> 0xFFFFFFFF.toInt()
-                    }
-                )
+                // is dark for contrast; past cells are muted grey, except
+                // catch-up ones, which are brighter — they can be played.
+                setTextColor(programmeTitleColor(isNow, isPast, isCatchup))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
@@ -802,18 +818,18 @@ class GuideActivity : FragmentActivity() {
                     // rows so Down never runs out of grid below.
                     appendRowsIfNearEnd(rowIndex)
                 } else {
-                    titleView.setTextColor(
-                        when {
-                            isNow -> 0xFF080808.toInt()
-                            isPast -> 0xFF6B6B75.toInt()
-                            else -> 0xFFFFFFFF.toInt()
-                        }
-                    )
+                    titleView.setTextColor(programmeTitleColor(isNow, isPast, isCatchup))
                     // The current channel stays accent; the rest go white.
                     nameView.setTextColor(
                         if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
                     )
                 }
+                // 5.0.0 — neat animations: the focused cell pops
+                // slightly (150ms, transform only, so the grid layout
+                // never moves). Quick enough to never feel slow.
+                card.animate().scaleX(if (hasFocus) 1.03f else 1f)
+                    .scaleY(if (hasFocus) 1.03f else 1f)
+                    .setDuration(150).start()
             }
             rowLayout.addView(card)
             if (isNow && firstNowCard == null) firstNowCard = card
@@ -955,6 +971,20 @@ class GuideActivity : FragmentActivity() {
             intent.putExtra(PlaybackActivity.EXTRA_CHANNEL, channel)
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             startActivity(intent)
+        } else if (programme.stopMillis <= nowMillis) {
+            // 5.0.0 — catch-up: a past programme on a catch-up channel
+            // replays from the guide. Anything else past just says so.
+            val url = CatchUp.catchupUrl(channel, programme, nowMillis)
+            if (url != null) {
+                playCatchup(channel, programme, url)
+            } else {
+                val whenText = GuideData.formatHourLabel(programme.startMillis)
+                Toast.makeText(
+                    this,
+                    "${programme.title} — ${getString(R.string.starts_at, whenText)}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         } else {
             val whenText = GuideData.formatHourLabel(programme.startMillis)
             Toast.makeText(
@@ -963,6 +993,18 @@ class GuideActivity : FragmentActivity() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+
+    /** 5.0.0: start playback of a past programme's catch-up stream. */
+    private fun playCatchup(channel: Channel, programme: EpgParser.Programme, url: String) {
+        val intent = Intent(this, PlaybackActivity::class.java)
+        intent.putExtra(PlaybackActivity.EXTRA_CHANNEL, channel)
+        intent.putExtra(PlaybackActivity.EXTRA_CATCHUP_URL, url)
+        intent.putExtra(PlaybackActivity.EXTRA_CATCHUP_TITLE, programme.title)
+        intent.putExtra(PlaybackActivity.EXTRA_CATCHUP_START_MS, programme.startMillis)
+        intent.putExtra(PlaybackActivity.EXTRA_CATCHUP_STOP_MS, programme.stopMillis)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivity(intent)
     }
 
     /**
@@ -978,8 +1020,11 @@ class GuideActivity : FragmentActivity() {
             android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
         )
         // Side panel, not a centered popup: dock to the right edge,
-        // full height, like TiviMate's menu.
+        // full height, like TiviMate's menu. 5.0.0: it slides in from
+        // the right edge (and back out) instead of the default dialog
+        // fade / slide-up.
         dialog.window?.setGravity(Gravity.END)
+        dialog.window?.setWindowAnimations(R.style.GuideMenuAnimation)
         val view = layoutInflater.inflate(R.layout.dialog_guide_menu, null)
         dialog.setContentView(view)
         dialog.window?.setLayout(

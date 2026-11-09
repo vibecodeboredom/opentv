@@ -8,4 +8,12 @@
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:windowFullscreen">true</item>
     </style>
+
+    <!-- 5.0.0: the guide's hold-OK menu slides in from the right edge
+         (and back out the same way) instead of the default dialog
+         fade / slide-up. -->
+    <style name="GuideMenuAnimation">
+        <item name="android:windowEnterAnimation">@anim/slide_in_right</item>
+        <item name="android:windowExitAnimation">@anim/slide_out_right</item>
+    </style>
 </resources>
