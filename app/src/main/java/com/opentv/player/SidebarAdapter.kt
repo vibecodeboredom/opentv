@@ -211,8 +211,9 @@ class SidebarAdapter(
         view: View,
         private val onGroupClick: (SidebarGroup) -> Unit
     ) : RecyclerView.ViewHolder(view) {
-        private val nameView: TextView = (view as LinearLayout).getChildAt(0) as TextView
-        private val countView: TextView = view.getChildAt(1) as TextView
+        private val row: LinearLayout = view as LinearLayout
+        private val nameView: TextView = row.getChildAt(0) as TextView
+        private val countView: TextView = row.getChildAt(1) as TextView
         private var group: SidebarGroup? = null
 
         init {
@@ -238,9 +239,10 @@ class SidebarAdapter(
         private val onChannelClick: (Channel) -> Unit,
         private val currentChannelId: () -> String?
     ) : RecyclerView.ViewHolder(view) {
-        private val numberView: TextView = (view as LinearLayout).getChildAt(0) as TextView
-        private val logoView: ImageView = view.getChildAt(1) as ImageView
-        private val textBlock: LinearLayout = view.getChildAt(2) as LinearLayout
+        private val row: LinearLayout = view as LinearLayout
+        private val numberView: TextView = row.getChildAt(0) as TextView
+        private val logoView: ImageView = row.getChildAt(1) as ImageView
+        private val textBlock: LinearLayout = row.getChildAt(2) as LinearLayout
         private val nameView: TextView = textBlock.getChildAt(0) as TextView
         private val programmeView: TextView = textBlock.getChildAt(1) as TextView
         private var channel: Channel? = null
