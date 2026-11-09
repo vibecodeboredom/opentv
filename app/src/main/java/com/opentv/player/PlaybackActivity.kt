@@ -425,8 +425,8 @@ class PlaybackActivity : FragmentActivity() {
                     catchupTitle = null
                     nowProgramme = liveNow
                     nextProgramme = liveNext
-                    player?.release()
-                    player = null
+                    this@PlaybackActivity.player?.release()
+                    this@PlaybackActivity.player = null
                     Toast.makeText(
                         this@PlaybackActivity,
                         R.string.catchup_failed_live,
