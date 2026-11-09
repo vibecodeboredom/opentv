@@ -1,12 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Guide context menu (long-press OK on a programme), TiviMate style:
-     rounded dark panel with search, settings, and programme/channel actions. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     rounded dark panel with search, settings, and programme/channel actions.
+     5.0.1: the content is taller than the screen (search + up to 5 recent
+     rows + 11 action rows) and the old plain LinearLayout had no
+     scrolling, so buttons below the fold were laid out off-screen and
+     D-pad focus could never reach them. Wrap it in a ScrollView:
+     focus auto-scrolls the focused row into view, so every button is
+     reachable. The slide-in animation is a window animation and is
+     untouched. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="480dp"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@drawable/guide_panel_bg"
-    android:padding="8dp">
+    android:padding="8dp"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
 
     <EditText
         android:id="@+id/menu_search"
@@ -198,4 +210,5 @@
         android:focusable="true"
         android:clickable="true" />
 
-</LinearLayout>
+    </LinearLayout>
+</ScrollView>
