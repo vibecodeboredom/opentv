@@ -15,6 +15,7 @@
         android:required="false" />
 
     <application
+        android:name=".OpenTvApp"
         android:allowBackup="true"
         android:icon="@drawable/ic_banner"
         android:banner="@drawable/ic_banner"

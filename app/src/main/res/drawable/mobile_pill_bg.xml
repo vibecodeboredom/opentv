@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mobile playback top buttons (6.1.0): a defined dark pill with a
+     subtle border, instead of the flat 50%-grey pill they shared with
+     the loading status. Used by the Channels and Guide buttons. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#CC161616" />
+    <corners android:radius="24dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#333639" />
+</shape>

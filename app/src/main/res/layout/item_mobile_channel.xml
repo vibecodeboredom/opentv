@@ -14,11 +14,15 @@
     android:paddingTop="8dp"
     android:paddingBottom="8dp">
 
+    <!-- 6.1.0: the logo sits on a dark rounded tile so it reads
+         against the card instead of floating on it. -->
     <ImageView
         android:id="@+id/mobile_row_logo"
         android:layout_width="48dp"
         android:layout_height="28dp"
         android:scaleType="fitCenter"
+        android:background="@drawable/guide_preview_bg"
+        android:padding="4dp"
         android:contentDescription="@string/guide_preview" />
 
     <LinearLayout

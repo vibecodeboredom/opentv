@@ -30,7 +30,6 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
-import coil.load
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -852,14 +851,12 @@ class PlaybackActivity : FragmentActivity() {
         infoChannelName.text = name
         // Skip re-loading the same logo — but only for a real URL: a
         // null logo (recording playback) still loads every time (Coil
-        // shows the placeholder), exactly as before.
+        // shows the placeholder), exactly as before. 6.1.0:
+        // downsampled to the 60dp info logo.
         val logoUrl = ch?.logo
         if (logoUrl == null || logoUrl != infoLogoUrl) {
             infoLogoUrl = logoUrl
-            infoLogo.load(logoUrl) {
-                placeholder(R.drawable.ic_play)
-                error(R.drawable.ic_play)
-            }
+            infoLogo.loadLogo(logoUrl, 60)
         }
         val nowP = nowProgramme
         if (nowP != null) {
@@ -977,10 +974,8 @@ class PlaybackActivity : FragmentActivity() {
         val num = if (ch != null && ch.number > 0) "${ch.number}  " else ""
         mobileCenterChannel.text = "$num$name"
         val logoUrl = ch?.logo
-        mobileCenterLogo.load(logoUrl) {
-            placeholder(R.drawable.ic_play)
-            error(R.drawable.ic_play)
-        }
+        // 6.1.0: downsampled to the 72dp centre logo.
+        mobileCenterLogo.loadLogo(logoUrl, 72)
         val nowP = nowProgramme
         if (nowP != null) {
             val title = if (catchupUrl != null) "⏪ ${nowP.title}" else nowP.title
@@ -1105,10 +1100,8 @@ class PlaybackActivity : FragmentActivity() {
                 layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 if (logoUrl != null) {
-                    load(logoUrl) {
-                        placeholder(R.drawable.ic_play)
-                        error(R.drawable.ic_play)
-                    }
+                    // 6.1.0: downsampled to the 20dp tile icon.
+                    loadLogo(logoUrl, 20)
                 } else if (iconRes != null) {
                     setImageResource(iconRes)
                 }

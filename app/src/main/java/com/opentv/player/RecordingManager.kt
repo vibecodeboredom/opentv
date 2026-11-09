@@ -145,9 +145,16 @@ object RecordingManager {
         alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, stopAtMillis, pending)
     }
 
-    /** True while a channel's recording is actively downloading. */
+    /** True while a channel's recording is actively downloading.
+     * 6.1.0: does NOT create the DownloadManager. updateTransportIcons
+     * calls this on every play/pause change and overlay open, and the
+     * old code built the whole DownloadManager + SimpleCache + the
+     * foreground RecordingService on the first such check, even when
+     * the user never records. An active recording implies the manager
+     * exists in this process (the service created it when the
+     * recording started), so a null manager means not recording. */
     fun isRecording(context: Context, channelId: String): Boolean {
-        val manager = getDownloadManager(context)
+        val manager = downloadManager ?: return false
         val download = runCatching {
             manager.downloadIndex.getDownload(Recording.idForChannel(channelId))
         }.getOrNull() ?: return false

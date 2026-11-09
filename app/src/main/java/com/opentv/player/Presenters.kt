@@ -28,6 +28,9 @@ class ChannelPresenter : Presenter() {
             channel.group
         }
         cardView.mainImageView.load(channel.logo) {
+            // 6.1.0: downsample to the card's 320x180px image instead of
+            // decoding the provider's full-resolution logo.
+            size(CARD_WIDTH, CARD_HEIGHT)
             crossfade(true)
             placeholder(android.R.drawable.ic_media_play)
             error(android.R.drawable.ic_media_play)

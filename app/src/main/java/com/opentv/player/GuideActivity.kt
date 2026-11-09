@@ -27,7 +27,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
-import coil.load
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -98,6 +97,12 @@ class GuideActivity : FragmentActivity() {
     private var px12: Int = 0
     private var px16: Int = 0
     private var px40: Int = 0
+    /** 6.1.0: row height / margin in px, computed once in onCreate —
+     * appendRows and updateRowsWithEpg used to run dpToPx on every
+     * call (scroll + focus appends), and TypedValue.applyDimension
+     * is not free when it runs dozens of times a second. */
+    private var pxCellHeight: Int = 0
+    private var pxCellMargin: Int = 0
 
     /** Pinned channel-name column (4.7.2): sits beside the horizontal
      * scroller, so the names never scroll away sideways. */
@@ -209,6 +214,8 @@ class GuideActivity : FragmentActivity() {
         px12 = dpToPx(12)
         px16 = dpToPx(16)
         px40 = dpToPx(40)
+        pxCellHeight = dpToPx(CELL_HEIGHT_DP)
+        pxCellMargin = dpToPx(CELL_MARGIN_DP)
         favoritesCache = PlaylistRepository.favorites(this)
 
         // 6.0.0-rc1: the TV grid is built for a wide screen (320dp
@@ -558,14 +565,14 @@ class GuideActivity : FragmentActivity() {
             detailCategory.text = channel.group
             // Skip re-loading the same logo — but only for a real URL:
             // a null logo still loads every time (Coil shows the
-            // placeholder), exactly as before.
+            // placeholder), exactly as before. 6.1.0: downsampled to
+            // the 96dp preview box.
             val logoUrl = channel.logo
             if (logoUrl == null || logoUrl != detailLogoUrl) {
                 detailLogoUrl = logoUrl
-                detailLogo.load(logoUrl) {
-                    placeholder(android.R.drawable.ic_media_play)
-                    error(android.R.drawable.ic_media_play)
-                }
+                detailLogo.loadLogo(
+                    logoUrl, 96, android.R.drawable.ic_media_play
+                )
             }
         }
         val isNow = nowMillis in programme.startMillis until programme.stopMillis
@@ -619,7 +626,7 @@ class GuideActivity : FragmentActivity() {
         channelNameViews.clear()
         nowLine.visibility = View.GONE
 
-        buildGuideHeader(dpToPx(CELL_HEIGHT_DP))
+        buildGuideHeader(pxCellHeight)
         // 4.8.1: build only the first screenful synchronously — the
         // first paint was blocked by inflating all 24 rows, and only
         // ~6 fit on screen at once. The rest of the initial rows, plus
@@ -638,8 +645,8 @@ class GuideActivity : FragmentActivity() {
     private fun appendRows(count: Int = GUIDE_APPEND_ROWS) {
         if (builtRowCount >= displayRows.size) return
         val windowEnd = windowStart + WINDOW_HOURS * 60L * 60 * 1000
-        val cellHeight = dpToPx(CELL_HEIGHT_DP)
-        val cellMargin = dpToPx(CELL_MARGIN_DP)
+        val cellHeight = pxCellHeight
+        val cellMargin = pxCellMargin
         val end = minOf(builtRowCount + count, displayRows.size)
         while (builtRowCount < end) {
             buildRowViews(
@@ -752,10 +759,9 @@ class GuideActivity : FragmentActivity() {
             layoutParams = LinearLayout.LayoutParams(px40, px40).apply {
                 marginEnd = px12
             }
-            load(row.channel.logo) {
-                placeholder(android.R.drawable.ic_media_play)
-                error(android.R.drawable.ic_media_play)
-            }
+            // 6.1.0: downsampled to the 40dp cell instead of the
+            // provider's full-resolution logo.
+            loadLogo(row.channel.logo, 40, android.R.drawable.ic_media_play)
         }
         channelCell.addView(logo)
         val nameView = TextView(this).apply {
@@ -950,8 +956,8 @@ class GuideActivity : FragmentActivity() {
         firstNow = null
         firstNowCard = null
         val windowEnd = windowStart + WINDOW_HOURS * 60L * 60 * 1000
-        val cellHeight = dpToPx(CELL_HEIGHT_DP)
-        val cellMargin = dpToPx(CELL_MARGIN_DP)
+        val cellHeight = pxCellHeight
+        val cellMargin = pxCellMargin
         for (i in 0 until builtRowCount) {
             val row = allRows[i]
             val nameView = channelNameViews[row.channel.id] ?: continue

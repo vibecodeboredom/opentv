@@ -1,6 +1,9 @@
 package com.opentv.player
 
 import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
@@ -8,7 +11,6 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import coil.load
 
 /**
  * The mobile home list (6.0.0-rc1): a flat list of section headers
@@ -126,12 +128,24 @@ class MobileChannelAdapter(
         fun bind(item: Item.ChannelItem) {
             channel = item.channel
             val ch = item.channel
-            name.text = if (ch.number > 0) "${ch.number}  ${ch.name}" else ch.name
-            group.text = ch.group
-            logo.load(ch.logo) {
-                placeholder(R.drawable.ic_play)
-                error(R.drawable.ic_play)
+            // 6.1.0: the channel number is accent green, the name stays
+            // white — same hierarchy as the TV sidebar rows, which
+            // colour the number separately.
+            name.text = if (ch.number > 0) {
+                val num = ch.number.toString()
+                SpannableString("$num  ${ch.name}").apply {
+                    setSpan(
+                        ForegroundColorSpan(0xFF86C739.toInt()),
+                        0, num.length,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+            } else {
+                ch.name
             }
+            group.text = ch.group
+            // 6.1.0: downsampled to the 48dp row logo.
+            logo.loadLogo(ch.logo, 48)
             star.text = if (item.isFavorite) "★" else "☆"
             star.setTextColor(
                 if (item.isFavorite) 0xFFFFC107.toInt() else 0xFF7A7A85.toInt()

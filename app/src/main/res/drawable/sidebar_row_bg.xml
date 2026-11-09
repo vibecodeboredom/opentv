@@ -1,12 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Sidebar row background (4.6.0, TiviMate-style): transparent by default,
      a rounded 16dp dark-grey highlight when focused. The focused text turns
-     accent in code; the highlight here is the row's backdrop. -->
+     accent in code; the highlight here is the row's backdrop.
+     6.1.0: the focused row also gets a 1dp accent outline, so focus is
+     unmistakable on the TV even at a glance. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="rectangle">
             <solid android:color="#333639" />
             <corners android:radius="16dp" />
+            <stroke
+                android:width="1dp"
+                android:color="#86C739" />
         </shape>
     </item>
     <item android:state_pressed="true">

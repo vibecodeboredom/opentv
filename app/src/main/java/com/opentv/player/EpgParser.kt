@@ -1,7 +1,8 @@
 package com.opentv.player
 
 import org.w3c.dom.Element
-import java.io.ByteArrayInputStream
+import org.xml.sax.InputSource
+import java.io.StringReader
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -39,7 +40,11 @@ object EpgParser {
         try {
             val factory = DocumentBuilderFactory.newInstance()
             val builder = factory.newDocumentBuilder()
-            val doc = builder.parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+            // 6.1.0: parse from a StringReader instead of copying the
+            // whole multi-MB XML string into a byte array first — the
+            // string, the byte copy, and the DOM tree were all live
+            // at once on a 1GB box.
+            val doc = builder.parse(InputSource(StringReader(xml)))
             val programmeNodes = doc.getElementsByTagName("programme")
             for (i in 0 until programmeNodes.length) {
                 val el = programmeNodes.item(i) as? Element ?: continue

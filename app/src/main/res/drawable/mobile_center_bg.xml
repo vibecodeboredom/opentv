@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mobile centred channel-info panel (6.1.0): a mostly-solid dark
+     panel with a subtle border, instead of the flat 50%-grey pill —
+     the channel name and now/next stay readable over any video. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#E6161616" />
+    <corners android:radius="16dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#333639" />
+</shape>

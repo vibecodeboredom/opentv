@@ -1,15 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 6.1.0: radius 8dp (was 6dp) and a subtle 1dp border on the
+     default state, so past cells read against the black grid.
+     Pressed state added for touch users. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="rectangle">
             <solid android:color="#FFFFFF" />
-            <corners android:radius="6dp" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#232629" />
+            <corners android:radius="8dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
             <solid android:color="#111111" />
-            <corners android:radius="6dp" />
+            <corners android:radius="8dp" />
+            <stroke
+                android:width="1dp"
+                android:color="#232629" />
         </shape>
     </item>
 </selector>

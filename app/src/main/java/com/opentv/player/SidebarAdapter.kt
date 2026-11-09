@@ -10,7 +10,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import coil.load
 
 /** One group row in the sidebar (key + label + channel count). */
 data class SidebarGroup(val key: String, val label: String, val count: Int)
@@ -261,10 +260,8 @@ class SidebarAdapter(
             numberView.text = if (ch.number > 0) ch.number.toString() else ""
             nameView.text = ch.name
             programmeView.text = programmeTitle
-            logoView.load(ch.logo) {
-                placeholder(R.drawable.ic_play)
-                error(R.drawable.ic_play)
-            }
+            // 6.1.0: downsampled to the 32dp row logo.
+            logoView.loadLogo(ch.logo, 32)
             // A rebound row keeps its focus state; re-apply the colours.
             applyFocusColors(itemView.isFocused)
         }

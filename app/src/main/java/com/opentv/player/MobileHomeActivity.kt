@@ -15,6 +15,8 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -30,6 +32,13 @@ import kotlinx.coroutines.launch
  * auto-play, as before).
  */
 class MobileHomeActivity : FragmentActivity() {
+
+    private companion object {
+        /** Search waits this long after the last keystroke before
+         * rebuilding the list (6.1.0) — typing used to rebuild the
+         * whole ~1500-item list on every keystroke. */
+        private const val SEARCH_DEBOUNCE_MS = 150L
+    }
 
     private lateinit var recycler: RecyclerView
     private lateinit var search: EditText
@@ -53,6 +62,9 @@ class MobileHomeActivity : FragmentActivity() {
     private var lastRenderedFavorites: Set<String> = emptySet()
     private var lastChannel: Channel? = null
     private var currentQuery: String = ""
+    /** 6.1.0: debounced search — renderList builds a ~1500-item
+     * list, and the old code did it on every keystroke while typing. */
+    private var searchJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,8 +87,25 @@ class MobileHomeActivity : FragmentActivity() {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
-                currentQuery = s?.toString().orEmpty()
-                renderList()
+                // 6.1.0: debounced like the guide search — the scan
+                // only runs once typing pauses, so a fast typist
+                // doesn't queue a full list rebuild per keystroke.
+                // Clearing the search is still instant.
+                val query = s?.toString().orEmpty()
+                searchJob?.cancel()
+                if (query == currentQuery) return
+                if (query.trim().isEmpty()) {
+                    currentQuery = query
+                    renderList()
+                    return
+                }
+                searchJob = lifecycleScope.launch {
+                    delay(SEARCH_DEBOUNCE_MS)
+                    if (query != currentQuery) {
+                        currentQuery = query
+                        renderList()
+                    }
+                }
             }
         })
 
