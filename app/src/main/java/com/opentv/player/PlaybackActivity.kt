@@ -56,7 +56,7 @@ import java.util.Locale
  *   between strip tiles (same focus caveat as Left); nothing up → show
  *   the channel info overlay.
  * - UP/DOWN: move focus between rows/tiles/buttons (framework focus
- *   search; the ScrollView scrolls to the focused sidebar row).
+ *   search; the sidebar's RecyclerView scrolls to the focused row).
  * - BACK: sidebar up → back/close; overlay up → hide it; else the
  *   system default (leave playback).
  * - Play/pause key (remote): toggle pause/resume. Channel up/down keys:
@@ -69,8 +69,8 @@ import java.util.Locale
  * with number + logo + name + the current programme. The current
  * channel is highlighted in the accent (#86C739); the focused row gets
  * a rounded 16dp highlight and its text turns accent. Channel rows
- * are capped at 200 (the footer says so) so opening the sidebar never
- * has to build thousands of views.
+ * are capped at 200 (the footer says so); 6.0.0-rc2 made the list a
+ * RecyclerView, so only the visible rows are bound.
  *
  * The player is built in onStart and released in onStop, so leaving
  * for the guide and coming straight back resumes the channel instead
@@ -239,8 +239,7 @@ class PlaybackActivity : FragmentActivity() {
             panel = findViewById(R.id.sidebar),
             title = findViewById(R.id.sidebar_title),
             subtitle = findViewById(R.id.sidebar_subtitle),
-            scroll = findViewById(R.id.sidebar_scroll),
-            list = findViewById(R.id.sidebar_list),
+            list = findViewById(R.id.sidebar_scroll),
             footer = findViewById(R.id.sidebar_footer),
             currentChannelId = { channel?.id },
             onChannelSelected = { switchToChannel(it) }

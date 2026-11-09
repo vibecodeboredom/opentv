@@ -193,8 +193,7 @@ class GuideActivity : FragmentActivity() {
             panel = findViewById(R.id.guide_sidebar),
             title = findViewById(R.id.guide_sidebar_title),
             subtitle = findViewById(R.id.guide_sidebar_subtitle),
-            scroll = findViewById(R.id.guide_sidebar_scroll),
-            list = findViewById(R.id.guide_sidebar_list),
+            list = findViewById(R.id.guide_sidebar_scroll),
             footer = findViewById(R.id.guide_sidebar_footer),
             currentChannelId = { currentChannelId },
             onChannelSelected = { playChannel(it) }

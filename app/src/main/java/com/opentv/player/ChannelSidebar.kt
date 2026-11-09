@@ -2,17 +2,12 @@ package com.opentv.player
 
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Typeface
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.View
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
-import coil.load
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -25,6 +20,12 @@ import kotlinx.coroutines.launch
  * 16dp highlight and its text turns accent. Channel rows are capped
  * at 200 (the footer says so) so opening the sidebar never has to
  * build thousands of views.
+ *
+ * 6.0.0-rc2: the list is a RecyclerView (SidebarAdapter). It used to
+ * be a LinearLayout inside a ScrollView with up to 200 channel rows
+ * (~1,200 views) inflated on every open and re-measured on every
+ * focus move, plus 200 logo fetches fired at once — that was the lag
+ * on the Onn 4K box. Only the ~10 visible rows bind now.
  *
  * Shared by PlaybackActivity and GuideActivity (4.6.2). The two callers
  * differ only in which channel counts as "current" and what happens
@@ -45,8 +46,7 @@ class ChannelSidebar(
     private val panel: View,
     private val title: TextView,
     private val subtitle: TextView,
-    private val scroll: ScrollView,
-    private val list: LinearLayout,
+    private val list: RecyclerView,
     private val footer: TextView,
     private val currentChannelId: () -> String?,
     private val onChannelSelected: (Channel) -> Unit
@@ -72,14 +72,31 @@ class ChannelSidebar(
      * action, so a show() mid-slide can't be undone by the stale
      * hide finishing after it. */
     private var hideGeneration = 0
-    /** Channel id -> "now playing" TextView, so the EPG fill-in can update
-     * rows after they are built. */
-    private val programmeViews = mutableMapOf<String, TextView>()
 
-    /** Display density, cached once — dp() used to read
-     * activity.resources.displayMetrics on every call (up to ~10 per
-     * sidebar row, 200 rows per open). */
-    private val density: Float by lazy { activity.resources.displayMetrics.density }
+    private val adapter = SidebarAdapter(
+        onGroupClick = { item ->
+            // 4.8.0: "Playlists" opens the picker, not a channel list.
+            if (item.key == GROUP_PLAYLISTS) {
+                showPlaylistPicker()
+            } else {
+                inGroups = false
+                group = item.key
+                buildChannels(item.key)
+            }
+        },
+        onChannelClick = onChannelSelected,
+        currentChannelId = currentChannelId
+    )
+
+    init {
+        list.layoutManager = LinearLayoutManager(activity)
+        list.adapter = adapter
+        // Rows are a fixed height (56dp min, single-line texts), so the
+        // list's own size never depends on its contents; and no change
+        // animations, so a rebind never flickers or steals focus.
+        list.setHasFixedSize(true)
+        list.itemAnimator = null
+    }
 
     fun isVisible(): Boolean = panel.visibility == View.VISIBLE
 
@@ -119,7 +136,7 @@ class ChannelSidebar(
                 scrim.alpha = 1f
             }.start()
         scrim.animate().alpha(0f).setDuration(180).start()
-        programmeViews.clear()
+        adapter.clearTitles()
     }
 
     /** Left / BACK inside the sidebar: channels -> groups, groups -> close. */
@@ -136,17 +153,19 @@ class ChannelSidebar(
      * The "Playlists" row opens the playlist picker instead. */
     fun activate() {
         val focused = focusedRow() ?: return
-        when (val tag = focused.tag) {
-            is SidebarGroup -> {
-                if (tag.key == GROUP_PLAYLISTS) {
+        val pos = list.getChildAdapterPosition(focused)
+        when (val item = adapter.itemAt(pos)) {
+            is SidebarAdapter.Item.GroupItem -> {
+                if (item.group.key == GROUP_PLAYLISTS) {
                     showPlaylistPicker()
                     return
                 }
                 inGroups = false
-                group = tag.key
-                buildChannels(tag.key)
+                group = item.group.key
+                buildChannels(item.group.key)
             }
-            is Channel -> onChannelSelected(tag)
+            is SidebarAdapter.Item.ChannelItem -> onChannelSelected(item.channel)
+            null -> return
         }
     }
 
@@ -190,23 +209,25 @@ class ChannelSidebar(
      * framework focus search could jump out of the sidebar. Returns
      * true when focus moved (the key is consumed). */
     fun moveFocus(down: Boolean): Boolean {
-        if (list.childCount == 0) return false
-        // 4.9.5: plain loop instead of building a throwaway list of all
-        // rows on every Up/Down press just to find the focused one.
+        val count = adapter.itemCount
+        if (count == 0) return false
+        // The focused row is one of the visible children; its adapter
+        // position is the index to step from.
         var current = -1
         for (i in 0 until list.childCount) {
-            if (list.getChildAt(i).isFocused) {
-                current = i
+            val child = list.getChildAt(i)
+            if (child.isFocused) {
+                current = list.getChildAdapterPosition(child)
                 break
             }
         }
-        if (current < 0) current = if (down) -1 else list.childCount
-        val next = if (down) (current + 1).coerceAtMost(list.childCount - 1)
+        if (current < 0) current = if (down) -1 else count
+        val next = if (down) (current + 1).coerceAtMost(count - 1)
         else (current - 1).coerceAtLeast(0)
-        val target = list.getChildAt(next) ?: return false
-        target.requestFocus()
-        // Keep the newly focused row visible.
-        scroll.post { scroll.scrollTo(0, target.top) }
+        list.scrollToPosition(next)
+        // The row may not be laid out until the scroll lands; ask for
+        // focus after the next layout pass.
+        list.post { list.layoutManager?.findViewByPosition(next)?.requestFocus() }
         return true
     }
 
@@ -219,9 +240,15 @@ class ChannelSidebar(
         return null
     }
 
-    private data class SidebarGroup(val key: String, val label: String, val count: Int)
+    /** Scroll a position into view and give it focus once laid out. */
+    private fun focusPosition(pos: Int) {
+        if (pos < 0 || pos >= adapter.itemCount) return
+        list.scrollToPosition(pos)
+        list.post { list.layoutManager?.findViewByPosition(pos)?.requestFocus() }
+    }
 
-    private fun dp(v: Int): Int = (v * density).toInt()
+    private fun dp(v: Int): Int =
+        (v * activity.resources.displayMetrics.density).toInt()
 
     /** The groups list: All channels, Favorites, History, then playlist groups.
      * Builds synchronously when the playlist is already in memory. */
@@ -229,8 +256,7 @@ class ChannelSidebar(
         title.setText(R.string.sidebar_groups)
         subtitle.text = ""
         footer.text = ""
-        list.removeAllViews()
-        programmeViews.clear()
+        adapter.submitList(emptyList(), emptyMap(), "")
         val cached = PlaylistRepository.cachedPlaylist()
         if (cached != null) {
             renderGroups(cached)
@@ -262,94 +288,42 @@ class ChannelSidebar(
             groupCounts[ch.group] = (groupCounts[ch.group] ?: 0) + 1
             if (ch.id in favorites) favoriteCount++
         }
-        val items = mutableListOf<SidebarGroup>()
+        val items = mutableListOf<SidebarAdapter.Item>()
         // 4.8.0: "Playlists" first — it opens the playlist picker,
         // not a channel list. The count is the enabled (switchable)
         // playlists; disabled ones don't show in the picker (4.9.0).
-        items += SidebarGroup(
-            GROUP_PLAYLISTS, activity.getString(R.string.playlists_title),
-            PlaylistRepository.enabledPlaylists(activity).size
+        items += SidebarAdapter.Item.GroupItem(
+            SidebarGroup(
+                GROUP_PLAYLISTS, activity.getString(R.string.playlists_title),
+                PlaylistRepository.enabledPlaylists(activity).size
+            )
         )
-        items += SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visibleCount)
-        items += SidebarGroup(
-            GROUP_FAVORITES, activity.getString(R.string.favorites),
-            favoriteCount
+        items += SidebarAdapter.Item.GroupItem(
+            SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visibleCount)
         )
-        items += SidebarGroup(
-            GROUP_HISTORY, activity.getString(R.string.sidebar_history), recents.size
+        items += SidebarAdapter.Item.GroupItem(
+            SidebarGroup(
+                GROUP_FAVORITES, activity.getString(R.string.favorites),
+                favoriteCount
+            )
+        )
+        items += SidebarAdapter.Item.GroupItem(
+            SidebarGroup(
+                GROUP_HISTORY, activity.getString(R.string.sidebar_history), recents.size
+            )
         )
         for ((g, count) in groupCounts) {
-            items += SidebarGroup(g, g, count)
+            items += SidebarAdapter.Item.GroupItem(SidebarGroup(g, g, count))
         }
-        for (item in items) {
-            list.addView(buildGroupRow(item))
-        }
+        adapter.submitList(items, emptyMap(), activity.getString(R.string.overlay_no_info))
         if (items.isEmpty()) {
             footer.setText(R.string.sidebar_no_groups)
         }
         // Focus the "All channels" row so Up/Down works straight away
         // (it is the second row now — "Playlists" sits above it).
         list.post {
-            for (i in 0 until list.childCount) {
-                val row = list.getChildAt(i)
-                if ((row.tag as? SidebarGroup)?.key == GROUP_ALL) {
-                    row.requestFocus()
-                    break
-                }
-            }
+            focusPosition(adapter.positionOfGroup(GROUP_ALL))
         }
-    }
-
-    /** One group row: name + channel count, accent text when focused. */
-    private fun buildGroupRow(item: SidebarGroup): View {
-        val row = LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isFocusable = true
-            isFocusableInTouchMode = true
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(2); bottomMargin = dp(2) }
-            minimumHeight = dp(56)
-            setBackgroundResource(R.drawable.sidebar_row_bg)
-            tag = item
-            setOnClickListener {
-                // 4.8.0: "Playlists" opens the picker, not a channel list.
-                if (item.key == GROUP_PLAYLISTS) {
-                    showPlaylistPicker()
-                    return@setOnClickListener
-                }
-                inGroups = false
-                group = item.key
-                buildChannels(item.key)
-            }
-        }
-        val nameView = TextView(activity).apply {
-            text = item.label
-            setTextColor(0xFFFFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-            typeface = Typeface.DEFAULT_BOLD
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val countView = TextView(activity).apply {
-            text = item.count.toString()
-            setTextColor(0xB3FFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-        row.addView(nameView)
-        row.addView(countView)
-        row.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
-            nameView.setTextColor(if (hasFocus) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
-        }
-        return row
     }
 
     /** The channels of one group (or a pseudo-group), capped at 200 rows.
@@ -362,8 +336,7 @@ class ChannelSidebar(
             else -> groupKey
         }
         title.text = groupLabel
-        list.removeAllViews()
-        programmeViews.clear()
+        adapter.submitList(emptyList(), emptyMap(), "")
         footer.text = ""
         val cached = PlaylistRepository.cachedPlaylist()
         if (cached != null) {
@@ -417,9 +390,12 @@ class ChannelSidebar(
         }
         subtitle.text = activity.getString(R.string.sidebar_channels_count, channelList.size)
         val shown = channelList.take(SIDEBAR_MAX_CHANNELS)
-        for (ch in shown) {
-            list.addView(buildChannelRow(ch))
-        }
+        val items = shown.map { SidebarAdapter.Item.ChannelItem(it) }
+        // The cached EPG lets the first bind already show now-playing
+        // titles; without it, fillNowPlaying updates rows as it arrives.
+        val cachedEpg = PlaylistRepository.cachedEpg()
+        val titles = if (cachedEpg != null) programmeTitlesFor(cachedEpg, shown) else emptyMap()
+        adapter.submitList(items, titles, activity.getString(R.string.overlay_no_info))
         if (channelList.isEmpty()) {
             footer.setText(R.string.sidebar_no_channels)
         } else if (channelList.size > SIDEBAR_MAX_CHANNELS) {
@@ -429,128 +405,36 @@ class ChannelSidebar(
         // Up/Down works straight away.
         val currentId = currentChannelId()
         list.post {
-            // 4.9.5: plain loops instead of throwaway lists of all rows.
-            var target: View? = null
-            for (i in 0 until list.childCount) {
-                val row = list.getChildAt(i)
-                if ((row.tag as? Channel)?.id == currentId) {
-                    target = row
-                    break
-                }
-            }
-            (target ?: list.getChildAt(0))?.requestFocus()
-            // Keep the focused row visible once the list is laid out.
-            scroll.post {
-                focusedRow()?.let { scroll.scrollTo(0, it.top) }
-            }
+            val pos = currentId?.let { adapter.positionOfChannel(it) }?.takeIf { it >= 0 } ?: 0
+            focusPosition(pos)
         }
-        fillNowPlaying(shown)
+        if (cachedEpg == null) fillNowPlaying(shown)
     }
 
-    /** Fill in each shown row's "now playing" programme. Uses the cached
-     * EPG when it is already in memory; otherwise loads it once and
-     * fills in when it arrives. */
+    /** Fill in each shown row's "now playing" programme once the EPG
+     * loads. Only runs when the cached EPG wasn't already in memory
+     * (renderChannels covers that case inline). */
     private fun fillNowPlaying(shown: List<Channel>) {
-        val cached = PlaylistRepository.cachedEpg()
-        if (cached != null) {
-            applyEpg(cached, shown)
-            return
-        }
         scope.launch {
             val epg = PlaylistRepository.loadEpg(activity)
             if (!isVisible() || inGroups) return@launch
-            applyEpg(epg, shown)
+            adapter.updateProgrammeTitles(programmeTitlesFor(epg, shown))
         }
     }
 
-    private fun applyEpg(
+    /** Channel id -> now-playing title for the shown rows. */
+    private fun programmeTitlesFor(
         epg: Map<String, List<EpgParser.Programme>>,
         shown: List<Channel>
-    ) {
+    ): Map<String, String> {
         val now = System.currentTimeMillis()
         val noInfo = activity.getString(R.string.overlay_no_info)
+        val titles = mutableMapOf<String, String>()
         for (ch in shown) {
-            val view = programmeViews[ch.id] ?: continue
             val programmes = epg[ch.tvgId] ?: epg[ch.name.lowercase()]
             val current = EpgParser.nowAndNext(programmes, now).first
-            view.text = current?.title ?: noInfo
+            titles[ch.id] = current?.title ?: noInfo
         }
-    }
-
-    /** One channel row: number + logo + name + now-playing programme. */
-    private fun buildChannelRow(ch: Channel): View {
-        val isCurrent = ch.id == currentChannelId()
-        val row = LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isFocusable = true
-            isFocusableInTouchMode = true
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(2); bottomMargin = dp(2) }
-            minimumHeight = dp(56)
-            setBackgroundResource(R.drawable.sidebar_row_bg)
-            tag = ch
-            setOnClickListener { onChannelSelected(ch) }
-        }
-        val numberView = TextView(activity).apply {
-            text = if (ch.number > 0) ch.number.toString() else ""
-            // The current channel's number is accent; the rest are 70% white.
-            setTextColor(if (isCurrent) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(dp(32), LinearLayout.LayoutParams.MATCH_PARENT)
-        }
-        val logoView = ImageView(activity).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).apply {
-                marginEnd = dp(8)
-            }
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            load(ch.logo) {
-                placeholder(R.drawable.ic_play)
-                error(R.drawable.ic_play)
-            }
-        }
-        val textBlock = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val nameView = TextView(activity).apply {
-            text = ch.name
-            // Current channel in accent, the rest white.
-            setTextColor(if (isCurrent) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.DEFAULT_BOLD
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        val programmeView = TextView(activity).apply {
-            text = activity.getString(R.string.overlay_no_info)
-            setTextColor(0xB3FFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        textBlock.addView(nameView)
-        textBlock.addView(programmeView)
-        row.addView(numberView)
-        row.addView(logoView)
-        row.addView(textBlock)
-        programmeViews[ch.id] = programmeView
-        row.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
-            // Focused row: name (and number, unless it is the current
-            // channel, which is already accent) turns accent.
-            nameView.setTextColor(
-                if (hasFocus || isCurrent) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
-            )
-            if (!isCurrent) {
-                numberView.setTextColor(if (hasFocus) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt())
-            }
-        }
-        return row
+        return titles
     }
 }
