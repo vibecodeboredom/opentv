@@ -27,11 +27,18 @@ data class SidebarGroup(val key: String, val label: String, val count: Int)
  * logo + name + now-playing). The row visuals are the same as the old
  * code-built rows (same paddings, sizes, colours, sidebar_row_bg) —
  * only the container changed.
+ *
+ * 6.1.2: rows are sized from AppSettings.sidebarSizing (Small is the
+ * compact default — 48dp rows, 28dp logos — Medium is the old 56dp /
+ * 260dp layout, Large is roomier). A channel name that overflows its
+ * row scrolls left-right (marquee) instead of being cut off; short
+ * names never scroll, so nothing moves unless it has to.
  */
 class SidebarAdapter(
     private val onGroupClick: (SidebarGroup) -> Unit,
     private val onChannelClick: (Channel) -> Unit,
-    private val currentChannelId: () -> String?
+    private val currentChannelId: () -> String?,
+    private val sizing: AppSettings.SidebarSizing
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     /** One row of the list: a group or a channel. */
@@ -102,7 +109,7 @@ class SidebarAdapter(
         } else {
             ChannelViewHolder(
                 buildChannelRow(parent.context, density),
-                onChannelClick, currentChannelId
+                onChannelClick, currentChannelId, sizing
             )
         }
     }
@@ -125,12 +132,15 @@ class SidebarAdapter(
             gravity = Gravity.CENTER_VERTICAL
             isFocusable = true
             isFocusableInTouchMode = true
-            setPadding(dp(12, density), dp(12, density), dp(12, density), dp(12, density))
+            setPadding(
+                dp(sizing.groupPaddingDp, density), dp(sizing.groupPaddingDp, density),
+                dp(sizing.groupPaddingDp, density), dp(sizing.groupPaddingDp, density)
+            )
             layoutParams = RecyclerView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(2, density); bottomMargin = dp(2, density) }
-            minimumHeight = dp(56, density)
+            minimumHeight = dp(sizing.rowMinHeightDp, density)
             setBackgroundResource(R.drawable.sidebar_row_bg)
         }
         val nameView = TextView(context).apply {
@@ -161,22 +171,25 @@ class SidebarAdapter(
             gravity = Gravity.CENTER_VERTICAL
             isFocusable = true
             isFocusableInTouchMode = true
-            setPadding(dp(10, density), dp(10, density), dp(10, density), dp(10, density))
+            setPadding(
+                dp(sizing.rowPaddingDp, density), dp(sizing.rowPaddingDp, density),
+                dp(sizing.rowPaddingDp, density), dp(sizing.rowPaddingDp, density)
+            )
             layoutParams = RecyclerView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(2, density); bottomMargin = dp(2, density) }
-            minimumHeight = dp(56, density)
+            minimumHeight = dp(sizing.rowMinHeightDp, density)
             setBackgroundResource(R.drawable.sidebar_row_bg)
         }
         val numberView = TextView(context).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, sizing.nameSp)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(dp(32, density), LinearLayout.LayoutParams.MATCH_PARENT)
+            layoutParams = LinearLayout.LayoutParams(dp(sizing.numberWidthDp, density), LinearLayout.LayoutParams.MATCH_PARENT)
         }
         val logoView = ImageView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(32, density), dp(32, density)).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(sizing.logoDp, density), dp(sizing.logoDp, density)).apply {
                 marginEnd = dp(8, density)
             }
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -187,14 +200,22 @@ class SidebarAdapter(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         val nameView = TextView(context).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, sizing.nameSp)
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
+            // 6.1.2: a name that overflows its row scrolls left-right
+            // (marquee) so the full name can be read. Marquee only
+            // runs when the text is actually wider than the view, and
+            // only while the view is selected — set once here, it
+            // survives recycling (same view object, rebound).
+            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            isSingleLine = true
+            marqueeRepeatLimit = -1
+            isSelected = true
         }
         val programmeView = TextView(context).apply {
             setTextColor(0xB3FFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, sizing.programmeSp)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
@@ -236,7 +257,8 @@ class SidebarAdapter(
     private class ChannelViewHolder(
         view: View,
         private val onChannelClick: (Channel) -> Unit,
-        private val currentChannelId: () -> String?
+        private val currentChannelId: () -> String?,
+        private val sizing: AppSettings.SidebarSizing
     ) : RecyclerView.ViewHolder(view) {
         private val row: LinearLayout = view as LinearLayout
         private val numberView: TextView = row.getChildAt(0) as TextView
@@ -260,8 +282,8 @@ class SidebarAdapter(
             numberView.text = if (ch.number > 0) ch.number.toString() else ""
             nameView.text = ch.name
             programmeView.text = programmeTitle
-            // 6.1.0: downsampled to the 32dp row logo.
-            logoView.loadLogo(ch.logo, 32)
+            // 6.1.0: downsampled to the row logo size (6.1.2: from the sizing).
+            logoView.loadLogo(ch.logo, sizing.logoDp)
             // A rebound row keeps its focus state; re-apply the colours.
             applyFocusColors(itemView.isFocused)
         }

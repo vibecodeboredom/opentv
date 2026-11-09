@@ -19,6 +19,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -55,13 +56,22 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   groups/channels panel as playback; picking a channel starts
  *   playback of it.
  *
- * A 6-hour window starting at the top of the current hour.
+ * 6.1.2: the window reaches 4 hours back from the top of the current
+ * hour (10 hours total), so past programmes are visible — with the
+ * ⏪ marker and catch-up playback where the playlist supports it.
+ * The guide opens on the channel playing underneath (instead of the
+ * first row), and the horizontal scroller starts with "now" in view.
+ * All three are settings (default on) — see AppSettings.
  */
 class GuideActivity : FragmentActivity() {
 
     private lateinit var container: LinearLayout
     private lateinit var loading: ProgressBar
     private lateinit var scroll: ScrollView
+    /** 6.1.2: the horizontal scroller for the programme grid — the
+     * guide scrolls it on open so "now" is in view once the window
+     * reaches back into the past. */
+    private lateinit var hscroll: HorizontalScrollView
     private lateinit var nowLine: View
     private lateinit var emptyView: TextView
     /** The frame the now-line spans — cached (4.9.5) instead of
@@ -85,6 +95,14 @@ class GuideActivity : FragmentActivity() {
     private var allChannels: List<Channel> = emptyList()
     private var epg: Map<String, List<EpgParser.Programme>> = emptyMap()
     private var windowStart: Long = 0L
+    /** 6.1.2: the window's total span in hours — WINDOW_HOURS forward
+     * plus the past hours when past programming is on (10 by default).
+     * Set in onCreate from the setting; every span computation uses
+     * this, never the WINDOW_HOURS constant directly. */
+    private var windowHours: Int = WINDOW_HOURS
+    /** 6.1.2: how many hours of past the window covers (0 when the
+     * past-programming setting is off — the old top-of-hour window). */
+    private var pastHours: Int = 0
     private var nowMillis: Long = 0L
     private var pxPerMinute: Int = 0
     private var channelColWidth: Int = 0
@@ -133,6 +151,13 @@ class GuideActivity : FragmentActivity() {
      * and the initial focus. Set while rows are built. */
     private var firstNow: Pair<Channel, EpgParser.Programme>? = null
     private var firstNowCard: View? = null
+    /** 6.1.2: the current channel's programme on now (and its card).
+     * The guide opens on this instead of the first row, so the user
+     * lands on the channel they're watching. Set while rows are built,
+     * alongside firstNow; null when the current channel has no row
+     * (hidden, or not built yet) — callers fall back to firstNow. */
+    private var currentChannelNow: Pair<Channel, EpgParser.Programme>? = null
+    private var currentChannelNowCard: View? = null
 
     /** The programme the details header is currently showing. */
     private var detailChannelShown: Channel? = null
@@ -168,6 +193,7 @@ class GuideActivity : FragmentActivity() {
         pinnedCol = findViewById(R.id.guide_pinned_col)
         loading = findViewById(R.id.guide_loading)
         scroll = findViewById(R.id.guide_scroll)
+        hscroll = findViewById(R.id.guide_hscroll)
         nowLine = findViewById(R.id.guide_now_line)
         guideFrame = findViewById(R.id.guide_frame)
         guideHeader = findViewById(R.id.guide_header)
@@ -201,7 +227,8 @@ class GuideActivity : FragmentActivity() {
             list = findViewById(R.id.guide_sidebar_scroll),
             footer = findViewById(R.id.guide_sidebar_footer),
             currentChannelId = { currentChannelId },
-            onChannelSelected = { playChannel(it) }
+            onChannelSelected = { playChannel(it) },
+            sizing = AppSettings.sidebarSizing(this)
         )
         findViewById<View>(R.id.guide_sidebar_scrim).setOnClickListener {
             channelSidebar.hide()
@@ -282,7 +309,21 @@ class GuideActivity : FragmentActivity() {
                 return@launch
             }
             nowMillis = System.currentTimeMillis()
-            windowStart = GuideData.windowStartMillis(nowMillis)
+            // 6.1.2: past programming in the guide — the window starts
+            // 4 hours before the top of the current hour (10 hours
+            // total), so programmes that already aired are visible
+            // with the ⏪ marker and catch-up playback. The default
+            // EPG reaches ~4.5 hours back, so the 4-hour lookback is
+            // real data, not empty cells. Turn it off in Settings to
+            // go back to the old top-of-hour window.
+            pastHours = if (AppSettings.guideShowsPast(this@GuideActivity)) {
+                WINDOW_PAST_HOURS
+            } else {
+                0
+            }
+            windowHours = WINDOW_HOURS + pastHours
+            windowStart = GuideData.windowStartMillis(nowMillis) -
+                pastHours * 60L * 60 * 1000
             allChannels = channels
             rebuildRows()
             if (allRows.isEmpty()) {
@@ -463,7 +504,7 @@ class GuideActivity : FragmentActivity() {
         val overrides = PlaylistRepository.epgOverrides(this)
         allRows = withContext(Dispatchers.Default) {
             GuideData.buildRows(
-                channels, epgMap, windowStart, WINDOW_HOURS, hidden, overrides
+                channels, epgMap, windowStart, windowHours, hidden, overrides
             )
         }
     }
@@ -508,7 +549,7 @@ class GuideActivity : FragmentActivity() {
             val generation = ++searchGeneration
             val filtered = withContext(Dispatchers.Default) {
                 GuideData.searchRows(
-                    channels, epgMap, start, WINDOW_HOURS, hidden, overrides, query
+                    channels, epgMap, start, windowHours, hidden, overrides, query
                 )
             }
             if (generation != searchGeneration || currentSearchQuery != query) return@launch
@@ -621,6 +662,8 @@ class GuideActivity : FragmentActivity() {
         channelCells.clear()
         firstNow = null
         firstNowCard = null
+        currentChannelNow = null
+        currentChannelNowCard = null
         container.removeAllViews()
         pinnedCol.removeAllViews()
         channelNameViews.clear()
@@ -644,7 +687,7 @@ class GuideActivity : FragmentActivity() {
      * one programme row each) and append them. */
     private fun appendRows(count: Int = GUIDE_APPEND_ROWS) {
         if (builtRowCount >= displayRows.size) return
-        val windowEnd = windowStart + WINDOW_HOURS * 60L * 60 * 1000
+        val windowEnd = windowStart + windowHours * 60L * 60 * 1000
         val cellHeight = pxCellHeight
         val cellMargin = pxCellMargin
         val end = minOf(builtRowCount + count, displayRows.size)
@@ -692,7 +735,7 @@ class GuideActivity : FragmentActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
-        for (m in 0 until WINDOW_HOURS * 60 step 30) {
+        for (m in 0 until windowHours * 60 step 30) {
             val label = TextView(this).apply {
                 text = GuideData.formatHourLabel(windowStart + m * 60L * 1000)
                 setTextColor(0xFF9A9AA3.toInt())
@@ -850,6 +893,13 @@ class GuideActivity : FragmentActivity() {
             val isCatchup = isPast &&
                 CatchUp.isAvailable(row.channel, programme, nowMillis)
             if (isNow && firstNow == null) firstNow = row.channel to programme
+            // 6.1.2: the current channel's now programme — the guide
+            // opens on this row instead of the first one. Set here
+            // alongside firstNow, so it exists whenever the row is
+            // built (including placeholder "No information" rows).
+            if (isNow && isCurrentChannel && currentChannelNow == null) {
+                currentChannelNow = row.channel to programme
+            }
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -917,6 +967,9 @@ class GuideActivity : FragmentActivity() {
             }
             rowLayout.addView(card)
             if (isNow && firstNowCard == null) firstNowCard = card
+            if (isNow && isCurrentChannel && currentChannelNowCard == null) {
+                currentChannelNowCard = card
+            }
             posMinutes = layout.startOffsetMinutes + layout.widthMinutes
         }
     }
@@ -955,7 +1008,9 @@ class GuideActivity : FragmentActivity() {
         } else null
         firstNow = null
         firstNowCard = null
-        val windowEnd = windowStart + WINDOW_HOURS * 60L * 60 * 1000
+        currentChannelNow = null
+        currentChannelNowCard = null
+        val windowEnd = windowStart + windowHours * 60L * 60 * 1000
         val cellHeight = pxCellHeight
         val cellMargin = pxCellMargin
         for (i in 0 until builtRowCount) {
@@ -968,13 +1023,19 @@ class GuideActivity : FragmentActivity() {
         displayRows = allRows
         // Restore focus: the programme airing at the same time on the
         // same channel (the old card was a placeholder, so an exact
-        // start-time match usually won't exist), else the first now card.
+        // start-time match usually won't exist), else the current
+        // channel's now card (6.1.2), else the first now card.
         var restored = false
         if (focusedProg != null && focusedChannelId != null) {
             restored = focusProgrammeAt(focusedChannelId, focusedProg.startMillis)
         }
         if (!restored) {
-            firstNowCard?.let { it.requestFocus() }
+            val fallbackCard = if (AppSettings.guideOpensOnCurrentChannel(this)) {
+                currentChannelNowCard ?: firstNowCard
+            } else {
+                firstNowCard
+            }
+            fallbackCard?.let { it.requestFocus() }
         }
         refreshNowLine()
     }
@@ -1008,14 +1069,48 @@ class GuideActivity : FragmentActivity() {
 
     /** After the first rows are in: details header, focus, and the now-line. */
     private fun finishGuideBuild() {
-        // Show the first programme on now in the details header.
-        firstNow?.let { (ch, prog) -> showDetails(ch, prog) }
+        // 6.1.2: land on the channel playing underneath instead of the
+        // first row — the user was tired of scrolling to find it. The
+        // guide only builds the first screenful eagerly, so if the
+        // current channel sits further down, build rows up to its row
+        // first (same work scrolling would do, once, on open). Falls
+        // back to the first row when the setting is off, the channel
+        // has no row (hidden), or the guide was opened with no
+        // current channel.
+        if (AppSettings.guideOpensOnCurrentChannel(this)) {
+            val idx = displayRows.indexOfFirst { it.channel.id == currentChannelId }
+            if (idx >= 0 && idx >= builtRowCount) {
+                appendRows(idx + 1 - builtRowCount)
+            }
+        }
+        // Show the current channel's now programme in the details
+        // header when we have it, else the first programme on now.
+        (currentChannelNow ?: firstNow)?.let { (ch, prog) -> showDetails(ch, prog) }
 
-        // Focus the programme on now, so the guide opens with a cell
-        // focused and a long-press OK lands on a programme (the side
-        // menu), not on the header star.
-        firstNowCard?.let { card ->
-            container.post { card.requestFocus() }
+        // Focus the current channel's now card when we have it, else
+        // the first now card — so the guide opens with a cell focused
+        // and a long-press OK lands on a programme (the side menu),
+        // not on the header star.
+        val focusCard = if (AppSettings.guideOpensOnCurrentChannel(this)) {
+            currentChannelNowCard ?: firstNowCard
+        } else {
+            firstNowCard
+        }
+        focusCard?.let { card ->
+            container.post {
+                card.requestFocus()
+                // 6.1.2: with past programming in the window, "now"
+                // sits hours into the grid — scroll the horizontal
+                // scroller so the now-line is in view with ~30 minutes
+                // of past to its left (scroll left for more). Posted
+                // after the focus so it wins over the framework's
+                // minimal focus scroll.
+                if (pastHours > 0) {
+                    val nowX = ((nowMillis - windowStart) / 60_000L * pxPerMinute).toInt()
+                    val targetX = maxOf(0, nowX - PAST_VISIBLE_MINUTES * pxPerMinute)
+                    hscroll.post { hscroll.scrollTo(targetX, 0) }
+                }
+            }
         }
 
         // Position the red now-line at the current time, spanning all rows.
@@ -1377,6 +1472,13 @@ class GuideActivity : FragmentActivity() {
         /** Intent extra: id of the channel playing underneath. */
         const val EXTRA_CURRENT_CHANNEL_ID = "current_channel_id"
         private const val WINDOW_HOURS = 6
+        /** 6.1.2: hours of past programming the guide window reaches
+         * back (10 hours total). The default EPG reaches ~4.5 hours
+         * back, so the 4-hour lookback is real data. */
+        private const val WINDOW_PAST_HOURS = 4
+        /** 6.1.2: minutes of past left visible beside "now" when the
+         * guide opens with the past window — scroll left for more. */
+        private const val PAST_VISIBLE_MINUTES = 30
         private const val PX_PER_MINUTE_DP = 4
         private const val CHANNEL_COL_DP = 320
         /** Thinner rows (was 72) so more channels fit on one TV screen. */

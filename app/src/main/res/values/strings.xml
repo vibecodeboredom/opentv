@@ -168,4 +168,13 @@
     <string name="mobile_results">Results (%1$d)</string>
     <string name="mobile_channels">☰ Channels</string>
     <string name="mobile_guide">Guide</string>
+    <!-- Guide & playback preferences (6.1.2). -->
+    <string name="prefs_guide_title">Guide &amp; playback</string>
+    <string name="prefs_guide_current_channel">Guide opens on the channel you\'re watching</string>
+    <string name="prefs_tv_info_fade">TV channel info fades out</string>
+    <string name="prefs_guide_show_past">Show past programmes in the guide</string>
+    <string name="prefs_channel_list_size">Channel list size</string>
+    <string name="prefs_size_small">Small</string>
+    <string name="prefs_size_medium">Medium</string>
+    <string name="prefs_size_large">Large</string>
 </resources>

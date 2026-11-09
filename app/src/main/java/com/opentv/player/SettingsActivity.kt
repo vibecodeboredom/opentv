@@ -12,6 +12,8 @@ import android.view.Gravity
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioGroup
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -78,6 +80,47 @@ class SettingsActivity : FragmentActivity() {
         uploadUrl.setText(PlaylistRepository.uploadUrl(this))
 
         buildPlaylistsUi()
+
+        // 6.1.2: guide & playback preferences — toggles save
+        // immediately; the channel-list size applies the next time
+        // playback or the guide opens a fresh sidebar.
+        findViewById<Switch>(R.id.pref_guide_current_channel).apply {
+            isChecked = AppSettings.guideOpensOnCurrentChannel(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setGuideOpensOnCurrentChannel(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<Switch>(R.id.pref_tv_info_fade).apply {
+            isChecked = AppSettings.tvInfoFade(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setTvInfoFade(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<Switch>(R.id.pref_guide_show_past).apply {
+            isChecked = AppSettings.guideShowsPast(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setGuideShowsPast(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<RadioGroup>(R.id.pref_channel_list_size).apply {
+            check(
+                when (AppSettings.channelListSize(this@SettingsActivity)) {
+                    AppSettings.ChannelListSize.SMALL -> R.id.pref_size_small
+                    AppSettings.ChannelListSize.MEDIUM -> R.id.pref_size_medium
+                    AppSettings.ChannelListSize.LARGE -> R.id.pref_size_large
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setChannelListSize(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_size_medium -> AppSettings.ChannelListSize.MEDIUM
+                        R.id.pref_size_large -> AppSettings.ChannelListSize.LARGE
+                        else -> AppSettings.ChannelListSize.SMALL
+                    }
+                )
+            }
+        }
 
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)

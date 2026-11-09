@@ -221,11 +221,14 @@
         android:background="#98000000"
         android:visibility="gone" />
 
-    <!-- Left sidebar (4.6.2): a 260dp panel docked to the left, same as
-         the playback sidebar (shared ChannelSidebar helper). -->
+    <!-- Left sidebar (4.6.2): a panel docked to the left, same as
+         the playback sidebar (shared ChannelSidebar helper). 6.1.2:
+         the width comes from the channel-list size setting — 220dp is
+         the compact default, and ChannelSidebar widens it in code for
+         Medium/Large. -->
     <LinearLayout
         android:id="@+id/guide_sidebar"
-        android:layout_width="260dp"
+        android:layout_width="220dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:background="#111111"

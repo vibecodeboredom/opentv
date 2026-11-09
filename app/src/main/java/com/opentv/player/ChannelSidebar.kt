@@ -12,14 +12,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
- * The left sidebar (TiviMate-style): a 260dp panel over a 60% black
- * scrim, listing groups at the top ("All channels", "Favorites",
- * "History", then the playlist groups) and channels below with number
- * + logo + name + the current programme. The current channel is
- * highlighted in the accent (#86C739); the focused row gets a rounded
- * 16dp highlight and its text turns accent. Channel rows are capped
- * at 200 (the footer says so) so opening the sidebar never has to
- * build thousands of views.
+ * The left sidebar (TiviMate-style): a panel over a 60% black scrim
+ * (6.1.2: width from AppSettings.sidebarSizing — 220dp compact
+ * default, 260dp Medium, 300dp Large), listing groups at the top
+ * ("All channels", "Favorites", "History", then the playlist groups)
+ * and channels below with number + logo + name + the current
+ * programme. The current channel is highlighted in the accent
+ * (#86C739); the focused row gets a rounded 16dp highlight and its
+ * text turns accent. Channel rows are capped at 200 (the footer says
+ * so) so opening the sidebar never has to build thousands of views.
  *
  * 6.0.0-rc2: the list is a RecyclerView (SidebarAdapter). It used to
  * be a LinearLayout inside a ScrollView with up to 200 channel rows
@@ -49,7 +50,8 @@ class ChannelSidebar(
     private val list: RecyclerView,
     private val footer: TextView,
     private val currentChannelId: () -> String?,
-    private val onChannelSelected: (Channel) -> Unit
+    private val onChannelSelected: (Channel) -> Unit,
+    private val sizing: AppSettings.SidebarSizing
 ) {
 
     companion object {
@@ -85,15 +87,21 @@ class ChannelSidebar(
             }
         },
         onChannelClick = onChannelSelected,
-        currentChannelId = currentChannelId
+        currentChannelId = currentChannelId,
+        sizing = sizing
     )
 
     init {
+        // 6.1.2: panel width comes from the size setting (the XML
+        // default is the compact 220dp; a Medium/Large choice widens
+        // it). Set before first layout so the slide animation reads
+        // the right width.
+        panel.layoutParams = panel.layoutParams.apply { width = dp(sizing.panelDp) }
         list.layoutManager = LinearLayoutManager(activity)
         list.adapter = adapter
-        // Rows are a fixed height (56dp min, single-line texts), so the
-        // list's own size never depends on its contents; and no change
-        // animations, so a rebind never flickers or steals focus.
+        // Rows are a fixed height, so the list's own size never
+        // depends on its contents; and no change animations, so a
+        // rebind never flickers or steals focus.
         list.setHasFixedSize(true)
         list.itemAnimator = null
     }
@@ -111,7 +119,7 @@ class ChannelSidebar(
         panel.visibility = View.VISIBLE
         panel.animate().cancel()
         scrim.animate().cancel()
-        val width = panel.width.takeIf { it > 0 } ?: dp(260)
+        val width = panel.width.takeIf { it > 0 } ?: dp(sizing.panelDp)
         panel.translationX = -width.toFloat()
         scrim.alpha = 0f
         panel.animate().translationX(0f).setDuration(200).start()
@@ -126,7 +134,7 @@ class ChannelSidebar(
         val generation = ++hideGeneration
         panel.animate().cancel()
         scrim.animate().cancel()
-        val width = panel.width.takeIf { it > 0 } ?: dp(260)
+        val width = panel.width.takeIf { it > 0 } ?: dp(sizing.panelDp)
         panel.animate().translationX(-width.toFloat()).setDuration(180)
             .withEndAction {
                 if (generation != hideGeneration) return@withEndAction

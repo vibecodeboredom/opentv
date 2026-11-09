@@ -62,8 +62,9 @@ import java.util.Locale
  *   next / previous channel.
  * - MENU opens options (favorite + record). INFO toggles favorite.
  *
- * The left sidebar (4.6.2, shared ChannelSidebar helper) is a 260dp
- * panel over a 60% black scrim: groups at the top ("All channels",
+ * The left sidebar (4.6.2, shared ChannelSidebar helper) is a panel
+ * over a 60% black scrim (6.1.2: width from the channel-list size
+ * setting — 220dp compact default): groups at the top ("All channels",
  * "Favorites", "History", then the playlist groups), channels below
  * with number + logo + name + the current programme. The current
  * channel is highlighted in the accent (#86C739); the focused row gets
@@ -265,7 +266,8 @@ class PlaybackActivity : FragmentActivity() {
             list = findViewById(R.id.sidebar_scroll),
             footer = findViewById(R.id.sidebar_footer),
             currentChannelId = { channel?.id },
-            onChannelSelected = { switchToChannel(it) }
+            onChannelSelected = { switchToChannel(it) },
+            sizing = AppSettings.sidebarSizing(this)
         )
         // No media controller at all — the video just plays. The overlay
         // and sidebar are OpenTV's own UI.
@@ -928,15 +930,22 @@ class PlaybackActivity : FragmentActivity() {
             fadeOutOverlayView(overlay)
             fadeOutOverlayView(mobileGuideButton)
             fadeOutOverlayView(mobileCenterInfo)
+        } else if (AppSettings.tvInfoFade(this)) {
+            // 6.1.2: the TV info overlay fades out (200ms) like the
+            // mobile one instead of popping off — the user reported
+            // it never faded. Turn it off in Settings to go back to
+            // the instant hide.
+            fadeOutOverlayView(overlay)
         } else {
             overlay.visibility = View.GONE
         }
     }
 
-    /** 6.0.0-rc3: fade a mobile overlay view out, then hide it.
-     * Cancelling a fade-out in flight (a re-show does this) never
-     * runs its end action, so a re-shown view can't be hidden again
-     * by a stale fade. Alpha is reset so the next show starts clean. */
+    /** 6.0.0-rc3: fade an overlay view out, then hide it (mobile;
+     * 6.1.2: the TV info overlay uses it too). Cancelling a fade-out
+     * in flight (a re-show does this) never runs its end action, so
+     * a re-shown view can't be hidden again by a stale fade. Alpha
+     * is reset so the next show starts clean. */
     private fun fadeOutOverlayView(view: View) {
         if (view.visibility != View.VISIBLE) return
         view.animate().cancel()
