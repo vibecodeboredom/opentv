@@ -168,12 +168,11 @@ class GuideActivity : FragmentActivity() {
     /** The programme the details header is currently showing. */
     private var detailChannelShown: Channel? = null
 
-    /** Cached favorite ids. updateDetailStar runs on every focus
-     * change, and it used to read the favorites set out of
-     * SharedPreferences on every one. The set only changes through
-     * this activity's own star / menu toggles (which update the
-     * cache), so a cached copy is always in sync; it is refreshed
-     * on resume as a safety net. */
+    /** Cached favorite ids. updateDetailStar re-reads them fresh on
+     * every draw (6.1.8) — the set can change from playback, the
+     * sidebar or mobile home, so a snapshot taken in onCreate is
+     * not enough to keep the star honest. It is still refreshed
+     * on resume as a safety net for the other readers. */
     private var favoritesCache: Set<String> = emptySet()
 
     private fun isFavorite(channelId: String): Boolean = channelId in favoritesCache
@@ -653,6 +652,12 @@ class GuideActivity : FragmentActivity() {
     }
 
     private fun updateDetailStar(channel: Channel) {
+        // 6.1.8: re-read the favorites fresh — the cached set can go
+        // stale when the favorite changes from playback, the sidebar
+        // or mobile home, and the star must show the live state every
+        // time the details are shown. The read is a cheap in-memory
+        // SharedPreferences lookup, so it costs nothing per focus move.
+        favoritesCache = PlaylistRepository.favorites(this)
         val isFav = isFavorite(channel.id)
         detailStar.text = if (isFav) "★" else "☆"
         detailStar.setTextColor(

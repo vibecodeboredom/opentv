@@ -198,11 +198,12 @@ class PlaybackActivity : FragmentActivity() {
     /** True once a failed catch-up has already fallen back to live. */
     private var catchupFallbackTried = false
     /** Cached favorite ids (see GuideActivity — same pattern). The
-     * transport icons read favorites on every play/pause change and
-     * every overlay open, and the old code read the set out of
-     * SharedPreferences on each one. Refreshed on resume (the user
-     * may have favorited from the guide) and after every toggle
-     * made here. */
+     * transport icons are drawn from a fresh read inside
+     * updateTransportIcons (6.1.8), so the star always shows the
+     * live state — the cache alone can go stale when the favorite
+     * changes from the guide, the sidebar or mobile home. Still
+     * refreshed on resume and after every toggle made here, for
+     * the other readers (options menu, INFO key). */
     private var favoritesCache: Set<String> = emptySet()
     /** Last logo URL loaded into the info overlay — showChannelInfo
      * re-runs when the EPG lands, and the old code re-issued a Coil
@@ -616,8 +617,11 @@ class PlaybackActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         guideLaunched = false
-        // The user may have favorited this channel from the guide.
+        // The user may have favorited this channel from the guide —
+        // refresh the cache and redraw the star, so the overlay
+        // doesn't keep showing the pre-guide state (6.1.8).
         favoritesCache = PlaylistRepository.favorites(this)
+        updateTransportIcons()
     }
 
     /**
@@ -745,7 +749,12 @@ class PlaybackActivity : FragmentActivity() {
 
     /** Refresh the transport bar icons for the current state. Uses the
      * modern vector icons (4.6.1) — no more dated system drawables. The
-     * record dot turns red while recording instead of dimming. */
+     * record dot turns red while recording instead of dimming.
+     * 6.1.8: the favorite star is drawn from a fresh read of the
+     * favorites, not the cached set — the cache can go stale when
+     * the favorite changes from the guide, the sidebar or mobile
+     * home, and the star must show the live state every time the
+     * info is shown. */
     private fun updateTransportIcons() {
         val p = player
         transportPlayPause.setImageResource(
@@ -753,6 +762,7 @@ class PlaybackActivity : FragmentActivity() {
             else R.drawable.ic_pause
         )
         val ch = channel
+        favoritesCache = PlaylistRepository.favorites(this)
         val isFav = ch != null && ch.id in favoritesCache
         transportFavorite.setImageResource(
             if (isFav) R.drawable.ic_star_filled
