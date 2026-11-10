@@ -22,10 +22,15 @@ object AppSettings {
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
-     * roomier still. */
+     * roomier still. 6.1.4: the TV guide rows follow the same size —
+     * Small gives thin 40dp guide rows so more channels fit on
+     * screen, Large restores the old 56dp rows. */
     enum class ChannelListSize { SMALL, MEDIUM, LARGE }
 
-    /** Sidebar dimensions for one size: panel width + row geometry. */
+    /** Sidebar dimensions for one size: panel width + row geometry.
+     * 6.1.4: guideRowHeightDp is the TV guide row height for the
+     * same size — the guide and the sidebar share one size control,
+     * so there is no second setting to keep in sync. */
     data class SidebarSizing(
         val panelDp: Int,
         val rowMinHeightDp: Int,
@@ -34,7 +39,8 @@ object AppSettings {
         val numberWidthDp: Int,
         val logoDp: Int,
         val nameSp: Float,
-        val programmeSp: Float
+        val programmeSp: Float,
+        val guideRowHeightDp: Int
     )
 
     private fun prefs(context: Context): SharedPreferences =
@@ -82,15 +88,18 @@ object AppSettings {
     fun sidebarSizing(context: Context): SidebarSizing = when (channelListSize(context)) {
         ChannelListSize.SMALL -> SidebarSizing(
             panelDp = 220, rowMinHeightDp = 48, rowPaddingDp = 8, groupPaddingDp = 10,
-            numberWidthDp = 28, logoDp = 28, nameSp = 13f, programmeSp = 11f
+            numberWidthDp = 28, logoDp = 28, nameSp = 13f, programmeSp = 11f,
+            guideRowHeightDp = 40
         )
         ChannelListSize.MEDIUM -> SidebarSizing(
             panelDp = 260, rowMinHeightDp = 56, rowPaddingDp = 10, groupPaddingDp = 12,
-            numberWidthDp = 32, logoDp = 32, nameSp = 14f, programmeSp = 12f
+            numberWidthDp = 32, logoDp = 32, nameSp = 14f, programmeSp = 12f,
+            guideRowHeightDp = 48
         )
         ChannelListSize.LARGE -> SidebarSizing(
             panelDp = 300, rowMinHeightDp = 64, rowPaddingDp = 12, groupPaddingDp = 14,
-            numberWidthDp = 36, logoDp = 36, nameSp = 15f, programmeSp = 13f
+            numberWidthDp = 36, logoDp = 36, nameSp = 15f, programmeSp = 13f,
+            guideRowHeightDp = 56
         )
     }
 }

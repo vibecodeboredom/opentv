@@ -118,9 +118,15 @@ class GuideActivity : FragmentActivity() {
     /** 6.1.0: row height / margin in px, computed once in onCreate —
      * appendRows and updateRowsWithEpg used to run dpToPx on every
      * call (scroll + focus appends), and TypedValue.applyDimension
-     * is not free when it runs dozens of times a second. */
+     * is not free when it runs dozens of times a second.
+     * 6.1.4: on TV the row height (and the channel-cell logo size)
+     * follow the channel-list size setting — Small is 40dp rows with
+     * a 28dp logo, so more channels fit on screen. Mobile keeps the
+     * old 56dp rows / 40dp logo. */
     private var pxCellHeight: Int = 0
     private var pxCellMargin: Int = 0
+    private var pxGuideLogo: Int = 0
+    private var guideLogoDp: Int = 40
 
     /** Pinned channel-name column (4.7.2): sits beside the horizontal
      * scroller, so the names never scroll away sideways. */
@@ -241,7 +247,20 @@ class GuideActivity : FragmentActivity() {
         px12 = dpToPx(12)
         px16 = dpToPx(16)
         px40 = dpToPx(40)
-        pxCellHeight = dpToPx(CELL_HEIGHT_DP)
+        // 6.1.4: TV guide rows follow the channel-list size (default
+        // Small = 40dp thin rows, ~29% shorter than the old 56dp, so
+        // ~37% more channels fit on screen). The logo shrinks with
+        // the row so it doesn't fill the whole cell edge to edge.
+        // Mobile keeps the old 56dp rows / 40dp logo. Text sizes are
+        // untouched — the rows get thinner by cutting height, not by
+        // shrinking the font.
+        val isMobileDevice = DeviceType.isMobile(this)
+        val guideSizing = AppSettings.sidebarSizing(this)
+        pxCellHeight = dpToPx(
+            if (isMobileDevice) CELL_HEIGHT_DP else guideSizing.guideRowHeightDp
+        )
+        guideLogoDp = if (isMobileDevice) 40 else guideSizing.logoDp
+        pxGuideLogo = dpToPx(guideLogoDp)
         pxCellMargin = dpToPx(CELL_MARGIN_DP)
         favoritesCache = PlaylistRepository.favorites(this)
 
@@ -799,12 +818,14 @@ class GuideActivity : FragmentActivity() {
             })
         }
         val logo = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(px40, px40).apply {
+            layoutParams = LinearLayout.LayoutParams(pxGuideLogo, pxGuideLogo).apply {
                 marginEnd = px12
             }
-            // 6.1.0: downsampled to the 40dp cell instead of the
-            // provider's full-resolution logo.
-            loadLogo(row.channel.logo, 40, android.R.drawable.ic_media_play)
+            // 6.1.0: downsampled to the displayed size instead of the
+            // provider's full-resolution logo. 6.1.4: the size follows
+            // the channel-list size (28dp on Small) so the logo stays
+            // proportional to the thinner row.
+            loadLogo(row.channel.logo, guideLogoDp, android.R.drawable.ic_media_play)
         }
         channelCell.addView(logo)
         val nameView = TextView(this).apply {

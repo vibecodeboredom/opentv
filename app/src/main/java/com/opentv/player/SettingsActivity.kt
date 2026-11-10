@@ -83,7 +83,9 @@ class SettingsActivity : FragmentActivity() {
 
         // 6.1.2: guide & playback preferences — toggles save
         // immediately; the channel-list size applies the next time
-        // playback or the guide opens a fresh sidebar.
+        // playback or the guide opens a fresh sidebar. 6.1.4: the
+        // same size also sets the TV guide row height (thin rows on
+        // Small), applied the next time the guide opens.
         findViewById<Switch>(R.id.pref_guide_current_channel).apply {
             isChecked = AppSettings.guideOpensOnCurrentChannel(this@SettingsActivity)
             setOnCheckedChangeListener { _, checked ->
