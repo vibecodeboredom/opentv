@@ -1160,15 +1160,26 @@ class GuideActivity : FragmentActivity() {
             startActivity(intent)
         } else if (programme.stopMillis <= nowMillis) {
             // 5.0.0 — catch-up: a past programme on a catch-up channel
-            // replays from the guide. Anything else past just says so.
+            // replays from the guide.
+            // 6.1.3 — when there is no catch-up URL, say so plainly
+            // instead of the old misleading "starts at" toast (a past
+            // programme already aired). Most playlists declare no
+            // catch-up support at all, so the channel case is the
+            // common one; a channel WITH catch-up but a programme
+            // outside its window gets the programme wording.
             val url = CatchUp.catchupUrl(channel, programme, nowMillis)
             if (url != null) {
                 playCatchup(channel, programme, url)
-            } else {
-                val whenText = GuideData.formatHourLabel(programme.startMillis)
+            } else if (!CatchUp.hasCatchup(channel)) {
                 Toast.makeText(
                     this,
-                    "${programme.title} — ${getString(R.string.starts_at, whenText)}",
+                    getString(R.string.catchup_not_available_channel),
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(
+                    this,
+                    getString(R.string.catchup_not_available_programme),
                     Toast.LENGTH_SHORT
                 ).show()
             }
