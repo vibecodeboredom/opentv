@@ -4,13 +4,15 @@
      and a 14sp white status line on a rounded pill. The app used to launch
      straight into a random channel (or a black screen when the playlist
      failed); now launch always shows this screen first.
-     The error banner is a direct child of the root (not inside the loading
-     content) so it stays visible over the browse menu when loading fails. -->
+     6.1.5: the root uses the app's dark grey (@color/opentv_background)
+     instead of pure black, so it matches the splash window background
+     exactly — no flash when the layout draws over it. The spinner is
+     tinted with the accent green. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/main_frame"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@android:color/black">
+    android:background="@color/opentv_background">
 
     <LinearLayout
         android:id="@+id/loading_content"
@@ -29,11 +31,14 @@
             android:src="@drawable/ic_banner"
             android:contentDescription="@string/app_name" />
 
+        <!-- 6.1.5: accent-tinted spinner, so the loading state is
+             on-brand instead of the default grey. -->
         <ProgressBar
             android:id="@+id/loading_spinner"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="32dp" />
+            android:layout_marginTop="32dp"
+            android:indeterminateTint="@color/opentv_accent" />
 
         <!-- Status line: 14sp white on the rounded 16dp pill. -->
         <TextView

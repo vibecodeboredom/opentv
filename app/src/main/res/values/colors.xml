@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App palette (6.1.5): the dark grey used across the app's panels,
+         and the green accent. The launch screen references these so the
+         first frame already looks like OpenTV. -->
+    <color name="opentv_background">#161616</color>
+    <color name="opentv_accent">#86C739</color>
+</resources>

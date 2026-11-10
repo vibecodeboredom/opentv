@@ -43,6 +43,13 @@ class MainActivity : FragmentActivity() {
     private lateinit var error: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 6.1.5: the manifest puts this activity under the splash theme,
+        // so the window background (logo on dark grey) shows from the
+        // first frame until the layout draws. Switch back to the normal
+        // theme here so everything inflates under Theme.OpenTV. No
+        // artificial delay — the splash is only the window background
+        // until the first frame draws.
+        setTheme(R.style.Theme_OpenTV)
         super.onCreate(savedInstanceState)
         // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
         DeviceType.applyOrientation(this)

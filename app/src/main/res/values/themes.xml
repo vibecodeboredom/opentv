@@ -4,6 +4,16 @@
         <item name="android:windowBackground">@android:color/black</item>
     </style>
 
+    <!-- 6.1.5: launch splash. MainActivity runs under this theme so the
+         very first frame (before the layout inflates) already shows the
+         dark background and the banner logo instead of a plain black
+         flash. MainActivity switches back to Theme.OpenTV in onCreate
+         before super.onCreate(); the loading layout then covers the
+         window background with the same colour, so nothing shifts. -->
+    <style name="Theme.OpenTV.Splash" parent="Theme.OpenTV">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+
     <style name="Theme.OpenTV.Playback" parent="Theme.Leanback">
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:windowFullscreen">true</item>

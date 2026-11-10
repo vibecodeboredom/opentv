@@ -29,6 +29,7 @@
              on a phone/tablet — see DeviceType.kt. -->
         <activity
             android:name=".MainActivity"
+            android:theme="@style/Theme.OpenTV.Splash"
             android:exported="true">
             <!-- 6.0.0-rc1: first mobile-capable release. The LAUNCHER
                  category lets the app appear in phone launchers; on a

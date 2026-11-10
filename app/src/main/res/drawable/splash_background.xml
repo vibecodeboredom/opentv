@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch splash (6.1.5): what the user sees from the moment the app
+     starts, before the layout inflates. Dark grey (not plain black) with
+     the gradient banner centred — the same size and position as the logo
+     in activity_main.xml (320dp x 180dp), so the handoff from this
+     window background to the loading layout is seamless: the logo never
+     jumps or resizes, the spinner and status just fade in below it.
+     The bitmap is scaled to the item bounds (fill); the banner is
+     960x540, exactly 16:9 like the 320x180dp item, so no distortion.
+     Item width/height need API 23+; minSdk is 26. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/opentv_background" />
+    <item
+        android:width="320dp"
+        android:height="180dp"
+        android:gravity="center">
+        <bitmap
+            android:src="@drawable/ic_banner"
+            android:gravity="fill" />
+    </item>
+</layer-list>
