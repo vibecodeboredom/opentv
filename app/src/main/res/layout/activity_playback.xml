@@ -25,7 +25,10 @@
         android:visibility="gone" />
 
     <!-- 6.0.0-rc1: "Channels" button, mobile only (there is no Left
-         key on a phone to open the sidebar). Hidden on TV. -->
+         key on a phone to open the sidebar). 6.1.6: part of the
+         auto-hiding overlay group — it fades away with the overlay
+         after 5s idle and comes back when the video is tapped.
+         Hidden on TV. -->
     <TextView
         android:id="@+id/mobile_channels_button"
         android:layout_width="wrap_content"

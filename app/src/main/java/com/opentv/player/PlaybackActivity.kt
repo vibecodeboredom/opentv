@@ -133,7 +133,9 @@ class PlaybackActivity : FragmentActivity() {
     private lateinit var transportRecord: ImageButton
     private lateinit var transportFavorite: ImageButton
     /** 6.0.0-rc1: "Channels" button, mobile only — opens the sidebar
-     * (there is no Left key on a phone). */
+     * (there is no Left key on a phone). 6.1.6: part of the
+     * auto-hiding overlay group — it shows and fades with the
+     * overlay (see showMobileOverlayViews / hideOverlay). */
     private lateinit var channelsButton: TextView
     /** 6.0.0-rc3: mobile-only top "Guide" button + centred channel
      * info. Both are part of the auto-hiding overlay group on
@@ -375,8 +377,8 @@ class PlaybackActivity : FragmentActivity() {
     /**
      * Touch controls for mobile (6.0.0-rc1). TV is untouched — this
      * only runs on phones/tablets:
-     * - The "Channels" button appears (there is no Left key to open
-     *   the sidebar with).
+     * - The "Channels" button appears with the overlay (there is no
+     *   Left key to open the sidebar with) and fades with it.
      * - The transport bar and its buttons grow to finger size.
      * - Tapping the video toggles the info overlay; a horizontal
      *   fling changes channel. The tap/fling detector sits on the
@@ -387,7 +389,11 @@ class PlaybackActivity : FragmentActivity() {
      * shows it again.
      */
     private fun setupMobileTouch() {
-        channelsButton.visibility = View.VISIBLE
+        // 6.1.6: the "Channels" button is part of the overlay group —
+        // it only shows while the overlay is up (see showChannelInfo /
+        // hideOverlay), like the top Guide button. It used to be forced
+        // VISIBLE here and never faded, so it sat alone on screen after
+        // the 5s auto-hide. Its click opens the sidebar.
         channelsButton.setOnClickListener { showSidebar() }
         // 6.0.0-rc3: the top Guide button is part of the overlay
         // group — it only shows while the overlay is up (see
@@ -926,8 +932,11 @@ class PlaybackActivity : FragmentActivity() {
         if (DeviceType.isMobile(this)) {
             // 6.0.0-rc3: the overlay fades out (200ms) instead of
             // popping off, and the top Guide button + centred info
-            // fade with it. TV keeps the instant hide.
+            // fade with it. 6.1.6: the Channels button fades with
+            // them too — it used to stay on screen forever. TV keeps
+            // the instant hide.
             fadeOutOverlayView(overlay)
+            fadeOutOverlayView(channelsButton)
             fadeOutOverlayView(mobileGuideButton)
             fadeOutOverlayView(mobileCenterInfo)
         } else if (AppSettings.tvInfoFade(this)) {
@@ -957,10 +966,12 @@ class PlaybackActivity : FragmentActivity() {
 
     /** 6.0.0-rc3: show the mobile-only overlay group (top Guide
      * button + centred channel info) with the same 150ms fade-in
-     * as the bottom overlay. The centred panel steps aside while
+     * as the bottom overlay. 6.1.6: the Channels button shows
+     * with them too. The centred panel steps aside while
      * paused — the big centre play icon owns the middle of the
      * screen then (see onIsPlayingChanged). */
     private fun showMobileOverlayViews() {
+        showMobileView(channelsButton)
         showMobileView(mobileGuideButton)
         if (player?.isPlaying != false) showMobileView(mobileCenterInfo)
     }
