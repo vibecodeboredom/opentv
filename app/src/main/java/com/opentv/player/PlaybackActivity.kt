@@ -523,6 +523,23 @@ class PlaybackActivity : FragmentActivity() {
                         PlaylistRepository.recordRecentChannel(this@PlaybackActivity, it.id)
                         PlaylistRepository.setLastChannelId(this@PlaybackActivity, it.id)
                     }
+                    // 6.1.7: on mobile the overlay shows with the video
+                    // on first playback, then fades after 5s (see
+                    // armHideTimer). Before this the buttons never
+                    // appeared until the video was tapped — and since
+                    // 6.1.6 the Channels button fades too, a fresh
+                    // start showed nothing at all. Skip when the
+                    // overlay is already up, when a channel up/down
+                    // brief flash is coming (the EPG callback shows
+                    // it), or during catch-up (the EPG callback
+                    // toasts instead). TV is untouched.
+                    if (DeviceType.isMobile(this@PlaybackActivity) &&
+                        overlay.visibility != View.VISIBLE &&
+                        !intent.getBooleanExtra(EXTRA_SHOW_BRIEF_INFO, false) &&
+                        catchupUrl == null
+                    ) {
+                        showChannelInfo()
+                    }
                 }
             }
 
