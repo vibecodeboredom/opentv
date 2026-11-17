@@ -10,6 +10,18 @@
         android:layout_height="match_parent"
         android:keepScreenOn="true" />
 
+    <!-- 7.2.0 (Nova): night dim — a black veil over the video only,
+         its alpha set in code (25% / 50%). Above the PlayerView but
+         below every UI layer, so menus, the sidebar and the info
+         overlay stay fully readable while the picture calms down
+         for night viewing. Not clickable: touches pass through. -->
+    <View
+        android:id="@+id/dim_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:visibility="gone" />
+
     <!-- Paused cluster (4.6.0, TiviMate-style): a large centred play icon
          shown while playback is paused; tapping it (or the transport
          play/pause button, or the remote's play/pause key) resumes. -->
@@ -205,6 +217,29 @@
             android:maxLines="2" />
 
     </LinearLayout>
+
+    <!-- 7.2.0 (Nova): stream info — resolution / frame rate /
+         codec / bitrate / buffer, toggled from the options menu
+         and refreshed once a second while up. Top-end on a
+         translucent panel, above the video and sidebar but below
+         the channel info overlay. On mobile, code drops it below
+         the Guide button (see PlaybackActivity.onCreate). -->
+    <TextView
+        android:id="@+id/stream_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/loading_status_bg"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:fontFamily="monospace"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:visibility="gone" />
 
     <!-- Channel info overlay (4.6.0, restyled to the TiviMate player
          pattern; 4.6.3 made it smaller and more transparent; 4.7.1 made

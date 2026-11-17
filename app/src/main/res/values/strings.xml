@@ -175,6 +175,23 @@
     <string name="sleep_timer_set">Sleep timer set — playback pauses in %1$d min</string>
     <string name="sleep_timer_off_toast">Sleep timer off</string>
     <string name="sleep_timer_fired">Sleep timer — playback paused</string>
+    <!-- Nova 7.2.0: previous-channel swap, favorites zapping, stream info, night dim. -->
+    <string name="previous_channel_item">Previous channel: %1$s</string>
+    <string name="previous_channel_none">No previous channel yet</string>
+    <string name="favorites_zap_state">Favorites zapping: %1$s</string>
+    <string name="state_on">On</string>
+    <string name="favorites_zap_on_toast">Favorites zapping on — channel up/down cycle favorites</string>
+    <string name="favorites_zap_on_empty_toast">Favorites zapping on — no favorites yet, star a channel first</string>
+    <string name="favorites_zap_off_toast">Favorites zapping off</string>
+    <string name="favorites_zap_empty">No favorite channels</string>
+    <string name="stream_info">Stream info</string>
+    <string name="stream_info_state">Stream info: %1$s</string>
+    <string name="stream_info_buffer">buffer %1$d s</string>
+    <string name="stream_type_local">Local file</string>
+    <string name="stream_type_stream">Stream</string>
+    <string name="night_dim">Night dim</string>
+    <string name="night_dim_state">Night dim: %1$d%%</string>
+    <string name="night_dim_percent">%1$d%%</string>
     <string name="mobile_refresh">↻ Refresh</string>
     <string name="mobile_retry">Retry</string>
     <string name="mobile_results">Results (%1$d)</string>

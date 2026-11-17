@@ -12,6 +12,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -60,6 +61,10 @@ import java.util.Locale
  *   system default (leave playback).
  * - Play/pause key (remote): toggle pause/resume. Channel up/down keys:
  *   next / previous channel.
+ * - MEDIA_PREVIOUS (7.2.0): swap back to the channel watched before
+ *   this one; pressing it again swaps back. The options menu carries
+ *   the same swap for remotes without the key. With favorites
+ *   zapping on (options menu), channel up/down cycle favorites only.
  * - MENU opens options (favorite + record). INFO toggles favorite.
  *
  * The left sidebar (4.6.2, shared ChannelSidebar helper) is a panel
@@ -112,6 +117,8 @@ class PlaybackActivity : FragmentActivity() {
         private const val CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS = 5_000L
         /** Hold OK this long to open the context menu instead of the guide. */
         private const val LONG_PRESS_MS = 600L
+        /** 7.2.0 (Nova): stream info overlay refresh cadence. */
+        private const val STREAM_INFO_UPDATE_MS = 1_000L
     }
 
     private var player: ExoPlayer? = null
@@ -174,6 +181,32 @@ class PlaybackActivity : FragmentActivity() {
     /** 7.1.0 (Nova): warms the previous / next channels' streams
      * while this one plays, so a zap to them starts faster. */
     private val streamPrefetcher = StreamPrefetcher()
+    /** 7.2.0 (Nova): the channel watched before the current one —
+     * the target of the previous-channel swap. Recorded by
+     * switchToChannel only when the outgoing channel actually
+     * played, so a dead stream the auto-retry abandons never
+     * becomes the swap target. */
+    private var previousChannel: Channel? = null
+    /** 7.2.0 (Nova): favorites zapping — channel up/down cycle
+     * favorites only while on. Persisted in AppSettings (a
+     * playback preference), loaded in onCreate. */
+    private var favoritesZapMode: Boolean = false
+    /** 7.2.0 (Nova): stream info overlay + night dim veil, bound
+     * in onCreate. */
+    private lateinit var streamInfo: TextView
+    private lateinit var dimView: View
+    /** 7.2.0 (Nova): stream info visibility. While on, the
+     * updater re-reads the player's formats once a second — no
+     * faster; it is a calm readout, not a scope. */
+    private var streamInfoOn: Boolean = false
+    private val streamInfoRunnable = object : Runnable {
+        override fun run() {
+            updateStreamInfo()
+            if (streamInfoOn) infoHandler.postDelayed(this, STREAM_INFO_UPDATE_MS)
+        }
+    }
+    /** 7.2.0 (Nova): night dim level in percent (0 = off). */
+    private var dimPercent: Int = 0
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
@@ -258,6 +291,15 @@ class PlaybackActivity : FragmentActivity() {
         transportRecord = findViewById(R.id.transport_record)
         transportFavorite = findViewById(R.id.transport_favorite)
         pausedCluster = findViewById(R.id.paused_cluster)
+        streamInfo = findViewById(R.id.stream_info)
+        dimView = findViewById(R.id.dim_view)
+        // 7.2.0 (Nova): on mobile the top-end corner belongs to the
+        // Guide button — drop the stream info panel below it.
+        if (DeviceType.isMobile(this)) {
+            val lp = streamInfo.layoutParams as FrameLayout.LayoutParams
+            lp.topMargin = dp(72)
+            streamInfo.layoutParams = lp
+        }
         channelsButton = findViewById(R.id.mobile_channels_button)
         // 6.0.0-rc3: mobile-only overlay group (top Guide button +
         // centred channel info). Bound here but only ever shown on
@@ -326,6 +368,9 @@ class PlaybackActivity : FragmentActivity() {
         pausedCluster.setOnClickListener { togglePlayPause() }
         findViewById<View>(R.id.sidebar_scrim).setOnClickListener { hideSidebar() }
         favoritesCache = PlaylistRepository.favorites(this)
+        // 7.2.0 (Nova): favorites zapping is a persisted playback
+        // preference — restore it for this session.
+        favoritesZapMode = AppSettings.favoritesZap(this)
         updateTransportIcons()
         // 6.0.0-rc1: touch controls on mobile (tap to toggle the
         // overlay, swipe to change channel, big transport buttons).
@@ -655,6 +700,13 @@ class PlaybackActivity : FragmentActivity() {
                 onSleepTimerFired()
             }
         }
+        // 7.2.0 (Nova): the stream info updater stops in onStop —
+        // restart it if the overlay is still toggled on.
+        if (streamInfoOn) {
+            streamInfo.visibility = View.VISIBLE
+            infoHandler.removeCallbacks(streamInfoRunnable)
+            streamInfoRunnable.run()
+        }
     }
 
     override fun onResume() {
@@ -834,6 +886,16 @@ class PlaybackActivity : FragmentActivity() {
         updateTransportIcons()
     }
 
+    /**
+     * 7.2.0 (Nova): is [ch] in the set channel up/down cycles
+     * through? Hidden channels are always out; with favorites
+     * zapping on, only favorites are in. Shared by the zap itself
+     * and the neighbour prefetch, so the warm-up always matches
+     * where a zap can actually land.
+     */
+    private fun zapEligible(ch: Channel, hidden: Set<String>, favorites: Set<String>): Boolean =
+        ch.id !in hidden && (!favoritesZapMode || ch.id in favorites)
+
     /** Switch to the channel before / after the current one in the playlist. */
     private fun switchToAdjacentChannel(delta: Int) {
         val currentId = channel?.id ?: return
@@ -841,6 +903,7 @@ class PlaybackActivity : FragmentActivity() {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
             val channels = result.getOrNull() ?: return@launch
             val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
             // 4.9.5: find the adjacent channel without building a
             // filtered copy of the whole playlist (was a ~1500-element
             // list per CH+/CH- press). Two allocation-free passes:
@@ -848,20 +911,32 @@ class PlaybackActivity : FragmentActivity() {
             // visible position, then pick the channel at the target
             // visible position. Falls back to the full list when every
             // channel is hidden, exactly like the old ifEmpty.
+            // 7.2.0 (Nova): "visible" now goes through zapEligible —
+            // with favorites zapping on, the cycle is the favorites.
             var visibleIndex = -1
             var visibleCount = 0
             for (ch in channels) {
-                if (ch.id in hidden) continue
+                if (!zapEligible(ch, hidden, favorites)) continue
                 if (ch.id == currentId) visibleIndex = visibleCount
                 visibleCount++
             }
             val next: Channel? = if (visibleCount > 0) {
-                if (visibleIndex < 0) return@launch
-                val target = (visibleIndex + delta).mod(visibleCount)
+                // 7.2.0 (Nova): with favorites zapping on and the
+                // current channel outside the favorites (the mode
+                // was just switched on, or the favorite was removed
+                // from the guide), a zap jumps into the set — first
+                // favorite going up, last going down — instead of
+                // silently doing nothing.
+                val target = when {
+                    visibleIndex >= 0 -> (visibleIndex + delta).mod(visibleCount)
+                    favoritesZapMode && delta < 0 -> visibleCount - 1
+                    favoritesZapMode -> 0
+                    else -> return@launch
+                }
                 var seen = 0
                 var found: Channel? = null
                 for (ch in channels) {
-                    if (ch.id in hidden) continue
+                    if (!zapEligible(ch, hidden, favorites)) continue
                     if (seen == target) {
                         found = ch
                         break
@@ -869,17 +944,51 @@ class PlaybackActivity : FragmentActivity() {
                     seen++
                 }
                 found
+            } else if (favoritesZapMode) {
+                // 7.2.0 (Nova): zapping with no favorites at all —
+                // say so instead of falling back to the full list,
+                // which would zap straight out of the mode.
+                Toast.makeText(
+                    this@PlaybackActivity,
+                    R.string.favorites_zap_empty,
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@launch
             } else {
                 val idx = channels.indexOfFirst { it.id == currentId }
                     .takeIf { it >= 0 } ?: return@launch
                 channels[(idx + delta).mod(channels.size)]
             }
             val pick = next ?: return@launch
+            if (favoritesZapMode && pick.id == currentId) {
+                // 7.2.0 (Nova): the only favorite is the channel
+                // already playing — restarting it on every CH press
+                // would be noise. Just flash its info.
+                showChannelInfo(brief = true)
+                return@launch
+            }
             // Channel up/down restarts playback on the new channel and
             // flashes its info briefly (4.7.3) instead of the normal
             // Left/Right overlay duration.
             switchToChannel(pick, briefInfo = true)
         }
+    }
+
+    /**
+     * 7.2.0 (Nova): swap back to the channel watched before this
+     * one (the remote's MEDIA_PREVIOUS key, or the options menu).
+     * The swap is an ordinary in-place switch, and switchToChannel
+     * records the channel being left — so pressing it again swaps
+     * back, toggling between the two channels.
+     */
+    private fun swapToPreviousChannel() {
+        if (recordingUri != null) return
+        val prev = previousChannel
+        if (prev == null || prev.id == channel?.id) {
+            Toast.makeText(this, R.string.previous_channel_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        switchToChannel(prev, briefInfo = true)
     }
 
     /**
@@ -899,15 +1008,18 @@ class PlaybackActivity : FragmentActivity() {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
             val channels = result.getOrNull() ?: return@launch
             val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
             // Same two-pass visible-order math as
             // switchToAdjacentChannel, extended to both neighbours:
             // count the visible channels and the current channel's
             // visible position, then pick the channels at the
-            // neighbouring visible positions.
+            // neighbouring visible positions. 7.2.0 (Nova): the
+            // order is zapEligible's, so with favorites zapping on
+            // the favourites' neighbours are warmed instead.
             var visibleIndex = -1
             var visibleCount = 0
             for (ch in channels) {
-                if (ch.id in hidden) continue
+                if (!zapEligible(ch, hidden, favorites)) continue
                 if (ch.id == currentId) visibleIndex = visibleCount
                 visibleCount++
             }
@@ -918,15 +1030,17 @@ class PlaybackActivity : FragmentActivity() {
                 var next: Channel? = null
                 var seen = 0
                 for (ch in channels) {
-                    if (ch.id in hidden) continue
+                    if (!zapEligible(ch, hidden, favorites)) continue
                     if (seen == prevTarget) prev = ch
                     if (seen == nextTarget) next = ch
                     seen++
                 }
                 listOfNotNull(next, prev).distinctBy { it.id }
-            } else if (visibleCount == 0 && channels.size > 1) {
+            } else if (visibleCount == 0 && channels.size > 1 && !favoritesZapMode) {
                 // Every channel hidden: the full-list fallback,
-                // exactly like switchToAdjacentChannel.
+                // exactly like switchToAdjacentChannel. Never in
+                // favorites zapping mode (7.2.0): no favorites
+                // means nothing to warm.
                 val idx = channels.indexOfFirst { it.id == currentId }
                 if (idx < 0) {
                     emptyList()
@@ -987,7 +1101,17 @@ class PlaybackActivity : FragmentActivity() {
         val ch = channel
         val name = recordingName ?: ch?.name ?: return
         val now = System.currentTimeMillis()
-        infoGroup.text = ch?.group ?: ""
+        // 7.2.0 (Nova): favorites zapping rides along on the group
+        // line, so every zap flash and overlay shows the mode is
+        // on — a star and the word, nothing louder.
+        val group = ch?.group ?: ""
+        infoGroup.text = if (favoritesZapMode && recordingUri == null) {
+            listOf(group, "★ ${getString(R.string.favorites)}")
+                .filter { it.isNotEmpty() }
+                .joinToString("  •  ")
+        } else {
+            group
+        }
         // DateFormat.format(long) takes the millis directly — the old
         // code wrapped each one in a throwaway Date (3 per overlay open).
         infoDateTime.text = dateTimeFormat.format(now)
@@ -1371,6 +1495,14 @@ class PlaybackActivity : FragmentActivity() {
         // Log the outgoing channel's watch session — onStop does this
         // when the activity leaves, but an in-place switch never stops.
         logWatchSession()
+        // 7.2.0 (Nova): remember the outgoing channel for the
+        // previous-channel swap — but only if it actually played.
+        // A stream that never reached READY (the dead channel the
+        // auto-retry is abandoning, or a zap straight through) is
+        // not a channel the viewer was watching.
+        if (everPlayed) {
+            channel?.let { if (it.id != pick.id) previousChannel = it }
+        }
         channel = pick
         // A zap always goes live: catch-up state belongs to the old
         // channel's replay, never to the new channel.
@@ -1507,6 +1639,11 @@ class PlaybackActivity : FragmentActivity() {
                 updateTransportIcons()
                 return true
             }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                // 7.2.0 (Nova): the remote's previous-channel key.
+                swapToPreviousChannel()
+                return true
+            }
         }
         return super.onKeyDown(keyCode, event)
     }
@@ -1535,57 +1672,217 @@ class PlaybackActivity : FragmentActivity() {
             // machinery itself (arm, deadline, fire) never depended
             // on a channel.
             if (recordingUri == null) return
-            val sleepItem = sleepTimerMenuLabel()
+            // 7.2.0 (Nova): stream info and night dim are not
+            // channel options either — a recording has a stream
+            // worth describing and a picture worth dimming — so
+            // they join the sleep timer in this menu.
+            val items = arrayOf(
+                sleepTimerMenuLabel(),
+                streamInfoMenuLabel(),
+                nightDimMenuLabel()
+            )
             AlertDialog.Builder(this)
                 .setTitle(recordingName ?: getString(R.string.recording_label))
-                .setItems(arrayOf(sleepItem)) { _, _ -> showSleepTimerDialog() }
+                .setItems(items) { _, which ->
+                    when (which) {
+                        0 -> showSleepTimerDialog()
+                        1 -> setStreamInfo(!streamInfoOn)
+                        2 -> showDimDialog()
+                    }
+                }
                 .show()
             return
         }
         val isFav = ch.id in favoritesCache
         val isRecording = RecordingManager.isRecording(this, ch.id)
         val hasRecording = RecordingManager.hasRecording(this, ch.id)
+        // 7.2.0 (Nova): items and their actions are built as a
+        // pair of lists — the menu has grown past the point where
+        // a positional when stays readable, and one entry (the
+        // previous-channel swap) is conditional.
         val items = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
         items += if (isFav) getString(R.string.remove_favorite) else getString(R.string.add_favorite)
+        actions += {
+            toggleFavorite()
+            updateTransportIcons()
+        }
         items += when {
             isRecording -> getString(R.string.stop_recording)
             hasRecording -> getString(R.string.record_again)
             else -> getString(R.string.record_channel)
         }
+        actions += {
+            if (isRecording) {
+                RecordingManager.stopRecording(this, ch.id)
+                Toast.makeText(
+                    this,
+                    R.string.recording_stopped,
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                RecordingManager.startRecording(this, ch)
+                Toast.makeText(
+                    this,
+                    R.string.recording_started,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            updateTransportIcons()
+        }
+        // 7.2.0 (Nova): previous-channel swap, for remotes without
+        // a MEDIA_PREVIOUS key. Only offered once there is a
+        // channel to swap back to.
+        previousChannel?.let { prev ->
+            items += getString(R.string.previous_channel_item, prev.name)
+            actions += { swapToPreviousChannel() }
+        }
+        // 7.2.0 (Nova): favorites zapping, stream info and night
+        // dim — each label carries its state, like the sleep
+        // timer's below.
+        items += favoritesZapMenuLabel()
+        actions += { toggleFavoritesZap() }
+        items += streamInfoMenuLabel()
+        actions += { setStreamInfo(!streamInfoOn) }
+        items += nightDimMenuLabel()
+        actions += { showDimDialog() }
         // 7.0.0 (Nova): sleep timer — while one is running the menu
         // doubles as its status (7.1.1: counting down, see
         // sleepTimerMenuLabel).
         items += sleepTimerMenuLabel()
+        actions += { showSleepTimerDialog() }
         AlertDialog.Builder(this)
             .setTitle(ch.name)
-            .setItems(items.toTypedArray()) { _, which ->
-                when (which) {
-                    0 -> {
-                        toggleFavorite()
-                        updateTransportIcons()
-                    }
-                    1 -> {
-                        if (isRecording) {
-                            RecordingManager.stopRecording(this, ch.id)
-                            Toast.makeText(
-                                this,
-                                R.string.recording_stopped,
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            RecordingManager.startRecording(this, ch)
-                            Toast.makeText(
-                                this,
-                                R.string.recording_started,
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                        updateTransportIcons()
-                    }
-                    2 -> showSleepTimerDialog()
-                }
-            }
+            .setItems(items.toTypedArray()) { _, which -> actions[which]() }
             .show()
+    }
+
+    /** 7.2.0 (Nova): the options-menu label for favorites
+     * zapping, carrying its state like the sleep timer's does. */
+    private fun favoritesZapMenuLabel(): String = getString(
+        R.string.favorites_zap_state,
+        if (favoritesZapMode) getString(R.string.state_on)
+        else getString(R.string.sleep_timer_off)
+    )
+
+    /** 7.2.0 (Nova): flip favorites zapping and persist it. The
+     * zap and the neighbour prefetch read the flag on every press,
+     * so the mode changes under the playing channel with no
+     * restart — and the new mode's neighbours get warmed now,
+     * since nothing has prefetched them yet. */
+    private fun toggleFavoritesZap() {
+        favoritesZapMode = !favoritesZapMode
+        AppSettings.setFavoritesZap(this, favoritesZapMode)
+        prefetchAdjacentChannels()
+        if (favoritesZapMode) {
+            Toast.makeText(
+                this,
+                if (favoritesCache.isEmpty()) R.string.favorites_zap_on_empty_toast
+                else R.string.favorites_zap_on_toast,
+                Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            Toast.makeText(this, R.string.favorites_zap_off_toast, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 7.2.0 (Nova): the options-menu label for the stream info
+     * overlay, carrying its state. */
+    private fun streamInfoMenuLabel(): String = getString(
+        R.string.stream_info_state,
+        if (streamInfoOn) getString(R.string.state_on)
+        else getString(R.string.sleep_timer_off)
+    )
+
+    /** 7.2.0 (Nova): show / hide the stream info overlay. While
+     * shown, the updater re-reads the player's formats once a
+     * second; hidden, its callbacks stop with it. */
+    private fun setStreamInfo(on: Boolean) {
+        streamInfoOn = on
+        infoHandler.removeCallbacks(streamInfoRunnable)
+        if (on) {
+            streamInfo.visibility = View.VISIBLE
+            streamInfoRunnable.run()
+        } else {
+            streamInfo.visibility = View.GONE
+        }
+    }
+
+    /** 7.2.0 (Nova): fill the stream info overlay from what the
+     * player already reports — the video / audio formats, the
+     * stream kind and the buffer headroom. Nothing is probed;
+     * pieces the format does not carry are simply left out. */
+    private fun updateStreamInfo() {
+        if (!streamInfoOn) return
+        val p = player ?: return
+        val lines = mutableListOf<String>()
+        p.videoFormat?.let { vf ->
+            val parts = mutableListOf<String>()
+            if (vf.width > 0 && vf.height > 0) parts += "${vf.width}×${vf.height}"
+            if (vf.frameRate > 0f) parts += "${Math.round(vf.frameRate)} fps"
+            vf.sampleMimeType?.substringAfter('/')?.let { parts += it.uppercase() }
+            if (parts.isNotEmpty()) lines += parts.joinToString("  •  ")
+            // Format.bitrate is the stream's average bitrate —
+            // an approximation on adaptive streams, hence the ≈.
+            if (vf.bitrate > 0) {
+                lines += "≈ " + String.format(Locale.US, "%.1f Mbps", vf.bitrate / 1_000_000.0)
+            }
+        }
+        p.audioFormat?.let { af ->
+            val parts = mutableListOf<String>()
+            af.sampleMimeType?.substringAfter('/')?.let { parts += it.uppercase() }
+            if (af.channelCount > 0) parts += "${af.channelCount} ch"
+            if (af.sampleRate > 0) parts += "${af.sampleRate / 1000} kHz"
+            if (parts.isNotEmpty()) lines += parts.joinToString("  •  ")
+        }
+        val bufferedSec = ((p.bufferedPosition - p.currentPosition) / 1000L).coerceAtLeast(0L)
+        lines += "${streamTypeLabel()}  •  ${getString(R.string.stream_info_buffer, bufferedSec)}"
+        streamInfo.text = lines.joinToString("\n")
+    }
+
+    /** 7.2.0 (Nova): HLS / DASH / progressive, from the URL —
+     * the player does not name the stream kind directly. */
+    private fun streamTypeLabel(): String {
+        if (recordingUri != null) return getString(R.string.stream_type_local)
+        val url = catchupUrl ?: channel?.url
+            ?: return getString(R.string.stream_type_stream)
+        return when {
+            url.contains(".m3u8") -> "HLS"
+            url.contains(".mpd") -> "DASH"
+            else -> getString(R.string.stream_type_stream)
+        }
+    }
+
+    /** 7.2.0 (Nova): the options-menu label for night dim —
+     * plain when off, the level when on. */
+    private fun nightDimMenuLabel(): String =
+        if (dimPercent > 0) getString(R.string.night_dim_state, dimPercent)
+        else getString(R.string.night_dim)
+
+    /** 7.2.0 (Nova): pick a night dim level (or turn it off). */
+    private fun showDimDialog() {
+        val options = intArrayOf(0, 25, 50)
+        val labels = options.map { percent ->
+            if (percent == 0) getString(R.string.sleep_timer_off)
+            else getString(R.string.night_dim_percent, percent)
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.night_dim)
+            .setItems(labels) { _, which -> setDim(options[which]) }
+            .show()
+    }
+
+    /** 7.2.0 (Nova): apply a night dim level — a black veil over
+     * the video only (see the layout), so the picture calms down
+     * while every menu and overlay stays fully readable. */
+    private fun setDim(percent: Int) {
+        dimPercent = percent
+        if (percent > 0) {
+            dimView.alpha = percent / 100f
+            dimView.visibility = View.VISIBLE
+        } else {
+            dimView.visibility = View.GONE
+        }
     }
 
     /** 7.1.1 (Nova): the options-menu label for the sleep timer.
@@ -1652,6 +1949,9 @@ class PlaybackActivity : FragmentActivity() {
         // 7.0.0 (Nova): the sleep timer's callback goes too — its
         // deadline is kept, and onStart re-arms it (see there).
         infoHandler.removeCallbacks(sleepRunnable)
+        // 7.2.0 (Nova): the stream info updater stops too; onStart
+        // restarts it if the overlay is still toggled on.
+        infoHandler.removeCallbacks(streamInfoRunnable)
         // 7.1.0 (Nova): stream warm-ups stop with playback.
         streamPrefetcher.cancel()
         overlay.visibility = View.GONE

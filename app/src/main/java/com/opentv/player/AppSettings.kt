@@ -19,6 +19,7 @@ object AppSettings {
     private const val KEY_TV_INFO_FADE = "tv_info_fade"
     private const val KEY_GUIDE_SHOW_PAST = "guide_show_past"
     private const val KEY_CHANNEL_LIST_SIZE = "channel_list_size"
+    private const val KEY_FAVORITES_ZAP = "favorites_zap"
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -69,6 +70,17 @@ object AppSettings {
 
     fun setGuideShowsPast(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_GUIDE_SHOW_PAST, value).apply()
+    }
+
+    /** 7.2.0 (Nova): favorites zapping — channel up/down cycle
+     * through favorite channels only (default OFF). A playback
+     * preference, so it lives here with the other playback
+     * behaviours and is read when playback starts. */
+    fun favoritesZap(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_FAVORITES_ZAP, false)
+
+    fun setFavoritesZap(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_FAVORITES_ZAP, value).apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */
