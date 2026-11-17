@@ -52,11 +52,22 @@ Rules (from Chuni, 2026-11-17):
   Left/Right while a recording is playing. INFO opens the info
   overlay during a recording, since Left/Right seek there now.
 
-### 7.1.1 (planned) — Patch
+### 7.1.1 ✅ (this release) — Patch
 
-- Fixes + polish from 7.1.0 testing on the TV: sleep-timer edge
-  cases, speed resetting when the channel changes, and seek-skip
-  focus behaviour.
+- Playback speed survives a channel change: the chosen speed is
+  carried in the playback intent (and through the guide, for a
+  channel picked there) instead of resetting to 1× on a zap.
+  A fresh launch still starts at 1×. Catch-up replays do not
+  carry it — speed is live-only.
+- Recording seek-skip polish: Left/Right now seeks ±10 s when
+  the info overlay is up but no strip tile has focus, instead of
+  steering focus between transport buttons that do nothing while
+  a recording plays. The seek toast shows the new position /
+  duration ("2:34 / 45:00") instead of "+10s".
+- Sleep-timer edge cases were DROPPED from this patch — Nova
+  already covered the timer on her branch (basic timer 7.0.0,
+  recording playback 7.1.0, countdown display 7.1.1), so
+  reworking ours would just duplicate her work.
 
 ### 7.2.0 (planned) — Guide, day by day
 
