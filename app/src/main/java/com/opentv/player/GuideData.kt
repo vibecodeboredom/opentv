@@ -170,12 +170,77 @@ object GuideData {
         epgOverrides: Map<String, String> = emptyMap()
     ): List<GuideRow> {
         val rows = mutableListOf<GuideRow>()
-        for (channel in channels) {
-            if (rows.size >= MAX_GUIDE_ROWS) break
+        for (channel in rowChannels(channels, hidden)) {
             buildRow(channel, epg, windowStartMillis, windowHours, hidden, epgOverrides)
                 ?.let { rows += it }
         }
         return rows
+    }
+
+    /** The channels that get a guide row, in order: the non-hidden
+     * channels, capped at [MAX_GUIDE_ROWS]. This is exactly the set
+     * buildRows produces rows for (buildRow returns null only for
+     * hidden channels), split out so the guide screen can compute
+     * the cheap part — a filter over the channel list — up front and
+     * build the rows themselves lazily via [LazyRows]. */
+    fun rowChannels(
+        channels: List<Channel>,
+        hidden: Set<String> = emptySet()
+    ): List<Channel> =
+        channels.filter { !hidden.contains(it.id) }.take(MAX_GUIDE_ROWS)
+
+    /**
+     * Guide rows built one at a time, on first access, instead of all
+     * at once: the guide screen only ever displays the first rows on
+     * open and appends more as the user scrolls, so computing every
+     * row's programme filter + sort up front (up to [MAX_GUIDE_ROWS]
+     * rows) was work the open path paid for rows nobody had looked
+     * at yet. A row is computed by the same buildRow the eager
+     * buildRows uses and then cached, so the list's contents are
+     * identical to buildRows' — only the timing differs.
+     *
+     * [channels] must already be the row-producing set (non-hidden,
+     * capped — see [rowChannels]); buildRow only returns null for a
+     * hidden channel, which by construction cannot be in the list.
+     * Access follows the same main-thread pattern as the guide's
+     * other row lists (the screen builds and reads rows on the main
+     * thread); the cache is a plain array, not synchronised.
+     */
+    class LazyRows(
+        /** The row-producing channels, in row order. Exposed so a
+         * caller can compare or search the channel sequence without
+         * materialising any rows (the guide's EPG fill-in and its
+         * open-on-current-channel lookup both do this). */
+        val channels: List<Channel>,
+        private val epg: Map<String, List<EpgParser.Programme>>,
+        private val windowStartMillis: Long,
+        private val windowHours: Int = 6,
+        private val epgOverrides: Map<String, String> = emptyMap()
+    ) : AbstractList<GuideRow>() {
+
+        private val built = arrayOfNulls<GuideRow>(channels.size)
+
+        override val size: Int get() = channels.size
+
+        override fun get(index: Int): GuideRow {
+            if (index !in channels.indices) {
+                throw IndexOutOfBoundsException("index $index, size ${channels.size}")
+            }
+            built[index]?.let { return it }
+            val row = requireNotNull(
+                buildRow(
+                    channels[index], epg, windowStartMillis,
+                    windowHours, emptySet(), epgOverrides
+                )
+            ) { "LazyRows channel was not hidden-filtered: ${channels[index].id}" }
+            built[index] = row
+            return row
+        }
+
+        /** Index of a channel's row, or -1 — reads only the channel
+         * list, so finding a row never builds the rows before it. */
+        fun indexOfChannel(channelId: String?): Int =
+            channels.indexOfFirst { it.id == channelId }
     }
 
     const val MAX_GUIDE_ROWS = 400

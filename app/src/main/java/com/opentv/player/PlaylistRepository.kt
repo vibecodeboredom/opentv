@@ -2,9 +2,12 @@ package com.opentv.player
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -105,6 +108,96 @@ object PlaylistRepository {
     private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val playlistRefreshRunning = AtomicBoolean(false)
     private val epgRefreshRunning = AtomicBoolean(false)
+
+    /**
+     * Single-flight loads: while a playlist / EPG load is running, its
+     * Deferred lives here and every caller — the app-start preload,
+     * the launcher, playback, the guide — awaits the SAME one instead
+     * of starting a second download + parse of the same source. The
+     * slot is cleared when the load completes; later callers start a
+     * fresh load, which is normally just the in-memory cache hit at
+     * the top of the load itself. The Deferreds run on refreshScope,
+     * so a caller going away (an activity finishing) never cancels a
+     * load another caller is waiting on.
+     */
+    private val loadLock = Any()
+    @Volatile private var playlistLoad: Deferred<Result<List<Channel>>>? = null
+    @Volatile private var epgLoad: Deferred<Map<String, List<EpgParser.Programme>>>? = null
+
+    private fun playlistLoadDeferred(context: Context): Deferred<Result<List<Channel>>> {
+        playlistLoad?.let { return it }
+        synchronized(loadLock) {
+            playlistLoad?.let { return it }
+            val appContext = context.applicationContext
+            val deferred: Deferred<Result<List<Channel>>> = refreshScope.async {
+                try {
+                    loadPlaylistInternal(appContext)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // loadPlaylistInternal already reports its expected
+                    // failures as Result.failure; this only guards the
+                    // unexpected, so awaiters still get a Result.
+                    Result.failure(e)
+                }
+            }
+            playlistLoad = deferred
+            deferred.invokeOnCompletion {
+                synchronized(loadLock) {
+                    if (playlistLoad === deferred) playlistLoad = null
+                }
+            }
+            return deferred
+        }
+    }
+
+    private fun epgLoadDeferred(context: Context): Deferred<Map<String, List<EpgParser.Programme>>> {
+        epgLoad?.let { return it }
+        synchronized(loadLock) {
+            epgLoad?.let { return it }
+            val appContext = context.applicationContext
+            val deferred: Deferred<Map<String, List<EpgParser.Programme>>> = refreshScope.async {
+                try {
+                    loadEpgInternal(appContext)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // loadEpg's contract is "an empty map on any failure".
+                    emptyMap()
+                }
+            }
+            epgLoad = deferred
+            deferred.invokeOnCompletion {
+                synchronized(loadLock) {
+                    if (epgLoad === deferred) epgLoad = null
+                }
+            }
+            return deferred
+        }
+    }
+
+    /**
+     * App-start warm-up, called from OpenTvApp.onCreate: start the
+     * playlist + EPG loads now so the parsed data is already in memory
+     * when the user opens the guide or the browse screen. Pure
+     * fire-and-forget — creating the Deferreds returns immediately,
+     * the work runs on the IO scope, and because the loads are
+     * single-flight a screen opening mid-warm-up awaits the same load
+     * instead of re-parsing, while one opening after it just hits the
+     * memory cache. Sources are read exactly as the normal load path
+     * reads them (active playlist, configured EPG URLs). Failures are
+     * swallowed: a failed warm-up leaves the caches cold and the next
+     * screen load behaves exactly as it did before the preload existed.
+     */
+    fun preload(context: Context) {
+        try {
+            val appContext = context.applicationContext
+            playlistLoadDeferred(appContext)
+            epgLoadDeferred(appContext)
+        } catch (ignored: Exception) {
+            // Best-effort: the warm-up must never break app startup.
+        }
+    }
 
     /** The in-memory playlist when it is already loaded and fresh, else
      * null. Lets the overlay / sidebar build synchronously in the common
@@ -500,8 +593,16 @@ object PlaylistRepository {
      * M3U before any channel could play, even though the disk copy was
      * still good. Now it only downloads when the disk copy is missing
      * or stale, and falls back to a stale copy when the fetch fails.
+     *
+     * Single-flight: concurrent callers (the app-start preload, the
+     * launcher, the guide) share one in-flight load instead of each
+     * running the whole fetch + parse — see playlistLoadDeferred.
      */
-    suspend fun loadPlaylist(context: Context): Result<List<Channel>> = withContext(Dispatchers.IO) {
+    suspend fun loadPlaylist(context: Context): Result<List<Channel>> =
+        playlistLoadDeferred(context).await()
+
+    /** The playlist load itself; loadPlaylist gates it single-flight. */
+    private suspend fun loadPlaylistInternal(context: Context): Result<List<Channel>> = withContext(Dispatchers.IO) {
         val cached = playlistCache
         if (cached != null && System.currentTimeMillis() - cached.first < PLAYLIST_TTL_MS) {
             return@withContext Result.success(cached.second)
@@ -721,8 +822,15 @@ object PlaylistRepository {
      * reads it in milliseconds instead of re-parsing the whole XMLTV.
      * A stale snapshot is still returned immediately and refreshed in
      * the background, so the guide never blocks on the EPG.
+     *
+     * Single-flight, like loadPlaylist: concurrent callers share one
+     * in-flight load — see epgLoadDeferred.
      */
-    suspend fun loadEpg(context: Context): Map<String, List<EpgParser.Programme>> = withContext(Dispatchers.IO) {
+    suspend fun loadEpg(context: Context): Map<String, List<EpgParser.Programme>> =
+        epgLoadDeferred(context).await()
+
+    /** The EPG load itself; loadEpg gates it single-flight. */
+    private suspend fun loadEpgInternal(context: Context): Map<String, List<EpgParser.Programme>> = withContext(Dispatchers.IO) {
         val cached = epgCache
         if (cached != null && System.currentTimeMillis() - cached.first < EPG_TTL_MS) {
             return@withContext cached.second

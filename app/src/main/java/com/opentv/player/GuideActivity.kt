@@ -509,11 +509,14 @@ class GuideActivity : FragmentActivity() {
 
     /**
      * Recompute the guide rows for the current channels + EPG.
-     * Pure computation (GuideData is Android-free), so it runs on
-     * Dispatchers.Default — the open path used to do this on the main
-     * thread, twice per open (placeholders, then real EPG), before the
-     * first paint. The prefs reads are captured on the main thread;
-     * the filtering/sorting runs in the background.
+     * Only the row SOURCE is built here — the hidden filter over the
+     * channel list — on Dispatchers.Default, like the old full
+     * computation. The rows themselves are lazy (GuideData.LazyRows):
+     * each row's programme filter + sort runs on first access, which
+     * in practice is appendRows building that row's views, so opening
+     * the guide no longer computes all 400 rows before the first
+     * paint (and again on the EPG fill-in). The prefs reads are
+     * captured on the main thread.
      */
     private suspend fun rebuildRows() {
         val channels = allChannels
@@ -521,8 +524,9 @@ class GuideActivity : FragmentActivity() {
         val hidden = PlaylistRepository.hiddenChannels(this)
         val overrides = PlaylistRepository.epgOverrides(this)
         allRows = withContext(Dispatchers.Default) {
-            GuideData.buildRows(
-                channels, epgMap, windowStart, windowHours, hidden, overrides
+            GuideData.LazyRows(
+                GuideData.rowChannels(channels, hidden),
+                epgMap, windowStart, windowHours, overrides
             )
         }
     }
@@ -670,6 +674,9 @@ class GuideActivity : FragmentActivity() {
      * of rows is built synchronously, so the guide appears and is usable
      * almost immediately after pressing OK; more rows are appended as
      * the user scrolls down (maybeAppendRows) or focus nears the end.
+     * The row data behind the views is lazy too: rebuildRows hands
+     * over a GuideData.LazyRows, so a row's programmes are computed
+     * only when appendRows reaches that row.
      * The grid used to inflate all 400 rows eagerly in 40-row chunks,
      * which was the open delay — and it did it twice per open (once for
      * the placeholders, once when the EPG arrived). A generation counter
@@ -1018,8 +1025,24 @@ class GuideActivity : FragmentActivity() {
      */
     private suspend fun updateRowsWithEpg() {
         rebuildRows()
-        val sameChannels = displayRows.size == allRows.size &&
-            displayRows.indices.all { displayRows[it].channel.id == allRows[it].channel.id }
+        // Compare channel sequences, not rows: when both sides are
+        // lazy row sources, reading displayRows[it] / allRows[it]
+        // here would materialise every row just to check the channels
+        // match — defeating the lazy build on the very path (EPG
+        // fill-in) that runs on every open. When either side is a
+        // concrete list (search results), fall back to comparing the
+        // rows; an active search reroutes to applySearch below anyway.
+        val oldSource = displayRows as? GuideData.LazyRows
+        val newSource = allRows as? GuideData.LazyRows
+        val sameChannels = if (oldSource != null && newSource != null) {
+            oldSource.channels.size == newSource.channels.size &&
+                oldSource.channels.indices.all {
+                    oldSource.channels[it].id == newSource.channels[it].id
+                }
+        } else {
+            displayRows.size == allRows.size &&
+                displayRows.indices.all { displayRows[it].channel.id == allRows[it].channel.id }
+        }
         if (currentSearchQuery.isNotEmpty() || !sameChannels) {
             applySearch(currentSearchQuery)
             return
@@ -1066,10 +1089,17 @@ class GuideActivity : FragmentActivity() {
         refreshNowLine()
     }
 
+    /** Index of a channel's row in displayRows, or -1. When the rows
+     * are a lazy source, the lookup reads only its channel list, so
+     * finding a row never builds the rows before it. */
+    private fun rowIndexOf(channelId: String?): Int =
+        (displayRows as? GuideData.LazyRows)?.indexOfChannel(channelId)
+            ?: displayRows.indexOfFirst { it.channel.id == channelId }
+
     /** Focus the card airing at [timeMillis] on the given channel, if
      * that row is built. Returns false when nothing matched. */
     private fun focusProgrammeAt(channelId: String, timeMillis: Long): Boolean {
-        val idx = displayRows.indexOfFirst { it.channel.id == channelId }
+        val idx = rowIndexOf(channelId)
         if (idx < 0 || idx >= builtRowCount) return false
         val rowLayout = programmeRowLayouts[idx]
         for (i in 0 until rowLayout.childCount) {
@@ -1104,7 +1134,7 @@ class GuideActivity : FragmentActivity() {
         // has no row (hidden), or the guide was opened with no
         // current channel.
         if (AppSettings.guideOpensOnCurrentChannel(this)) {
-            val idx = displayRows.indexOfFirst { it.channel.id == currentChannelId }
+            val idx = rowIndexOf(currentChannelId)
             if (idx >= 0 && idx >= builtRowCount) {
                 appendRows(idx + 1 - builtRowCount)
             }
