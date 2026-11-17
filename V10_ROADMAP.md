@@ -69,14 +69,24 @@ Rules (from Chuni, 2026-11-17):
   recording playback 7.1.0, countdown display 7.1.1), so
   reworking ours would just duplicate her work.
 
-### 7.2.0 (planned) — Guide, day by day
+### 7.2.0 ✅ (this release) — Guide, day by day
 
 - Day navigation in the guide: jump to tomorrow / a picked day,
-  instead of only the 10-hour window around now.
-- "Tonight" quick view: evening prime-time programmes across
-  favorites, one screen.
-- Guide window size setting: 6 h / 12 h / 24 h window, in
-  Settings → Guide & playback.
+  instead of only the 10-hour window around now. Prev/next-day
+  rows + a "Go to day…" picker (today .. +6 days) in the guide
+  menu; the header shows the viewed day, the now-line is hidden
+  off-today, and Jump to now comes home to today.
+- "Tonight" quick view: evening prime-time programmes (6–11 PM)
+  across favorites, one screen, from the guide menu. Always
+  today's 6–11 PM, even after 11 PM (the prime time that just
+  aired). No favorites yet shows the empty view.
+- Guide window size setting: 6 h / 12 h / 24 h forward, in
+  Settings → Guide & playback. Applies on open, or on return
+  when the guide is open. Past hours add on top as before.
+- Gemini reviewed the diff (caught 1 real issue: Tonight after
+  11 PM silently meant tomorrow — fixed to stay today) and wrote
+  3 extra unit tests; GLM 429'd and sat this one out. Day math
+  is DST-correct (Calendar day add, not fixed 24 h).
 
 ### 7.2.1 (planned) — Patch
 
