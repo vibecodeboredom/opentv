@@ -50,17 +50,21 @@ import java.util.Locale
  * - LEFT: sidebar up → back (channels → groups, groups → close); overlay
  *   up → move between strip tiles (only when a strip tile has focus, so
  *   the transport buttons keep normal Left/Right focus movement);
- *   nothing up → open the left sidebar (channels/groups).
+ *   nothing up → open the left sidebar (channels/groups); during a
+ *   recording, seek back 10 s instead (7.1.0).
  * - RIGHT: sidebar up → activate the focused row; overlay up → move
  *   between strip tiles (same focus caveat as Left); nothing up → show
- *   the channel info overlay.
+ *   the channel info overlay; during a recording, seek forward 10 s
+ *   instead (7.1.0).
  * - UP/DOWN: move focus between rows/tiles/buttons (framework focus
  *   search; the sidebar's RecyclerView scrolls to the focused row).
  * - BACK: sidebar up → back/close; overlay up → hide it; else the
  *   system default (leave playback).
  * - Play/pause key (remote): toggle pause/resume. Channel up/down keys:
  *   next / previous channel.
- * - MENU opens options (favorite + record). INFO toggles favorite.
+ * - MENU opens options (favorite + record + sleep timer + speed).
+ *   INFO toggles favorite; during a recording it shows the info
+ *   overlay instead (7.1.0 — Left/Right seek there now).
  *
  * The left sidebar (4.6.2, shared ChannelSidebar helper) is a panel
  * over a 60% black scrim (6.1.2: width from the channel-list size
@@ -168,6 +172,23 @@ class PlaybackActivity : FragmentActivity() {
      * matching key-UP must be swallowed too, or the normal OK action
      * (open the guide) would also fire. */
     private var numberEnterConsumed = false
+    /** 7.1.0: sleep timer — the chosen minutes until playback
+     * stops, or null when off. A dedicated handler so the timer
+     * survives onStop (leaving for the guide must not cancel it);
+     * it is cancelled in onDestroy, when the session really ends. */
+    private var sleepTimerMinutes: Int? = null
+    private val sleepHandler = Handler(Looper.getMainLooper())
+    private val sleepTimerRunnable = Runnable {
+        sleepTimerMinutes = null
+        Toast.makeText(this, R.string.sleep_timer_ended, Toast.LENGTH_LONG).show()
+        player?.pause()
+        finish()
+    }
+    /** 7.1.0: playback speed for live streams (1× default).
+     * Re-applied whenever the player is rebuilt (returning from
+     * the guide); a channel change starts a new activity, so it
+     * resets to 1× there. */
+    private var playbackSpeed: Float = 1f
     /** True while the overlay up is a channel up/down flash (short
      * timeout); the first Left/Right press upgrades it to the normal
      * Left/Right timeout instead. */
@@ -528,6 +549,9 @@ class PlaybackActivity : FragmentActivity() {
         player.setMediaItem(MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build())
         player.prepare()
         player.play()
+        // 7.1.0: restore the chosen playback speed on a rebuilt
+        // player (returning from the guide rebuilds it).
+        if (playbackSpeed != 1f) player.setPlaybackSpeed(playbackSpeed)
         sessionStartMillis = System.currentTimeMillis()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -728,8 +752,18 @@ class PlaybackActivity : FragmentActivity() {
                         }
                         return super.dispatchKeyEvent(event)
                     }
-                    // Nothing up: Left opens the sidebar, Right shows
-                    // the channel info overlay.
+                    // Nothing up: during a recording Left/Right
+                    // skip 10 s (7.1.0) — there is no channel list
+                    // to open, and the info overlay has its own
+                    // entry point (INFO) there. Live keeps the old
+                    // behaviour.
+                    if (recordingUri != null) {
+                        seekRecording(
+                            if (right) PlaybackComfort.SEEK_SKIP_MS
+                            else -PlaybackComfort.SEEK_SKIP_MS
+                        )
+                        return true
+                    }
                     if (right) showChannelInfo() else showSidebar()
                     return true
                 }
@@ -1417,8 +1451,16 @@ class PlaybackActivity : FragmentActivity() {
                 return true
             }
             KeyEvent.KEYCODE_INFO -> {
-                toggleFavorite()
-                updateTransportIcons()
+                if (recordingUri != null) {
+                    // 7.1.0: INFO opens the info overlay during a
+                    // recording — Left/Right seek there now, so the
+                    // overlay needs another entry point. Live keeps
+                    // the favorite toggle.
+                    showChannelInfo()
+                } else {
+                    toggleFavorite()
+                    updateTransportIcons()
+                }
                 return true
             }
         }
@@ -1438,51 +1480,147 @@ class PlaybackActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * 7.1.0: the playback menu is a (label, action) list now, so the
+     * entries differ by what is playing — live channels get favorite
+     * + record + sleep timer + speed; recordings get the sleep timer
+     * (no channel to favorite/record, and speed is live-only).
+     * Recordings used to have no menu at all (early return).
+     */
     private fun showOptions() {
         val ch = channel
-        if (ch == null) {
-            // Playing a recording: no channel options.
-            return
+        val entries = mutableListOf<Pair<String, () -> Unit>>()
+        if (ch != null) {
+            val isFav = ch.id in favoritesCache
+            entries += (if (isFav) getString(R.string.remove_favorite)
+            else getString(R.string.add_favorite)) to {
+                toggleFavorite()
+                updateTransportIcons()
+            }
+            val isRecording = RecordingManager.isRecording(this, ch.id)
+            val hasRecording = RecordingManager.hasRecording(this, ch.id)
+            entries += when {
+                isRecording -> getString(R.string.stop_recording)
+                hasRecording -> getString(R.string.record_again)
+                else -> getString(R.string.record_channel)
+            } to {
+                if (isRecording) {
+                    RecordingManager.stopRecording(this, ch.id)
+                    Toast.makeText(
+                        this,
+                        R.string.recording_stopped,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    RecordingManager.startRecording(this, ch)
+                    Toast.makeText(
+                        this,
+                        R.string.recording_started,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                updateTransportIcons()
+            }
         }
-        val isFav = ch.id in favoritesCache
-        val isRecording = RecordingManager.isRecording(this, ch.id)
-        val hasRecording = RecordingManager.hasRecording(this, ch.id)
-        val items = mutableListOf<String>()
-        items += if (isFav) getString(R.string.remove_favorite) else getString(R.string.add_favorite)
-        items += when {
-            isRecording -> getString(R.string.stop_recording)
-            hasRecording -> getString(R.string.record_again)
-            else -> getString(R.string.record_channel)
+        entries += getString(
+            R.string.sleep_timer_menu,
+            PlaybackComfort.sleepLabel(sleepTimerMinutes)
+        ) to { showSleepTimerPicker() }
+        // Speed is live-only: a recording has no live edge to chase,
+        // and a replay has its own seek keys.
+        if (ch != null && recordingUri == null && catchupUrl == null) {
+            entries += getString(
+                R.string.playback_speed_menu,
+                PlaybackComfort.speedLabel(playbackSpeed)
+            ) to { showSpeedPicker() }
         }
         AlertDialog.Builder(this)
-            .setTitle(ch.name)
-            .setItems(items.toTypedArray()) { _, which ->
-                when (which) {
-                    0 -> {
-                        toggleFavorite()
-                        updateTransportIcons()
-                    }
-                    1 -> {
-                        if (isRecording) {
-                            RecordingManager.stopRecording(this, ch.id)
-                            Toast.makeText(
-                                this,
-                                R.string.recording_stopped,
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            RecordingManager.startRecording(this, ch)
-                            Toast.makeText(
-                                this,
-                                R.string.recording_started,
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                        updateTransportIcons()
-                    }
-                }
+            .setTitle(ch?.name ?: recordingName ?: getString(R.string.app_name))
+            .setItems(entries.map { it.first }.toTypedArray()) { _, which ->
+                entries[which].second()
             }
             .show()
+    }
+
+    /** 7.1.0: sleep-timer picker — Off / 15 / 30 / 60 / 90 minutes. */
+    private fun showSleepTimerPicker() {
+        val labels = mutableListOf(getString(R.string.sleep_timer_off))
+        labels += PlaybackComfort.SLEEP_MINUTES.map {
+            getString(R.string.sleep_timer_minutes, it)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.sleep_timer_title)
+            .setItems(labels.toTypedArray()) { _, which ->
+                setSleepTimer(
+                    if (which == 0) null
+                    else PlaybackComfort.SLEEP_MINUTES[which - 1]
+                )
+            }
+            .show()
+    }
+
+    /** 7.1.0: set (or clear) the sleep timer. The timer counts
+     * wall-clock time from when it is set, paused or not, and fires
+     * once: pause + leave playback. Setting a new one replaces the
+     * old; Off cancels it. */
+    private fun setSleepTimer(minutes: Int?) {
+        sleepHandler.removeCallbacks(sleepTimerRunnable)
+        sleepTimerMinutes = minutes
+        if (minutes != null) {
+            sleepHandler.postDelayed(
+                sleepTimerRunnable,
+                PlaybackComfort.sleepDelayMillis(minutes)
+            )
+            Toast.makeText(
+                this,
+                getString(R.string.sleep_timer_set, minutes),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    /** 7.1.0: playback-speed picker — 0.5× to 2×, live streams only. */
+    private fun showSpeedPicker() {
+        val labels = PlaybackComfort.SPEEDS.map {
+            PlaybackComfort.speedLabel(it)
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.playback_speed_title)
+            .setItems(labels) { _, which ->
+                playbackSpeed = PlaybackComfort.SPEEDS[which]
+                player?.setPlaybackSpeed(playbackSpeed)
+                Toast.makeText(
+                    this,
+                    getString(
+                        R.string.playback_speed_set,
+                        PlaybackComfort.speedLabel(playbackSpeed)
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .show()
+    }
+
+    /** 7.1.0: skip a recording forward/back by [deltaMs] (±10 s),
+     * clamped to the recording's length. A no-op without a player. */
+    private fun seekRecording(deltaMs: Long) {
+        val p = player ?: return
+        val target = PlaybackComfort.clampSeek(p.currentPosition + deltaMs, p.duration)
+        p.seekTo(target)
+        Toast.makeText(
+            this,
+            if (deltaMs >= 0) R.string.recording_skip_forward
+            else R.string.recording_skip_back,
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    override fun onDestroy() {
+        // 7.1.0: the sleep timer dies with the session — a channel
+        // change (new activity) starts fresh, and a finished activity
+        // must never fire into a dead player.
+        sleepHandler.removeCallbacks(sleepTimerRunnable)
+        super.onDestroy()
     }
 
     override fun onStop() {

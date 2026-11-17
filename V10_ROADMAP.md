@@ -39,13 +39,18 @@ Rules (from Chuni, 2026-11-17):
   guide menu has a "Refresh guide data" action that re-downloads
   the EPG immediately instead of waiting out the 12 h cache.
 
-### 7.1.0 (planned) — Playback comfort
+### 7.1.0 ✅ (this release) — Playback comfort
 
 - Sleep timer: stop playback after 15 / 30 / 60 / 90 minutes,
-  from the playback menu.
-- Playback speed: 0.5×–2× on live streams, from the playback menu.
-- Seek skip for recordings and catch-up: jump forward/back 10 s
-  with Left/Right while a recording or catch-up replay is playing.
+  from the playback menu (MENU). Counts wall-clock time, paused
+  or not; fires once — pause + leave playback. Survives leaving
+  for the guide, dies with the session (channel change = fresh).
+- Playback speed: 0.5×–2× on live streams, from the playback
+  menu. Re-applied when the player is rebuilt (back from the
+  guide); resets to 1× on a channel change.
+- Seek skip for recordings only: jump forward/back 10 s with
+  Left/Right while a recording is playing. INFO opens the info
+  overlay during a recording, since Left/Right seek there now.
 
 ### 7.1.1 (planned) — Patch
 

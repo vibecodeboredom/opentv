@@ -109,6 +109,18 @@
     <string name="guide_refreshed">Guide data refreshed</string>
     <string name="guide_refresh_failed">Refresh failed — showing saved guide</string>
     <string name="guide_no_channel_number">No channel %1$d</string>
+    <!-- Playback comfort (7.1.0). -->
+    <string name="sleep_timer_menu">Sleep timer: %1$s</string>
+    <string name="sleep_timer_title">Sleep timer</string>
+    <string name="sleep_timer_off">Off</string>
+    <string name="sleep_timer_minutes">%1$d min</string>
+    <string name="sleep_timer_set">Sleep timer: %1$d min</string>
+    <string name="sleep_timer_ended">Sleep timer ended</string>
+    <string name="playback_speed_menu">Playback speed: %1$s</string>
+    <string name="playback_speed_title">Playback speed</string>
+    <string name="playback_speed_set">Playback speed: %1$s</string>
+    <string name="recording_skip_forward">+10s</string>
+    <string name="recording_skip_back">−10s</string>
     <string name="prefs_favorites_only">Guide shows favorites only</string>
     <string name="menu_external_player">Open in external player</string>
     <string name="menu_record">Record</string>
