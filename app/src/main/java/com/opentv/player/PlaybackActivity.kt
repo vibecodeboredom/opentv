@@ -185,7 +185,9 @@ class PlaybackActivity : FragmentActivity() {
      * the target of the previous-channel swap. Recorded by
      * switchToChannel only when the outgoing channel actually
      * played, so a dead stream the auto-retry abandons never
-     * becomes the swap target. */
+     * becomes the swap target. 7.2.1 (Nova): also persisted (see
+     * PlaylistRepository.previousChannelId) and restored on
+     * create, so the swap survives an app restart. */
     private var previousChannel: Channel? = null
     /** 7.2.0 (Nova): favorites zapping — channel up/down cycle
      * favorites only while on. Persisted in AppSettings (a
@@ -205,7 +207,9 @@ class PlaybackActivity : FragmentActivity() {
             if (streamInfoOn) infoHandler.postDelayed(this, STREAM_INFO_UPDATE_MS)
         }
     }
-    /** 7.2.0 (Nova): night dim level in percent (0 = off). */
+    /** 7.2.0 (Nova): night dim level in percent (0 = off).
+     * 7.2.1 (Nova): persisted in AppSettings and restored on
+     * create — 7.2.0 forgot it between sessions. */
     private var dimPercent: Int = 0
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
@@ -371,6 +375,29 @@ class PlaybackActivity : FragmentActivity() {
         // 7.2.0 (Nova): favorites zapping is a persisted playback
         // preference — restore it for this session.
         favoritesZapMode = AppSettings.favoritesZap(this)
+        // 7.2.1 (Nova): night dim is a persisted playback
+        // preference too — reapply the remembered level instead
+        // of starting every session undimmed.
+        setDim(AppSettings.nightDimPercent(this))
+        // 7.2.1 (Nova): restore the previous-channel swap target
+        // recorded by the last session. The saved id is resolved
+        // against the current playlist — a channel that has left
+        // the playlist simply never resolves, leaving the swap
+        // exactly as unavailable as it was in 7.2.0. A switch
+        // made while the playlist loads wins: it records (and
+        // persists) its own previous channel, and both guards
+        // below then drop this restore.
+        if (recordingUri == null && ch != null) {
+            val startChannelId = ch.id
+            lifecycleScope.launch {
+                val savedId = PlaylistRepository.previousChannelId(this@PlaybackActivity)
+                if (savedId.isEmpty() || savedId == startChannelId) return@launch
+                val channels = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+                    .getOrNull() ?: return@launch
+                if (previousChannel != null || channel?.id != startChannelId) return@launch
+                previousChannel = channels.firstOrNull { it.id == savedId }
+            }
+        }
         updateTransportIcons()
         // 6.0.0-rc1: touch controls on mobile (tap to toggle the
         // overlay, swipe to change channel, big transport buttons).
@@ -995,14 +1022,22 @@ class PlaybackActivity : FragmentActivity() {
      * 7.1.0 (Nova): warm the streams of the channels either side of
      * the current one (the same visible order channel up/down uses),
      * so zapping to them starts faster. Live channels only — a
-     * recording reads from disk, and a catch-up replay's neighbours
-     * are not where the viewer is likely to zap. The warm-up itself
-     * is capped and silent (see StreamPrefetcher); this only picks
-     * the URLs, next channel first — CH+ is the direction viewers
-     * zap most, so it gets the head start.
+     * recording reads from disk. The warm-up itself is capped and
+     * silent (see StreamPrefetcher); this only picks the URLs,
+     * next channel first — CH+ is the direction viewers zap most,
+     * so it gets the head start.
+     *
+     * 7.2.1 (Nova): catch-up sessions warm their neighbours too.
+     * 7.2.0 skipped them on the theory that a replay's neighbours
+     * are not zap targets — but a zap out of catch-up goes live on
+     * the neighbouring channel (switchToChannel clears the catch-up
+     * state), so they are exactly the zap targets. This runs once
+     * the catch-up stream is playing (the READY callback below),
+     * and the capped, one-at-a-time warm-up cannot disturb the
+     * replay it runs beside.
      */
     private fun prefetchAdjacentChannels() {
-        if (recordingUri != null || catchupUrl != null) return
+        if (recordingUri != null) return
         val currentId = channel?.id ?: return
         lifecycleScope.launch {
             val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
@@ -1501,7 +1536,14 @@ class PlaybackActivity : FragmentActivity() {
         // auto-retry is abandoning, or a zap straight through) is
         // not a channel the viewer was watching.
         if (everPlayed) {
-            channel?.let { if (it.id != pick.id) previousChannel = it }
+            channel?.let {
+                if (it.id != pick.id) {
+                    previousChannel = it
+                    // 7.2.1 (Nova): persist alongside the swap
+                    // target itself, so a restart restores it.
+                    PlaylistRepository.setPreviousChannelId(this, it.id)
+                }
+            }
         }
         channel = pick
         // A zap always goes live: catch-up state belongs to the old
@@ -1859,7 +1901,11 @@ class PlaybackActivity : FragmentActivity() {
         if (dimPercent > 0) getString(R.string.night_dim_state, dimPercent)
         else getString(R.string.night_dim)
 
-    /** 7.2.0 (Nova): pick a night dim level (or turn it off). */
+    /** 7.2.0 (Nova): pick a night dim level (or turn it off).
+     * 7.2.1 (Nova): single-choice with the current level checked —
+     * the menu label carries the state, and 7.2.0's plain item
+     * list left the picker itself silent about it. Picking a
+     * level applies it and dismisses, as the item list did. */
     private fun showDimDialog() {
         val options = intArrayOf(0, 25, 50)
         val labels = options.map { percent ->
@@ -1868,15 +1914,21 @@ class PlaybackActivity : FragmentActivity() {
         }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle(R.string.night_dim)
-            .setItems(labels) { _, which -> setDim(options[which]) }
+            .setSingleChoiceItems(labels, options.indexOf(dimPercent)) { dialog, which ->
+                setDim(options[which])
+                dialog.dismiss()
+            }
             .show()
     }
 
     /** 7.2.0 (Nova): apply a night dim level — a black veil over
      * the video only (see the layout), so the picture calms down
-     * while every menu and overlay stays fully readable. */
+     * while every menu and overlay stays fully readable.
+     * 7.2.1 (Nova): the choice is persisted as it is applied, so
+     * the next session restores it (see onCreate). */
     private fun setDim(percent: Int) {
         dimPercent = percent
+        AppSettings.setNightDimPercent(this, percent)
         if (percent > 0) {
             dimView.alpha = percent / 100f
             dimView.visibility = View.VISIBLE
@@ -1901,7 +1953,11 @@ class PlaybackActivity : FragmentActivity() {
         return getString(R.string.sleep_timer_remaining, remainingMin)
     }
 
-    /** 7.0.0 (Nova): pick a sleep-timer duration (or turn it off). */
+    /** 7.0.0 (Nova): pick a sleep-timer duration (or turn it off).
+     * 7.2.1 (Nova): single-choice with the current duration
+     * checked, like the night dim picker — the menu label counts
+     * the timer down, and now the picker shows the setting it is
+     * counting from. Picking applies and dismisses, as before. */
     private fun showSleepTimerDialog() {
         val options = intArrayOf(0, 15, 30, 60, 90)
         val labels = options.map { minutes ->
@@ -1910,7 +1966,10 @@ class PlaybackActivity : FragmentActivity() {
         }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle(R.string.sleep_timer)
-            .setItems(labels) { _, which -> setSleepTimer(options[which]) }
+            .setSingleChoiceItems(labels, options.indexOf(sleepTimerMinutes)) { dialog, which ->
+                setSleepTimer(options[which])
+                dialog.dismiss()
+            }
             .show()
     }
 

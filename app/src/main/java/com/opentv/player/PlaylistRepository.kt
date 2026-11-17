@@ -59,6 +59,10 @@ object PlaylistRepository {
     private const val KEY_RECENT_SEARCHES = "recent_searches"
     /** Id of the last channel that actually played (4.6.0: resume it on launch). */
     private const val KEY_LAST_CHANNEL = "last_channel"
+    /** 7.2.1 (Nova): the channel watched before the last one — the
+     * previous-channel swap target, persisted so the swap survives
+     * an app restart. */
+    private const val KEY_PREVIOUS_CHANNEL = "previous_channel"
     /** 7.0.0 (Nova): the guide position last focused (channel id +
      * programme start), so the guide can return to it on open. */
     private const val KEY_GUIDE_FOCUS_CHANNEL = "guide_focus_channel"
@@ -556,6 +560,18 @@ object PlaylistRepository {
     /** Remember the last channel that actually played (resumed on launch). */
     fun setLastChannelId(context: Context, channelId: String) {
         prefs(context).edit().putString(KEY_LAST_CHANNEL, channelId).apply()
+    }
+
+    /** 7.2.1 (Nova): id of the channel watched before the last
+     * one, or "" when none was recorded. May name a channel that
+     * has since left the playlist — callers resolve it against
+     * the current playlist and treat a miss as "no previous". */
+    fun previousChannelId(context: Context): String =
+        prefs(context).getString(KEY_PREVIOUS_CHANNEL, "") ?: ""
+
+    /** 7.2.1 (Nova): remember the previous-channel swap target. */
+    fun setPreviousChannelId(context: Context, channelId: String) {
+        prefs(context).edit().putString(KEY_PREVIOUS_CHANNEL, channelId).apply()
     }
 
     /**

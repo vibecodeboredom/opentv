@@ -20,6 +20,7 @@ object AppSettings {
     private const val KEY_GUIDE_SHOW_PAST = "guide_show_past"
     private const val KEY_CHANNEL_LIST_SIZE = "channel_list_size"
     private const val KEY_FAVORITES_ZAP = "favorites_zap"
+    private const val KEY_NIGHT_DIM = "night_dim_percent"
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -81,6 +82,19 @@ object AppSettings {
 
     fun setFavoritesZap(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_FAVORITES_ZAP, value).apply()
+    }
+
+    /** 7.2.1 (Nova): night dim level in percent (0 = off, else
+     * 25 or 50), persisted so a level chosen in one session is
+     * still dimming the next — 7.2.0 reset it every session.
+     * Anything stored outside the offered levels reads as off. */
+    fun nightDimPercent(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_NIGHT_DIM, 0)
+        return if (stored == 25 || stored == 50) stored else 0
+    }
+
+    fun setNightDimPercent(context: Context, percent: Int) {
+        prefs(context).edit().putInt(KEY_NIGHT_DIM, percent).apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */
