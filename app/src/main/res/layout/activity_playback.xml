@@ -22,6 +22,38 @@
         android:background="@android:color/black"
         android:visibility="gone" />
 
+    <!-- 7.3.0 (Nova): audio-only mode — a full black cover over
+         the video (and the dim veil), below every UI layer. The
+         player is untouched: the sound keeps playing while the
+         picture is blanked for music / radio channels or for
+         falling asleep to TV audio. Not clickable. -->
+    <View
+        android:id="@+id/audio_only_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:visibility="gone" />
+
+    <!-- 7.3.0 (Nova): auto-reconnect indicator — a small pill
+         under the centre of the screen, shown while a live stream
+         that already played is being re-connected after an error
+         or a stall. -->
+    <TextView
+        android:id="@+id/reconnect_view"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="110dp"
+        android:background="@drawable/loading_status_bg"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="@string/reconnecting"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
     <!-- Paused cluster (4.6.0, TiviMate-style): a large centred play icon
          shown while playback is paused; tapping it (or the transport
          play/pause button, or the remote's play/pause key) resumes. -->

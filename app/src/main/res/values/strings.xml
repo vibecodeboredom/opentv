@@ -192,6 +192,20 @@
     <string name="night_dim">Night dim</string>
     <string name="night_dim_state">Night dim: %1$d%%</string>
     <string name="night_dim_percent">%1$d%%</string>
+    <!-- Nova 7.3.0: sleep at end of programme, audio-only mode,
+         live auto-reconnect, playback speed. -->
+    <string name="sleep_timer_end_of_programme">End of programme</string>
+    <string name="sleep_timer_eop_set">Sleep timer set — playback pauses at the end of the programme</string>
+    <string name="sleep_timer_eop_fallback">No programme info — sleep timer set for 30 minutes instead</string>
+    <string name="sleep_timer_eop_state">Sleep timer: end of programme</string>
+    <string name="audio_only_state">Audio only: %1$s</string>
+    <string name="audio_only_on_toast">Audio only — press any key to bring the picture back</string>
+    <string name="reconnecting">Reconnecting…</string>
+    <string name="stream_quality">Stream quality</string>
+    <string name="stream_quality_state">Stream quality: %1$s</string>
+    <string name="quality_auto">Auto</string>
+    <string name="quality_high">High</string>
+    <string name="quality_low">Low</string>
     <string name="mobile_refresh">↻ Refresh</string>
     <string name="mobile_retry">Retry</string>
     <string name="mobile_results">Results (%1$d)</string>

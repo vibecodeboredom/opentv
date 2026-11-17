@@ -21,6 +21,15 @@ object AppSettings {
     private const val KEY_CHANNEL_LIST_SIZE = "channel_list_size"
     private const val KEY_FAVORITES_ZAP = "favorites_zap"
     private const val KEY_NIGHT_DIM = "night_dim_percent"
+    private const val KEY_QUALITY_MODE = "quality_mode"
+
+    /** 7.3.0 (Nova): stream quality modes for the playback
+     * track selector. AUTO is the player's default adaptive
+     * behaviour, HIGH prefers the highest variant, LOW caps the
+     * video bitrate so adaptive streams settle on a low variant. */
+    const val QUALITY_AUTO = 0
+    const val QUALITY_HIGH = 1
+    const val QUALITY_LOW = 2
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -95,6 +104,18 @@ object AppSettings {
 
     fun setNightDimPercent(context: Context, percent: Int) {
         prefs(context).edit().putInt(KEY_NIGHT_DIM, percent).apply()
+    }
+
+    /** 7.3.0 (Nova): stream quality mode (see the QUALITY_*
+     * constants), persisted so the choice holds across sessions
+     * and player rebuilds. Anything unrecognised reads as AUTO. */
+    fun qualityMode(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_QUALITY_MODE, QUALITY_AUTO)
+        return if (stored == QUALITY_HIGH || stored == QUALITY_LOW) stored else QUALITY_AUTO
+    }
+
+    fun setQualityMode(context: Context, mode: Int) {
+        prefs(context).edit().putInt(KEY_QUALITY_MODE, mode).apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */

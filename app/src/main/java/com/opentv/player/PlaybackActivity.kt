@@ -30,6 +30,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -105,6 +106,23 @@ class PlaybackActivity : FragmentActivity() {
         const val EXTRA_SHOW_BRIEF_INFO = "show_brief_info"
         /** Dead streams are common in the playlist — auto-try another random channel this many times. */
         private const val MAX_AUTO_RETRY = 3
+        /** 7.3.0 (Nova): a live stream that already played gets
+         * this many same-stream reconnect attempts before the
+         * error is shown — separate from MAX_AUTO_RETRY, which
+         * hops channels for streams that never played. */
+        private const val MAX_RECONNECT_ATTEMPTS = 3
+        /** 7.3.0 (Nova): a live stream stuck in BUFFERING this
+         * long counts as stalled and earns a reconnect attempt. */
+        private const val STALL_TIMEOUT_MS = 12_000L
+        /** 7.3.0 (Nova): backoff between reconnect attempts. */
+        private val RECONNECT_BACKOFF_MS = longArrayOf(2_000L, 5_000L, 10_000L)
+        /** 7.3.0 (Nova): sleepTimerMinutes sentinel — pause when
+         * the current programme ends instead of after N minutes. */
+        private const val SLEEP_END_OF_PROGRAMME = -1
+        /** 7.3.0 (Nova): the LOW stream quality cap — adaptive
+         * selection picks the best variant at or under it (or the
+         * lowest available when every variant is above it). */
+        private const val LOW_QUALITY_MAX_BITRATE = 400_000
         /** Overlay auto-hides after this long with no key press. */
         private const val OVERLAY_TIMEOUT_MS = 10_000L
         /** 6.0.0-rc3: mobile overlay auto-hide — 5s idle, then it
@@ -211,6 +229,33 @@ class PlaybackActivity : FragmentActivity() {
      * 7.2.1 (Nova): persisted in AppSettings and restored on
      * create — 7.2.0 forgot it between sessions. */
     private var dimPercent: Int = 0
+    /** 7.3.0 (Nova): audio-only mode — the picture is covered by
+     * a black view while the player (and its sound) runs on.
+     * Session-only: it exists for falling asleep, and any key
+     * press ends it (see dispatchKeyEvent). */
+    private lateinit var audioOnlyView: View
+    private var audioOnlyOn: Boolean = false
+    /** 7.3.0 (Nova): the key-UP matching a key-DOWN that restored
+     * the picture is swallowed too, so the press that wakes the
+     * screen does not also fire its normal action. */
+    private var audioRestoreSwallowUp: Boolean = false
+    /** 7.3.0 (Nova): live auto-reconnect — attempts spent on the
+     * current stream, the "Reconnecting…" pill, the pending retry
+     * and the stall watchdog. Reset whenever the stream reaches
+     * READY again, and cancelled by a channel switch, a pause or
+     * onStop, so retries never outlive the viewer's intent. */
+    private lateinit var reconnectView: TextView
+    private var reconnectAttempts: Int = 0
+    private val reconnectRunnable = Runnable { restartCurrentStream() }
+    private val stallWatchdogRunnable = Runnable { onStreamStalled() }
+    /** 7.3.0 (Nova): stream quality selector — the activity owns
+     * the player's track selector so the persisted mode (see
+     * AppSettings.QUALITY_*) can be applied at build time and
+     * changed live from the options menu. Only meaningful for
+     * adaptive streams; a single-variant stream has nothing to
+     * select and simply plays as before. */
+    private var trackSelector: DefaultTrackSelector? = null
+    private var qualityMode: Int = AppSettings.QUALITY_AUTO
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
@@ -297,6 +342,8 @@ class PlaybackActivity : FragmentActivity() {
         pausedCluster = findViewById(R.id.paused_cluster)
         streamInfo = findViewById(R.id.stream_info)
         dimView = findViewById(R.id.dim_view)
+        audioOnlyView = findViewById(R.id.audio_only_view)
+        reconnectView = findViewById(R.id.reconnect_view)
         // 7.2.0 (Nova): on mobile the top-end corner belongs to the
         // Guide button — drop the stream info panel below it.
         if (DeviceType.isMobile(this)) {
@@ -379,6 +426,9 @@ class PlaybackActivity : FragmentActivity() {
         // preference too — reapply the remembered level instead
         // of starting every session undimmed.
         setDim(AppSettings.nightDimPercent(this))
+        // 7.3.0 (Nova): stream quality is persisted too — the
+        // track selector built in initializePlayer reads it.
+        qualityMode = AppSettings.qualityMode(this)
         // 7.2.1 (Nova): restore the previous-channel swap target
         // recorded by the last session. The saved id is resolved
         // against the current playlist — a channel that has left
@@ -588,6 +638,13 @@ class PlaybackActivity : FragmentActivity() {
                 /* bufferForPlaybackAfterRebufferMs */ 1_500
             )
             .build()
+        // 7.3.0 (Nova): the activity builds the track selector
+        // itself (instead of letting the builder default one) so
+        // the persisted quality mode can be applied now and
+        // changed live later.
+        val selector = DefaultTrackSelector(this)
+        trackSelector = selector
+        applyQualityMode(selector)
         val player = if (recordingUri != null) {
             // Playback from the local download cache.
             val mediaSourceFactory = DefaultMediaSourceFactory(this)
@@ -595,16 +652,22 @@ class PlaybackActivity : FragmentActivity() {
             ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setLoadControl(fastStartLoadControl)
+                .setTrackSelector(selector)
                 .build()
         } else {
             ExoPlayer.Builder(this)
                 .setLoadControl(fastStartLoadControl)
+                .setTrackSelector(selector)
                 .build()
         }
         this.player = player
         playerView.player = player
         everPlayed = false
         autoRetrying = false
+        // 7.3.0 (Nova): a rebuilt player starts with a clean
+        // reconnect slate — the old player's pending retries and
+        // stall watchdog must not fire into the new one.
+        cancelReconnect()
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
@@ -615,6 +678,24 @@ class PlaybackActivity : FragmentActivity() {
         sessionStartMillis = System.currentTimeMillis()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                // 7.3.0 (Nova): auto-reconnect bookkeeping. READY
+                // means the stream is healthy again — clear the
+                // attempts and the indicator. BUFFERING on a live
+                // stream that already played arms the stall
+                // watchdog; leaving BUFFERING disarms it.
+                if (playbackState == Player.STATE_READY) {
+                    infoHandler.removeCallbacks(stallWatchdogRunnable)
+                    if (reconnectAttempts > 0 || reconnectView.visibility == View.VISIBLE) {
+                        cancelReconnect()
+                    }
+                } else if (playbackState == Player.STATE_BUFFERING) {
+                    if (everPlayed && recordingUri == null && catchupUrl == null) {
+                        infoHandler.removeCallbacks(stallWatchdogRunnable)
+                        infoHandler.postDelayed(stallWatchdogRunnable, STALL_TIMEOUT_MS)
+                    }
+                } else {
+                    infoHandler.removeCallbacks(stallWatchdogRunnable)
+                }
                 if (playbackState == Player.STATE_READY && !everPlayed) {
                     everPlayed = true
                     // First real playback: this channel counts as watched,
@@ -700,6 +781,17 @@ class PlaybackActivity : FragmentActivity() {
                     tryAnotherChannel()
                     return
                 }
+                // 7.3.0 (Nova): a live stream that DID play and then
+                // failed gets reconnected to the SAME stream with
+                // backoff — a dropped connection mid-show should not
+                // cost the viewer their channel. Recordings and
+                // catch-up keep the plain error below.
+                if (everPlayed && recordingUri == null && catchupUrl == null &&
+                    reconnectAttempts < MAX_RECONNECT_ATTEMPTS
+                ) {
+                    scheduleReconnect()
+                    return
+                }
                 Toast.makeText(
                     this@PlaybackActivity,
                     getString(R.string.playback_error, error.message ?: "unknown error"),
@@ -752,6 +844,21 @@ class PlaybackActivity : FragmentActivity() {
      * opens the context menu without also firing the short-press action.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 7.3.0 (Nova): audio-only mode — ANY key press brings the
+        // picture back and ends the mode. The press is consumed
+        // whole (down and its matching up), so waking the screen
+        // never also zaps, pauses or opens the guide.
+        if (audioOnlyOn) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                setAudioOnly(false)
+                audioRestoreSwallowUp = true
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP && audioRestoreSwallowUp) {
+                audioRestoreSwallowUp = false
+                return true
+            }
+        }
         val sidebarUp = channelSidebar.isVisible()
         val overlayUp = overlay.visibility == View.VISIBLE
         if (event.action == KeyEvent.ACTION_DOWN) {
@@ -865,6 +972,10 @@ class PlaybackActivity : FragmentActivity() {
     /** Pause / resume, and keep the cluster + transport icon in sync. */
     private fun togglePlayPause() {
         val p = player ?: return
+        // 7.3.0 (Nova): pausing on purpose ends any reconnect in
+        // progress — retries only run while the viewer wants
+        // playback.
+        if (p.isPlaying) cancelReconnect()
         if (p.isPlaying) p.pause() else p.play()
         // onIsPlayingChanged updates the cluster and the icon.
     }
@@ -1518,6 +1629,9 @@ class PlaybackActivity : FragmentActivity() {
         // the moment a switch starts — drop them; the new channel's
         // first READY starts fresh ones for its own neighbours.
         streamPrefetcher.cancel()
+        // 7.3.0 (Nova): a zap ends any reconnect in progress — the
+        // retries belong to the old channel's stream.
+        cancelReconnect()
         if (recordingUri != null) {
             val intent = Intent(this, PlaybackActivity::class.java)
             intent.putExtra(EXTRA_CHANNEL, pick)
@@ -1788,6 +1902,14 @@ class PlaybackActivity : FragmentActivity() {
         actions += { setStreamInfo(!streamInfoOn) }
         items += nightDimMenuLabel()
         actions += { showDimDialog() }
+        // 7.3.0 (Nova): audio-only mode — picture off, sound on.
+        items += audioOnlyMenuLabel()
+        actions += { setAudioOnly(!audioOnlyOn) }
+        // 7.3.0 (Nova): stream quality — steers adaptive track
+        // selection (HLS/DASH variants); a single-variant stream
+        // simply has nothing to steer.
+        items += qualityMenuLabel()
+        actions += { showQualityDialog() }
         // 7.0.0 (Nova): sleep timer — while one is running the menu
         // doubles as its status (7.1.1: counting down, see
         // sleepTimerMenuLabel).
@@ -1946,9 +2068,17 @@ class PlaybackActivity : FragmentActivity() {
      * falls back to the set-duration label — the callback is due
      * immediately anyway. */
     private fun sleepTimerMenuLabel(): String {
-        if (sleepTimerMinutes <= 0) return getString(R.string.sleep_timer)
+        if (sleepTimerMinutes == 0) return getString(R.string.sleep_timer)
         val remainingMs = sleepDeadlineMillis - System.currentTimeMillis()
-        if (remainingMs <= 0L) return getString(R.string.sleep_timer_on, sleepTimerMinutes)
+        // 7.3.0 (Nova): end-of-programme has no minute count to
+        // fall back on — its overdue label names the mode instead.
+        if (remainingMs <= 0L) {
+            return if (sleepTimerMinutes == SLEEP_END_OF_PROGRAMME) {
+                getString(R.string.sleep_timer_eop_state)
+            } else {
+                getString(R.string.sleep_timer_on, sleepTimerMinutes)
+            }
+        }
         val remainingMin = ((remainingMs + 59_999L) / 60_000L).toInt()
         return getString(R.string.sleep_timer_remaining, remainingMin)
     }
@@ -1957,12 +2087,19 @@ class PlaybackActivity : FragmentActivity() {
      * 7.2.1 (Nova): single-choice with the current duration
      * checked, like the night dim picker — the menu label counts
      * the timer down, and now the picker shows the setting it is
-     * counting from. Picking applies and dismisses, as before. */
+     * counting from. Picking applies and dismisses, as before.
+     * 7.3.0 (Nova): an "End of programme" choice joins the fixed
+     * durations (the SLEEP_END_OF_PROGRAMME sentinel in the same
+     * int list, so the checked-index lookup works unchanged). */
     private fun showSleepTimerDialog() {
-        val options = intArrayOf(0, 15, 30, 60, 90)
+        val options = intArrayOf(0, 15, 30, 60, 90, SLEEP_END_OF_PROGRAMME)
         val labels = options.map { minutes ->
-            if (minutes == 0) getString(R.string.sleep_timer_off)
-            else getString(R.string.sleep_timer_minutes, minutes)
+            when {
+                minutes == 0 -> getString(R.string.sleep_timer_off)
+                minutes == SLEEP_END_OF_PROGRAMME ->
+                    getString(R.string.sleep_timer_end_of_programme)
+                else -> getString(R.string.sleep_timer_minutes, minutes)
+            }
         }.toTypedArray()
         AlertDialog.Builder(this)
             .setTitle(R.string.sleep_timer)
@@ -1975,8 +2112,33 @@ class PlaybackActivity : FragmentActivity() {
 
     /** 7.0.0 (Nova): arm (or clear) the sleep timer. When it fires,
      * playback pauses — the calm option: the TV stays on, the show
-     * stops, and one OK press resumes if the viewer is still awake. */
+     * stops, and one OK press resumes if the viewer is still awake.
+     * 7.3.0 (Nova): SLEEP_END_OF_PROGRAMME arms the same deadline
+     * machinery at the current programme's EPG end time, so it
+     * survives guide visits exactly like a fixed duration. With
+     * no programme info (or a programme already over — a catch-up
+     * replay's programme is in the past) it falls back to a plain
+     * 30 minutes and says so, rather than firing instantly. */
     private fun setSleepTimer(minutes: Int) {
+        if (minutes == SLEEP_END_OF_PROGRAMME) {
+            val stopMillis = nowProgramme?.stopMillis ?: 0L
+            val remaining = stopMillis - System.currentTimeMillis()
+            if (remaining <= 0L) {
+                setSleepTimer(30)
+                Toast.makeText(
+                    this,
+                    R.string.sleep_timer_eop_fallback,
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+            infoHandler.removeCallbacks(sleepRunnable)
+            sleepTimerMinutes = SLEEP_END_OF_PROGRAMME
+            sleepDeadlineMillis = stopMillis
+            infoHandler.postDelayed(sleepRunnable, remaining)
+            Toast.makeText(this, R.string.sleep_timer_eop_set, Toast.LENGTH_SHORT).show()
+            return
+        }
         infoHandler.removeCallbacks(sleepRunnable)
         sleepTimerMinutes = minutes
         if (minutes > 0) {
@@ -2001,6 +2163,150 @@ class PlaybackActivity : FragmentActivity() {
         Toast.makeText(this, R.string.sleep_timer_fired, Toast.LENGTH_LONG).show()
     }
 
+    /** 7.3.0 (Nova): queue the next reconnect attempt for a live
+     * stream that failed or stalled mid-playback. Attempts are
+     * capped and spaced by a growing backoff, the indicator shows
+     * while waiting, and reaching READY clears the slate (see
+     * onPlaybackStateChanged). */
+    private fun scheduleReconnect() {
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return
+        val delay = RECONNECT_BACKOFF_MS[reconnectAttempts]
+        reconnectAttempts++
+        reconnectView.visibility = View.VISIBLE
+        infoHandler.removeCallbacks(reconnectRunnable)
+        infoHandler.postDelayed(reconnectRunnable, delay)
+    }
+
+    /** 7.3.0 (Nova): the stall watchdog fired — the stream has
+     * sat in BUFFERING past the timeout. Counts as a failed
+     * attempt, same as a load error. */
+    private fun onStreamStalled() {
+        val p = player ?: return
+        if (p.playbackState != Player.STATE_BUFFERING) return
+        if (!everPlayed || recordingUri != null || catchupUrl != null) return
+        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            scheduleReconnect()
+        }
+    }
+
+    /** 7.3.0 (Nova): a reconnect attempt comes due — re-prepare
+     * the SAME stream. Aborts quietly if the viewer has moved on:
+     * the player is gone, playback was paused on purpose, or the
+     * stream already recovered on its own. stop() keeps the media
+     * item, so prepare() reloads exactly what was playing. */
+    private fun restartCurrentStream() {
+        val p = player ?: return
+        if (!p.playWhenReady) {
+            cancelReconnect()
+            return
+        }
+        if (p.playbackState == Player.STATE_READY) {
+            cancelReconnect()
+            return
+        }
+        p.stop()
+        p.prepare()
+        p.play()
+    }
+
+    /** 7.3.0 (Nova): forget all reconnect state — pending retry,
+     * stall watchdog, attempt count and the indicator. Called on
+     * recovery, channel switch, pause and onStop. */
+    private fun cancelReconnect() {
+        infoHandler.removeCallbacks(reconnectRunnable)
+        infoHandler.removeCallbacks(stallWatchdogRunnable)
+        reconnectAttempts = 0
+        if (::reconnectView.isInitialized) reconnectView.visibility = View.GONE
+    }
+
+    /** 7.3.0 (Nova): the options-menu label for audio-only mode,
+     * carrying its state like the other toggles. */
+    private fun audioOnlyMenuLabel(): String = getString(
+        R.string.audio_only_state,
+        if (audioOnlyOn) getString(R.string.state_on)
+        else getString(R.string.sleep_timer_off)
+    )
+
+    /** 7.3.0 (Nova): blank / restore the picture for audio-only
+     * mode. Only the black cover changes visibility — the player
+     * is never paused, stopped or rebuilt, so the sound runs on
+     * uninterrupted. */
+    private fun setAudioOnly(on: Boolean) {
+        audioOnlyOn = on
+        audioOnlyView.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) {
+            Toast.makeText(this, R.string.audio_only_on_toast, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 7.3.0 (Nova): the options-menu label for stream quality,
+     * carrying the current mode. The label names the mode only —
+     * on a single-variant stream every mode plays the same track,
+     * and the label must not pretend otherwise. */
+    private fun qualityMenuLabel(): String = getString(
+        R.string.stream_quality_state,
+        qualityModeName(qualityMode)
+    )
+
+    private fun qualityModeName(mode: Int): String = getString(
+        when (mode) {
+            AppSettings.QUALITY_HIGH -> R.string.quality_high
+            AppSettings.QUALITY_LOW -> R.string.quality_low
+            else -> R.string.quality_auto
+        }
+    )
+
+    /** 7.3.0 (Nova): pick a stream quality mode. Single-choice
+     * with the current mode checked, like the other pickers.
+     * Picking persists the mode and re-points the live track
+     * selector — no restart, the player re-selects tracks under
+     * the new constraints on its own. */
+    private fun showQualityDialog() {
+        val options = intArrayOf(
+            AppSettings.QUALITY_AUTO,
+            AppSettings.QUALITY_HIGH,
+            AppSettings.QUALITY_LOW
+        )
+        val labels = options.map { qualityModeName(it) }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.stream_quality)
+            .setSingleChoiceItems(labels, options.indexOf(qualityMode)) { dialog, which ->
+                setQualityMode(options[which])
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    /** 7.3.0 (Nova): persist a quality mode and apply it to the
+     * running player's selector (if any). */
+    private fun setQualityMode(mode: Int) {
+        qualityMode = mode
+        AppSettings.setQualityMode(this, mode)
+        trackSelector?.let { applyQualityMode(it) }
+    }
+
+    /** 7.3.0 (Nova): translate a quality mode into track
+     * selection parameters. AUTO restores the player's default
+     * adaptive behaviour outright; HIGH forces the highest
+     * supported variant; LOW caps the video bitrate so adaptive
+     * selection settles on a low variant. Applied to a fresh
+     * selector in initializePlayer and live on a mode change. */
+    private fun applyQualityMode(selector: DefaultTrackSelector) {
+        val builder = selector.parameters.buildUpon()
+        when (qualityMode) {
+            AppSettings.QUALITY_HIGH -> builder
+                .setMaxVideoBitrate(Int.MAX_VALUE)
+                .setForceHighestSupportedBitrate(true)
+            AppSettings.QUALITY_LOW -> builder
+                .setMaxVideoBitrate(LOW_QUALITY_MAX_BITRATE)
+                .setForceHighestSupportedBitrate(false)
+            else -> builder
+                .setMaxVideoBitrate(Int.MAX_VALUE)
+                .setForceHighestSupportedBitrate(false)
+        }
+        selector.setParameters(builder.build())
+    }
+
     override fun onStop() {
         super.onStop()
         infoHandler.removeCallbacks(hideInfoRunnable)
@@ -2011,6 +2317,12 @@ class PlaybackActivity : FragmentActivity() {
         // 7.2.0 (Nova): the stream info updater stops too; onStart
         // restarts it if the overlay is still toggled on.
         infoHandler.removeCallbacks(streamInfoRunnable)
+        // 7.3.0 (Nova): reconnect callbacks stop too — a pending
+        // retry must not fire into a stopped activity. The attempt
+        // count itself is left alone; the rebuilt player's first
+        // READY or error sorts it out.
+        infoHandler.removeCallbacks(reconnectRunnable)
+        infoHandler.removeCallbacks(stallWatchdogRunnable)
         // 7.1.0 (Nova): stream warm-ups stop with playback.
         streamPrefetcher.cancel()
         overlay.visibility = View.GONE
