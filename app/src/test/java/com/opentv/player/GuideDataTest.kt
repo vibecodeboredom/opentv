@@ -358,22 +358,47 @@ class GuideDataTest {
     }
 
     @Test
-    fun tonightWindowAfter11PmIsTomorrow() {
+    fun tonightWindowAfter11PmIsStillToday() {
         withUtc {
-            // 2026-11-07 23:30 UTC -> tomorrow 18:00–23:00 UTC.
+            // 2026-11-07 23:30 UTC -> still today 18:00–23:00 UTC
+            // (the prime time that just aired, not tomorrow's).
             val (start, hours) = GuideData.tonightWindow(1_794_094_200_000L)
-            assertEquals(1_794_160_800_000L, start)
+            assertEquals(1_794_074_400_000L, start)
             assertEquals(5, hours)
         }
     }
 
     @Test
-    fun tonightWindowAt11PmIsTomorrow() {
+    fun tonightWindowAt11PmIsStillToday() {
         withUtc {
-            // 2026-11-07 23:00 UTC exactly -> tomorrow 18:00 UTC.
+            // 2026-11-07 23:00 UTC exactly -> still today 18:00 UTC.
             val (start, hours) = GuideData.tonightWindow(1_794_092_400_000L)
-            assertEquals(1_794_160_800_000L, start)
+            assertEquals(1_794_074_400_000L, start)
             assertEquals(5, hours)
         }
+    }
+
+    @Test
+    fun dayAnchorPlus6IsTheMaxDayOffset() {
+        // 2026-11-07 10:00 UTC -> anchor +6 days.
+        val now = 1_794_045_600_000L
+        assertEquals(1_794_045_600_000L + 6 * 24 * hour, GuideData.dayAnchorMillis(now, 6))
+    }
+
+    @Test
+    fun tonightWindowAtExactly6Pm() {
+        withUtc {
+            // 2026-11-07 18:00 UTC exactly -> tonight starts now.
+            val (start, hours) = GuideData.tonightWindow(1_794_074_400_000L)
+            assertEquals(1_794_074_400_000L, start)
+            assertEquals(5, hours)
+        }
+    }
+
+    @Test
+    fun dayAnchorAtMidnight() {
+        // 2026-11-07 00:00 UTC -> anchor is midnight itself.
+        val now = 1_794_009_600_000L
+        assertEquals(1_794_009_600_000L, GuideData.dayAnchorMillis(now, 0))
     }
 }

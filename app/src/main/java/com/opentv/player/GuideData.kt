@@ -29,20 +29,23 @@ object GuideData {
 
     /** 7.2.0: the guide window's anchor — the top of the current
      * hour, shifted by whole days for day navigation (0 = today,
-     * +1 = tomorrow). The window is [pastHours] back from the
-     * anchor and the forward hours ahead of it. */
+     * +1 = tomorrow). Calendar day math, not a fixed 24 h — a
+     * daylight-saving day is 23 or 25 hours long. The window is
+     * [pastHours] back from the anchor and the forward hours ahead
+     * of it. */
     fun dayAnchorMillis(nowMillis: Long, dayOffset: Int): Long {
-        val day = 24L * 60 * 60 * 1000
-        return windowStartMillis(nowMillis) + dayOffset * day
+        val cal = calendarFor(windowStartMillis(nowMillis))
+        cal.add(java.util.Calendar.DAY_OF_YEAR, dayOffset)
+        return cal.timeInMillis
     }
 
     /** 7.2.0: tonight's prime-time window, 6–11 PM local time.
-     * After 11 PM tonight is over, so it means tomorrow 6–11 PM.
-     * Returns (window start, window hours). */
+     * Always today's 6–11 PM — after 11 PM it is the prime time
+     * that just aired (shown with the past styling), so the header
+     * never says "Tonight" about tomorrow's date. Returns
+     * (window start, window hours). */
     fun tonightWindow(nowMillis: Long): Pair<Long, Int> {
-        val hour = calendarFor(nowMillis).get(java.util.Calendar.HOUR_OF_DAY)
-        var dayStart = midnightMillis(nowMillis)
-        if (hour >= TONIGHT_END_HOUR) dayStart += 24L * 60 * 60 * 1000
+        val dayStart = midnightMillis(nowMillis)
         return Pair(dayStart + TONIGHT_START_HOUR * 60L * 60 * 1000, TONIGHT_HOURS)
     }
 
@@ -58,7 +61,6 @@ object GuideData {
 
     /** Tonight's prime-time hours (7.2.0). */
     const val TONIGHT_START_HOUR = 18
-    const val TONIGHT_END_HOUR = 23
     const val TONIGHT_HOURS = 5
 
     /** Build the row for one channel: its programmes inside the window,
