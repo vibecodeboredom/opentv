@@ -78,11 +78,15 @@ class BrowseFragment : BrowseSupportFragment() {
         val favorites = PlaylistRepository.favorites(requireContext())
         // Single pass for the favorites row and the group rows — the
         // old code scanned the whole playlist three times (two filters
-        // + groupBy) to build the same rows.
+        // + groupBy) to build the same rows. 7.0.0 (Nova): the same
+        // pass also fills an id lookup for the Recently watched row,
+        // so it costs no extra scan either.
         val favoriteChannels = mutableListOf<Channel>()
         val grouped = linkedMapOf<String, MutableList<Channel>>()
+        val visibleById = HashMap<String, Channel>()
         for (ch in channels) {
             if (hidden.contains(ch.id)) continue
+            visibleById[ch.id] = ch
             if (favorites.contains(ch.id)) favoriteChannels += ch
             (grouped.getOrPut(ch.group) { mutableListOf() }) += ch
         }
@@ -90,6 +94,20 @@ class BrowseFragment : BrowseSupportFragment() {
             val favAdapter = ArrayObjectAdapter(ChannelPresenter())
             favoriteChannels.forEach { favAdapter.add(it) }
             rowsAdapter.add(ListRow(HeaderItem(getString(R.string.favorites)), favAdapter))
+        }
+
+        // 7.0.0 (Nova): Recently watched, right under Favorites —
+        // the history was already tracked for the playback strip and
+        // the sidebar, but the home screen never showed it. Hidden
+        // channels drop out via the visible-only lookup above.
+        val recentChannels = PlaylistRepository.recentChannelIds(requireContext())
+            .mapNotNull { visibleById[it] }
+        if (recentChannels.isNotEmpty()) {
+            val recentAdapter = ArrayObjectAdapter(ChannelPresenter())
+            recentChannels.forEach { recentAdapter.add(it) }
+            rowsAdapter.add(
+                ListRow(HeaderItem(getString(R.string.recently_watched)), recentAdapter)
+            )
         }
 
         for ((group, groupChannels) in grouped) {

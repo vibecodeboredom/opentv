@@ -981,6 +981,14 @@ class GuideActivity : FragmentActivity() {
                     titleView.setTextColor(0xFF121218.toInt())
                     nameView.setTextColor(0xFF86C739.toInt())
                     showDetails(row.channel, programme)
+                    // 7.0.0 (Nova): guide memory — remember where the
+                    // user is browsing, so reopening the guide (from
+                    // the browse menu / mobile home, where no channel
+                    // is playing underneath) returns here instead of
+                    // resetting to the top of the grid.
+                    PlaylistRepository.setLastGuideFocus(
+                        this@GuideActivity, row.channel.id, programme.startMillis
+                    )
                     // Focus nearing the last built row: append more
                     // rows so Down never runs out of grid below.
                     appendRowsIfNearEnd(rowIndex)
@@ -1139,10 +1147,38 @@ class GuideActivity : FragmentActivity() {
                 appendRows(idx + 1 - builtRowCount)
             }
         }
+        // 7.0.0 (Nova): guide memory. Opened from playback, the guide
+        // lands on the playing channel (above). Opened with NO channel
+        // playing underneath (browse menu, mobile home), it used to
+        // reset to the top every time — now it returns to the channel
+        // + programme last focused here, building rows up to it the
+        // same way the current-channel path does. Falls through to
+        // the normal first-now landing when there is no remembered
+        // position or its channel no longer has a row.
+        val remembered = if (currentChannelId == null) {
+            PlaylistRepository.lastGuideFocus(this)
+        } else {
+            null
+        }
+        val rememberedIdx = remembered?.let { rowIndexOf(it.first) } ?: -1
+        if (rememberedIdx >= 0 && rememberedIdx >= builtRowCount) {
+            appendRows(rememberedIdx + 1 - builtRowCount)
+        }
         // Show the current channel's now programme in the details
         // header when we have it, else the first programme on now.
         (currentChannelNow ?: firstNow)?.let { (ch, prog) -> showDetails(ch, prog) }
 
+        if (remembered != null && rememberedIdx >= 0) {
+            // Focus the remembered programme's card (its focus
+            // listener fills the details header); when that exact
+            // programme is gone (window moved on), land on the first
+            // card of its channel's row instead.
+            container.post {
+                if (!focusProgrammeAt(remembered.first, remembered.second)) {
+                    firstCardOfRow(rememberedIdx)?.requestFocus()
+                }
+            }
+        } else {
         // Focus the current channel's now card when we have it, else
         // the first now card — so the guide opens with a cell focused
         // and a long-press OK lands on a programme (the side menu),
@@ -1167,6 +1203,7 @@ class GuideActivity : FragmentActivity() {
                     hscroll.post { hscroll.scrollTo(targetX, 0) }
                 }
             }
+        }
         }
 
         // Position the red now-line at the current time, spanning all rows.

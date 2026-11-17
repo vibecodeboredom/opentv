@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OpenTV</string>
+    <string name="app_name">OpenTV Nova</string>
     <string name="loading">Loading channels…</string>
     <string name="loading_playlist">Loading playlist…</string>
     <string name="loading_guide">Loading guide…</string>
@@ -165,6 +165,15 @@
     <string name="playlist_disabled_hint">This playlist is disabled — long-press it to activate it.</string>
     <!-- Mobile (6.0.0-rc1): touch home screen + playback. -->
     <string name="mobile_continue_watching">▶  Continue watching</string>
+    <!-- Nova 7.0.0: home-screen recents row + playback sleep timer. -->
+    <string name="recently_watched">Recently watched</string>
+    <string name="sleep_timer">Sleep timer</string>
+    <string name="sleep_timer_on">Sleep timer: %1$d min</string>
+    <string name="sleep_timer_off">Off</string>
+    <string name="sleep_timer_minutes">%1$d minutes</string>
+    <string name="sleep_timer_set">Sleep timer set — playback pauses in %1$d min</string>
+    <string name="sleep_timer_off_toast">Sleep timer off</string>
+    <string name="sleep_timer_fired">Sleep timer — playback paused</string>
     <string name="mobile_refresh">↻ Refresh</string>
     <string name="mobile_retry">Retry</string>
     <string name="mobile_results">Results (%1$d)</string>

@@ -164,6 +164,13 @@ class PlaybackActivity : FragmentActivity() {
         showOptions()
     }
     private var longPressFired = false
+    /** 7.0.0 (Nova): sleep timer — the minutes chosen (0 = off), the
+     * wall-clock deadline it fires at, and the runnable that pauses
+     * playback. The deadline survives a guide visit: onStop removes
+     * the callback, onStart re-arms from the deadline. */
+    private var sleepTimerMinutes: Int = 0
+    private var sleepDeadlineMillis: Long = 0L
+    private val sleepRunnable = Runnable { onSleepTimerFired() }
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
@@ -323,54 +330,71 @@ class PlaybackActivity : FragmentActivity() {
 
         // Best-effort EPG: show Now / Next for this channel once it loads.
         if (ch != null) {
-            lifecycleScope.launch {
-                val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
-                val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
-                liveNow = now
-                liveNext = next
-                // 5.0.0 — catch-up: the replayed programme is "now" and
-                // the live programme is "next" (the way back to live).
-                if (catchupUrl != null) {
-                    nowProgramme = catchupProgramme()
-                    nextProgramme = now
-                } else {
-                    nowProgramme = now
-                    nextProgramme = next
+            refreshNowNext(briefInfo)
+        }
+    }
+
+    /**
+     * Load the EPG and fill in Now / Next for the current channel:
+     * refresh the info overlay if it's up, flash it briefly on a
+     * channel up/down switch, or toast the now/next otherwise.
+     * Extracted from onCreate in 7.0.0 (Nova) — an in-place channel
+     * switch needs the exact same fill-in for the new channel.
+     */
+    private fun refreshNowNext(briefInfo: Boolean) {
+        val ch = channel ?: return
+        val targetId = ch.id
+        lifecycleScope.launch {
+            val epg = PlaylistRepository.loadEpg(this@PlaybackActivity)
+            // 7.0.0 (Nova): dropped when the user has already zapped
+            // on — the newer switch started its own fill-in, and a
+            // stale one must not overwrite the new channel's info.
+            if (channel?.id != targetId) return@launch
+            val (now, next) = EpgParser.nowAndNext(epg[ch.tvgId])
+            liveNow = now
+            liveNext = next
+            // 5.0.0 — catch-up: the replayed programme is "now" and
+            // the live programme is "next" (the way back to live).
+            if (catchupUrl != null) {
+                nowProgramme = catchupProgramme()
+                nextProgramme = now
+            } else {
+                nowProgramme = now
+                nextProgramme = next
+            }
+            if (overlay.visibility == View.VISIBLE) {
+                // The overlay was opened before the EPG finished
+                // loading and still shows "No information" — refresh
+                // it with the real now/next data, keeping its
+                // current 5s/10s hide mode.
+                showChannelInfo(brief = overlayBrief)
+            } else if (briefInfo) {
+                // Channel up/down: flash the info overlay briefly
+                // with the real now/next data, instead of the toast
+                // (the overlay shows the same info). Only if the
+                // user hasn't already opened something else while
+                // the EPG was loading — a late flash must not yank
+                // the sidebar away or shorten a normal overlay.
+                if (!channelSidebar.isVisible() &&
+                    overlay.visibility != View.VISIBLE
+                ) {
+                    showChannelInfo(brief = true)
                 }
-                if (overlay.visibility == View.VISIBLE) {
-                    // The overlay was opened before the EPG finished
-                    // loading and still shows "No information" — refresh
-                    // it with the real now/next data, keeping its
-                    // current 5s/10s hide mode.
-                    showChannelInfo(brief = overlayBrief)
-                } else if (briefInfo) {
-                    // Channel up/down: flash the info overlay briefly
-                    // with the real now/next data, instead of the toast
-                    // (the overlay shows the same info). Only if the
-                    // user hasn't already opened something else while
-                    // the EPG was loading — a late flash must not yank
-                    // the sidebar away or shorten a normal overlay.
-                    if (!channelSidebar.isVisible() &&
-                        overlay.visibility != View.VISIBLE
-                    ) {
-                        showChannelInfo(brief = true)
+            } else if (catchupUrl != null) {
+                Toast.makeText(
+                    this@PlaybackActivity,
+                    getString(R.string.catchup_playing, catchupTitle ?: ""),
+                    Toast.LENGTH_LONG
+                ).show()
+            } else if (now != null || next != null) {
+                val text = buildString {
+                    now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
+                    next?.let {
+                        if (isNotEmpty()) append("  •  ")
+                        append("${getString(R.string.next_up)}: ${it.title}")
                     }
-                } else if (catchupUrl != null) {
-                    Toast.makeText(
-                        this@PlaybackActivity,
-                        getString(R.string.catchup_playing, catchupTitle ?: ""),
-                        Toast.LENGTH_LONG
-                    ).show()
-                } else if (now != null || next != null) {
-                    val text = buildString {
-                        now?.let { append("${getString(R.string.now_playing)}: ${it.title}") }
-                        next?.let {
-                            if (isNotEmpty()) append("  •  ")
-                            append("${getString(R.string.next_up)}: ${it.title}")
-                        }
-                    }
-                    Toast.makeText(this@PlaybackActivity, text, Toast.LENGTH_LONG).show()
                 }
+                Toast.makeText(this@PlaybackActivity, text, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -612,6 +636,19 @@ class PlaybackActivity : FragmentActivity() {
         // Rebuild the player if it was released in onStop (e.g. after
         // visiting the guide and coming back).
         initializePlayer()
+        // 7.0.0 (Nova): re-arm the sleep timer across a guide visit —
+        // onStop removed the callback, but the deadline survives, so
+        // a timer set before opening the guide still fires on time
+        // (or immediately, if it came due while away).
+        if (sleepDeadlineMillis > 0L) {
+            val remaining = sleepDeadlineMillis - System.currentTimeMillis()
+            infoHandler.removeCallbacks(sleepRunnable)
+            if (remaining > 0L) {
+                infoHandler.postDelayed(sleepRunnable, remaining)
+            } else {
+                onSleepTimerFired()
+            }
+        }
     }
 
     override fun onResume() {
@@ -1220,16 +1257,80 @@ class PlaybackActivity : FragmentActivity() {
         stripTiles.firstOrNull { it.isFocused }?.performClick()
     }
 
-    /** Switch playback to the given channel (used by a recent-channel tile). */
-    private fun switchToChannel(pick: Channel, briefInfo: Boolean = false) {
+    /**
+     * Switch playback to the given channel (sidebar, strip recents,
+     * channel up/down, dead-stream auto-retry).
+     *
+     * 7.0.0 (Nova): the switch happens IN PLACE. The old code started
+     * a fresh PlaybackActivity and finished this one, so every zap
+     * paid a full activity create, a from-scratch ExoPlayer build and
+     * an EPG reload before the first frame. Now the running player is
+     * re-pointed at the new channel and only the per-channel state
+     * (now/next, catch-up, retry count, session clock) resets — the
+     * same trick goLive() already used for catch-up. Recording
+     * playback keeps the restart path: it has no channel list, and
+     * leaving it for a live channel is a mode change, not a zap.
+     */
+    private fun switchToChannel(
+        pick: Channel,
+        briefInfo: Boolean = false,
+        retryCount: Int = 0
+    ) {
         hideOverlay()
         hideSidebar()
-        val intent = Intent(this, PlaybackActivity::class.java)
-        intent.putExtra(EXTRA_CHANNEL, pick)
-        if (briefInfo) intent.putExtra(EXTRA_SHOW_BRIEF_INFO, true)
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        startActivity(intent)
-        finish()
+        if (recordingUri != null) {
+            val intent = Intent(this, PlaybackActivity::class.java)
+            intent.putExtra(EXTRA_CHANNEL, pick)
+            if (briefInfo) intent.putExtra(EXTRA_SHOW_BRIEF_INFO, true)
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            startActivity(intent)
+            finish()
+            return
+        }
+        // Log the outgoing channel's watch session — onStop does this
+        // when the activity leaves, but an in-place switch never stops.
+        logWatchSession()
+        channel = pick
+        // A zap always goes live: catch-up state belongs to the old
+        // channel's replay, never to the new channel.
+        catchupUrl = null
+        catchupTitle = null
+        catchupStartMillis = 0L
+        catchupStopMillis = 0L
+        catchupFallbackTried = false
+        nowProgramme = null
+        nextProgramme = null
+        liveNow = null
+        liveNext = null
+        everPlayed = false
+        autoRetrying = false
+        this.retryCount = retryCount
+        guideLaunched = false
+        // Keep the intent honest: the player listener reads
+        // EXTRA_SHOW_BRIEF_INFO from it when playback starts.
+        val newIntent = Intent(this, PlaybackActivity::class.java)
+        newIntent.putExtra(EXTRA_CHANNEL, pick)
+        if (briefInfo) newIntent.putExtra(EXTRA_SHOW_BRIEF_INFO, true)
+        if (retryCount > 0) newIntent.putExtra(EXTRA_RETRY_COUNT, retryCount)
+        setIntent(newIntent)
+        val p = player
+        if (p != null) {
+            val metadata = MediaMetadata.Builder()
+                .setTitle(pick.name)
+                .setSubtitle(pick.group)
+                .build()
+            p.setMediaItem(
+                MediaItem.Builder().setUri(pick.url).setMediaMetadata(metadata).build()
+            )
+            p.prepare()
+            p.play()
+            sessionStartMillis = System.currentTimeMillis()
+        } else {
+            initializePlayer()
+        }
+        favoritesCache = PlaylistRepository.favorites(this)
+        updateTransportIcons()
+        refreshNowNext(briefInfo)
     }
 
     /** 5.0.0: leave a catch-up replay and return to the live stream
@@ -1291,12 +1392,9 @@ class PlaybackActivity : FragmentActivity() {
                 found
             }
             if (pick != null) {
-                val intent = Intent(this@PlaybackActivity, PlaybackActivity::class.java)
-                intent.putExtra(EXTRA_CHANNEL, pick)
-                intent.putExtra(EXTRA_RETRY_COUNT, retryCount + 1)
-                intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                startActivity(intent)
-                finish()
+                // 7.0.0 (Nova): in-place switch with the retry count
+                // carried over (was a full activity restart).
+                switchToChannel(pick, retryCount = retryCount + 1)
             } else {
                 autoRetrying = false
                 Toast.makeText(
@@ -1352,6 +1450,13 @@ class PlaybackActivity : FragmentActivity() {
             hasRecording -> getString(R.string.record_again)
             else -> getString(R.string.record_channel)
         }
+        // 7.0.0 (Nova): sleep timer — shows the set duration while
+        // one is running, so the menu doubles as its status.
+        items += if (sleepTimerMinutes > 0) {
+            getString(R.string.sleep_timer_on, sleepTimerMinutes)
+        } else {
+            getString(R.string.sleep_timer)
+        }
         AlertDialog.Builder(this)
             .setTitle(ch.name)
             .setItems(items.toTypedArray()) { _, which ->
@@ -1378,15 +1483,60 @@ class PlaybackActivity : FragmentActivity() {
                         }
                         updateTransportIcons()
                     }
+                    2 -> showSleepTimerDialog()
                 }
             }
             .show()
+    }
+
+    /** 7.0.0 (Nova): pick a sleep-timer duration (or turn it off). */
+    private fun showSleepTimerDialog() {
+        val options = intArrayOf(0, 15, 30, 60, 90)
+        val labels = options.map { minutes ->
+            if (minutes == 0) getString(R.string.sleep_timer_off)
+            else getString(R.string.sleep_timer_minutes, minutes)
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.sleep_timer)
+            .setItems(labels) { _, which -> setSleepTimer(options[which]) }
+            .show()
+    }
+
+    /** 7.0.0 (Nova): arm (or clear) the sleep timer. When it fires,
+     * playback pauses — the calm option: the TV stays on, the show
+     * stops, and one OK press resumes if the viewer is still awake. */
+    private fun setSleepTimer(minutes: Int) {
+        infoHandler.removeCallbacks(sleepRunnable)
+        sleepTimerMinutes = minutes
+        if (minutes > 0) {
+            sleepDeadlineMillis = System.currentTimeMillis() + minutes * 60_000L
+            infoHandler.postDelayed(sleepRunnable, minutes * 60_000L)
+            Toast.makeText(
+                this,
+                getString(R.string.sleep_timer_set, minutes),
+                Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            sleepDeadlineMillis = 0L
+            Toast.makeText(this, R.string.sleep_timer_off_toast, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 7.0.0 (Nova): the sleep timer came due — pause and say so. */
+    private fun onSleepTimerFired() {
+        sleepTimerMinutes = 0
+        sleepDeadlineMillis = 0L
+        player?.pause()
+        Toast.makeText(this, R.string.sleep_timer_fired, Toast.LENGTH_LONG).show()
     }
 
     override fun onStop() {
         super.onStop()
         infoHandler.removeCallbacks(hideInfoRunnable)
         infoHandler.removeCallbacks(longPressRunnable)
+        // 7.0.0 (Nova): the sleep timer's callback goes too — its
+        // deadline is kept, and onStart re-arms it (see there).
+        infoHandler.removeCallbacks(sleepRunnable)
         overlay.visibility = View.GONE
         // 6.0.0-rc3: the mobile overlay group hides instantly here
         // (no fade — the activity is leaving). Otherwise the Guide
@@ -1401,6 +1551,17 @@ class PlaybackActivity : FragmentActivity() {
         }
         hideSidebar()
         // Log the watch session (local only, never shared).
+        logWatchSession()
+        player?.release()
+        player = null
+    }
+
+    /** Log the current watch session to the local statistics and
+     * reset the session clock. Called from onStop, and from an
+     * in-place channel switch (7.0.0, Nova) — the switch never
+     * stops the activity, so without this the outgoing channel's
+     * session would be lost (or credited to the new channel). */
+    private fun logWatchSession() {
         val watchedMillis = System.currentTimeMillis() - sessionStartMillis
         if (sessionStartMillis > 0L && watchedMillis > 0L) {
             val id = channel?.id ?: recordingId ?: "unknown"
@@ -1408,7 +1569,5 @@ class PlaybackActivity : FragmentActivity() {
             StatsManager.logWatchSession(this, id, name, watchedMillis)
         }
         sessionStartMillis = 0L
-        player?.release()
-        player = null
     }
 }

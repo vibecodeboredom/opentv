@@ -59,8 +59,15 @@ object PlaylistRepository {
     private const val KEY_RECENT_SEARCHES = "recent_searches"
     /** Id of the last channel that actually played (4.6.0: resume it on launch). */
     private const val KEY_LAST_CHANNEL = "last_channel"
-    /** The overlay's channel strip shows this many most recent channels. */
-    private const val MAX_RECENT = 3
+    /** 7.0.0 (Nova): the guide position last focused (channel id +
+     * programme start), so the guide can return to it on open. */
+    private const val KEY_GUIDE_FOCUS_CHANNEL = "guide_focus_channel"
+    private const val KEY_GUIDE_FOCUS_START = "guide_focus_start"
+    /** How many recent channels are remembered. The overlay strip
+     * shows the first 3; 7.0.0 (Nova) keeps 12 so the home screen's
+     * Recently watched row and the sidebar History group have a
+     * real history to show. */
+    private const val MAX_RECENT = 12
     /** Guide search remembers this many past queries. */
     private const val MAX_RECENT_SEARCHES = 8
     private const val CACHE_FILE = "playlist.m3u"
@@ -490,13 +497,13 @@ object PlaylistRepository {
         prefs(context).edit().remove(KEY_HIDDEN).apply()
     }
 
-    /** Most recently watched channel ids, most recent first (max 3). */
+    /** Most recently watched channel ids, most recent first (max 12). */
     fun recentChannelIds(context: Context): List<String> {
         val raw = prefs(context).getString(KEY_RECENT, "") ?: ""
         return raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    /** Record a channel as most recently watched (deduped, max 3). */
+    /** Record a channel as most recently watched (deduped, max 12). */
     fun recordRecentChannel(context: Context, channelId: String) {
         val current = recentChannelIds(context).toMutableList()
         current.remove(channelId)
@@ -549,6 +556,29 @@ object PlaylistRepository {
     /** Remember the last channel that actually played (resumed on launch). */
     fun setLastChannelId(context: Context, channelId: String) {
         prefs(context).edit().putString(KEY_LAST_CHANNEL, channelId).apply()
+    }
+
+    /**
+     * 7.0.0 (Nova) — guide memory: the channel + programme start last
+     * focused in the TV guide, or null when the guide was never used
+     * (or the programme's start wasn't recorded). The guide restores
+     * this position when it is opened without a playing channel
+     * underneath (browse menu / mobile home), instead of always
+     * resetting to the top of the grid.
+     */
+    fun lastGuideFocus(context: Context): Pair<String, Long>? {
+        val channelId = prefs(context).getString(KEY_GUIDE_FOCUS_CHANNEL, null)
+            ?: return null
+        val start = prefs(context).getLong(KEY_GUIDE_FOCUS_START, 0L)
+        return if (start > 0L) channelId to start else null
+    }
+
+    /** Remember the guide position (called on programme-card focus). */
+    fun setLastGuideFocus(context: Context, channelId: String, startMillis: Long) {
+        prefs(context).edit()
+            .putString(KEY_GUIDE_FOCUS_CHANNEL, channelId)
+            .putLong(KEY_GUIDE_FOCUS_START, startMillis)
+            .apply()
     }
 
     /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */
