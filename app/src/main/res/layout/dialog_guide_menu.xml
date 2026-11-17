@@ -96,6 +96,22 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.0.0 (Nova): pending programme reminders — the list is
+         reachable from any programme's menu, not just a reminded
+         one, so it sits with Settings at the top. -->
+    <TextView
+        android:id="@+id/menu_my_reminders"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_my_reminders"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <TextView
         android:id="@+id/menu_programme_title"
         android:layout_width="match_parent"
@@ -135,6 +151,21 @@
         android:layout_height="wrap_content"
         android:background="@drawable/guide_menu_item_bg"
         android:text="@string/menu_custom_recording"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.0.0 (Nova): set / remove a reminder for this programme.
+         Hidden in code for programmes that are not in the future
+         (or are "No information" placeholders). -->
+    <TextView
+        android:id="@+id/menu_reminder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_set_reminder"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:padding="16dp"

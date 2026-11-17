@@ -213,6 +213,82 @@
         android:visibility="gone" />
 </LinearLayout>
 
+    <!-- 8.0.0 (Nova): now-playing bar — the channel that was playing
+         when the guide opened, with the programme on now and a live
+         progress bar, pinned to the bottom of the screen. A true
+         video mini-player would need the player shared across
+         activities; playback is activity-owned and released when
+         the guide opens, so the bar carries the information instead.
+         Tapping it returns to playback (same as BACK). Populated
+         and ticked in code; hidden when the guide was opened with
+         no channel playing underneath. -->
+    <LinearLayout
+        android:id="@+id/guide_now_playing"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="#F2161616"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:focusable="true"
+        android:clickable="true"
+        android:contentDescription="@string/now_playing_cd"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="▶"
+            android:textColor="#86C739"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/guide_np_channel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/guide_np_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:textColor="#C9C9D1"
+            android:textSize="16sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/guide_np_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:textColor="#9A9AA3"
+            android:textSize="14sp"
+            android:maxLines="1" />
+
+        <ProgressBar
+            android:id="@+id/guide_np_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="140dp"
+            android:layout_height="6dp"
+            android:layout_marginStart="12dp"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@drawable/guide_progress_drawable" />
+    </LinearLayout>
+
     <!-- Left sidebar scrim (4.6.2): 60% black over the guide. -->
     <View
         android:id="@+id/guide_sidebar_scrim"

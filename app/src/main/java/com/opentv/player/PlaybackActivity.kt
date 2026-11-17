@@ -12,6 +12,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -130,6 +131,10 @@ class PlaybackActivity : FragmentActivity() {
         /** 7.3.1 (Nova): how long the audio-only hint stays up
          * on the black cover before it fades out. */
         private const val AUDIO_ONLY_HINT_MS = 4_000L
+        /** 8.0.0 (Nova): the sleep fade-out window — in the last
+         * minute before a sleep deadline the dim veil rises to
+         * black, so playback pauses out of a fade, not a cut. */
+        private const val SLEEP_FADE_MS = 60_000L
         /** Overlay auto-hides after this long with no key press. */
         private const val OVERLAY_TIMEOUT_MS = 10_000L
         /** 6.0.0-rc3: mobile overlay auto-hide — 5s idle, then it
@@ -203,6 +208,21 @@ class PlaybackActivity : FragmentActivity() {
     private var sleepTimerMinutes: Int = 0
     private var sleepDeadlineMillis: Long = 0L
     private val sleepRunnable = Runnable { onSleepTimerFired() }
+    /** 8.0.0 (Nova): the sleep fade-out — a runnable that starts
+     * the dim veil's rise to black SLEEP_FADE_MS before the sleep
+     * deadline, and a flag for "the veil is currently raised by
+     * the fade" (above whatever night dim says), so a cancel or a
+     * resume can put the veil back exactly where night dim had it.
+     * The fade drives dimView's alpha directly — never setDim —
+     * so the fade levels are never persisted as a dim choice. */
+    private val sleepFadeRunnable = Runnable { startSleepFade() }
+    private var sleepFaded: Boolean = false
+    /** 8.0.0 (Nova): programme reminder prompts while watching.
+     * Watch now zaps to the reminded channel in place, like a
+     * channel picked in the sidebar. */
+    private val reminderWatcher = ReminderWatcher(this) { reminder ->
+        watchReminderChannel(reminder)
+    }
     /** 7.1.0 (Nova): warms the previous / next channels' streams
      * while this one plays, so a zap to them starts faster. */
     private val streamPrefetcher = StreamPrefetcher()
@@ -745,6 +765,11 @@ class PlaybackActivity : FragmentActivity() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // 8.0.0 (Nova): playback resuming after a sleep
+                // fade-out puts the veil back to its night-dim
+                // level — the fade belonged to the timer that
+                // paused, not to the show now playing.
+                if (isPlaying && sleepFaded) setDim(dimPercent)
                 // Paused: show the centred play cluster; playing: hide it.
                 // The transport play/pause icon follows the same state.
                 pausedCluster.visibility = if (isPlaying) View.GONE else View.VISIBLE
@@ -832,10 +857,17 @@ class PlaybackActivity : FragmentActivity() {
             infoHandler.removeCallbacks(sleepRunnable)
             if (remaining > 0L) {
                 infoHandler.postDelayed(sleepRunnable, remaining)
+                // 8.0.0 (Nova): the fade re-arms with the timer —
+                // a deadline that fell inside the fade window while
+                // the viewer was in the guide starts its fade now.
+                scheduleSleepFade()
             } else {
                 onSleepTimerFired()
             }
         }
+        // 8.0.0 (Nova): reminder prompts run while watching (see
+        // ReminderWatcher); onStop stops them.
+        reminderWatcher.start()
         // 7.2.0 (Nova): the stream info updater stops in onStop —
         // restart it if the overlay is still toggled on.
         if (streamInfoOn) {
@@ -1728,6 +1760,40 @@ class PlaybackActivity : FragmentActivity() {
         if (briefInfo) showChannelInfo(brief = true)
     }
 
+    /** 8.0.0 (Nova): a reminder prompt's Watch now — zap to the
+     * reminded channel in place. The playlist cache is warm in
+     * every normal flow (playback was launched from it); when it
+     * somehow isn't, load it rather than failing the tap. A channel
+     * that has left the playlist gets the plain toast. */
+    private fun watchReminderChannel(reminder: PlaylistRepository.Reminder) {
+        val cached = PlaylistRepository.cachedPlaylist()
+        if (cached != null) {
+            val ch = cached.firstOrNull { it.id == reminder.channelId }
+            if (ch != null) {
+                if (ch.id != channel?.id) switchToChannel(ch, briefInfo = true)
+            } else {
+                Toast.makeText(
+                    this, R.string.reminder_channel_gone, Toast.LENGTH_SHORT
+                ).show()
+            }
+            return
+        }
+        lifecycleScope.launch {
+            val loaded = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+                .getOrNull()
+            val ch = loaded?.firstOrNull { it.id == reminder.channelId }
+            if (ch != null) {
+                if (ch.id != channel?.id) switchToChannel(ch, briefInfo = true)
+            } else {
+                Toast.makeText(
+                    this@PlaybackActivity,
+                    R.string.reminder_channel_gone,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
     /** 5.0.0: leave a catch-up replay and return to the live stream
      * of the same channel (the strip's "Go live" tile). Rebuilds the
      * player on the live URL and shows the live info panel. */
@@ -2080,6 +2146,15 @@ class PlaybackActivity : FragmentActivity() {
      * 7.2.1 (Nova): the choice is persisted as it is applied, so
      * the next session restores it (see onCreate). */
     private fun setDim(percent: Int) {
+        // 8.0.0 (Nova): an explicit dim level supersedes the sleep
+        // fade — retire its starter and any in-flight rise before
+        // applying, or the animator would keep fighting the alpha
+        // set below. The fade's own restore path comes through here
+        // too (setDim(dimPercent) from onStop / a resume / a timer
+        // cancel): cancelling first is what makes it a restore.
+        infoHandler.removeCallbacks(sleepFadeRunnable)
+        if (::dimView.isInitialized) dimView.animate().cancel()
+        sleepFaded = false
         dimPercent = percent
         AppSettings.setNightDimPercent(this, percent)
         if (percent > 0) {
@@ -2151,6 +2226,11 @@ class PlaybackActivity : FragmentActivity() {
      * replay's programme is in the past) it falls back to a plain
      * 30 minutes and says so, rather than firing instantly. */
     private fun setSleepTimer(minutes: Int) {
+        // 8.0.0 (Nova): re-arming or clearing retires any fade from
+        // the old deadline first — a veil caught mid-fade returns
+        // to its night-dim level before the new timer is set.
+        infoHandler.removeCallbacks(sleepFadeRunnable)
+        if (sleepFaded) setDim(dimPercent)
         if (minutes == SLEEP_END_OF_PROGRAMME) {
             val stopMillis = nowProgramme?.stopMillis ?: 0L
             val remaining = stopMillis - System.currentTimeMillis()
@@ -2167,6 +2247,7 @@ class PlaybackActivity : FragmentActivity() {
             sleepTimerMinutes = SLEEP_END_OF_PROGRAMME
             sleepDeadlineMillis = stopMillis
             infoHandler.postDelayed(sleepRunnable, remaining)
+            scheduleSleepFade()
             Toast.makeText(this, R.string.sleep_timer_eop_set, Toast.LENGTH_SHORT).show()
             return
         }
@@ -2175,6 +2256,7 @@ class PlaybackActivity : FragmentActivity() {
         if (minutes > 0) {
             sleepDeadlineMillis = System.currentTimeMillis() + minutes * 60_000L
             infoHandler.postDelayed(sleepRunnable, minutes * 60_000L)
+            scheduleSleepFade()
             Toast.makeText(
                 this,
                 getString(R.string.sleep_timer_set, minutes),
@@ -2186,12 +2268,63 @@ class PlaybackActivity : FragmentActivity() {
         }
     }
 
-    /** 7.0.0 (Nova): the sleep timer came due — pause and say so. */
+    /** 7.0.0 (Nova): the sleep timer came due — pause and say so.
+     * 8.0.0 (Nova): when the fade brought the veil up, it stays at
+     * black behind the pause — the room is dark, the show stopped.
+     * The sleepFaded flag stays set, so the resume that follows
+     * (one OK press) restores the plain night-dim level (see
+     * onIsPlayingChanged). */
     private fun onSleepTimerFired() {
         sleepTimerMinutes = 0
         sleepDeadlineMillis = 0L
+        infoHandler.removeCallbacks(sleepFadeRunnable)
+        if (sleepFaded) {
+            dimView.animate().cancel()
+            dimView.visibility = View.VISIBLE
+            dimView.alpha = 1f
+        }
         player?.pause()
         Toast.makeText(this, R.string.sleep_timer_fired, Toast.LENGTH_LONG).show()
+    }
+
+    /** 8.0.0 (Nova): (re)schedule the fade for the current sleep
+     * deadline. More than a minute out, the starter is posted for
+     * deadline − SLEEP_FADE_MS; already inside the window, the fade
+     * starts now, part-way up, so the veil still reaches black
+     * exactly at the deadline. No deadline, no fade. */
+    private fun scheduleSleepFade() {
+        infoHandler.removeCallbacks(sleepFadeRunnable)
+        if (sleepDeadlineMillis <= 0L) return
+        val remaining = sleepDeadlineMillis - System.currentTimeMillis()
+        when {
+            remaining > SLEEP_FADE_MS ->
+                infoHandler.postDelayed(sleepFadeRunnable, remaining - SLEEP_FADE_MS)
+            remaining > 0L -> startSleepFade()
+        }
+    }
+
+    /** 8.0.0 (Nova): start the dim veil's rise to black over the
+     * time left until the sleep deadline. The rise is linear and
+     * begins from wherever the fade should have reached by now, so
+     * a fade (re)started late — back from the guide mid-window —
+     * neither jumps nor overruns the deadline. Only the veil's
+     * alpha moves; night dim's stored level is never touched, so
+     * cancelling returns to exactly it via setDim(dimPercent). */
+    private fun startSleepFade() {
+        val remaining = sleepDeadlineMillis - System.currentTimeMillis()
+        if (remaining <= 0L) return
+        val base = dimPercent / 100f
+        val elapsedFraction =
+            1f - remaining.coerceAtMost(SLEEP_FADE_MS).toFloat() / SLEEP_FADE_MS
+        sleepFaded = true
+        dimView.animate().cancel()
+        dimView.visibility = View.VISIBLE
+        dimView.alpha = base + (1f - base) * elapsedFraction
+        dimView.animate()
+            .alpha(1f)
+            .setDuration(remaining)
+            .setInterpolator(LinearInterpolator())
+            .start()
     }
 
     /** 7.3.0 (Nova): queue the next reconnect attempt for a live
@@ -2543,6 +2676,14 @@ class PlaybackActivity : FragmentActivity() {
         // 7.0.0 (Nova): the sleep timer's callback goes too — its
         // deadline is kept, and onStart re-arms it (see there).
         infoHandler.removeCallbacks(sleepRunnable)
+        // 8.0.0 (Nova): the sleep fade's starter goes too, and a
+        // veil caught mid-fade resets to the plain night-dim level —
+        // onStart's re-arm restarts the fade from the deadline, so
+        // no half-faded state leaks across a guide visit.
+        infoHandler.removeCallbacks(sleepFadeRunnable)
+        if (sleepFaded) setDim(dimPercent)
+        // 8.0.0 (Nova): reminder prompts stop with the activity.
+        reminderWatcher.stop()
         // 7.2.0 (Nova): the stream info updater stops too; onStart
         // restarts it if the overlay is still toggled on.
         infoHandler.removeCallbacks(streamInfoRunnable)

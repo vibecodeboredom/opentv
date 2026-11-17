@@ -213,6 +213,23 @@
     <string name="track_off">Off</string>
     <string name="subtitle_track_number">Subtitle %1$d</string>
     <string name="audio_track_number">Audio %1$d</string>
+    <!-- Nova 8.0.0: programme reminders + guide now-playing bar.
+         Reminders are in-app only: they prompt while OpenTV is
+         running, they are not system notifications. -->
+    <string name="menu_set_reminder">Set reminder</string>
+    <string name="menu_remove_reminder">Remove reminder</string>
+    <string name="menu_my_reminders">My reminders</string>
+    <string name="reminder_set_toast">Reminder set — %1$s at %2$s</string>
+    <string name="reminder_removed_toast">Reminder removed</string>
+    <string name="reminder_cancelled_toast">Reminder cancelled</string>
+    <string name="reminder_prompt_title">Starting now</string>
+    <string name="reminder_prompt_message">%1$s is starting on %2$s</string>
+    <string name="reminder_watch_now">Watch now</string>
+    <string name="reminder_dismiss">Dismiss</string>
+    <string name="reminders_list_title">My reminders</string>
+    <string name="reminders_empty">No reminders set.\nLong-press a future programme in the guide to set one.</string>
+    <string name="reminder_channel_gone">That channel is no longer in the playlist</string>
+    <string name="now_playing_cd">Return to playback</string>
     <string name="track_label_sdh">%1$s (SDH)</string>
     <string name="track_label_dub">%1$s (Dub)</string>
     <string name="track_label_descriptive">%1$s (Descriptive)</string>

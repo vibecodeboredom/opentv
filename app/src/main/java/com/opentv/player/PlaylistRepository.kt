@@ -67,6 +67,13 @@ object PlaylistRepository {
      * programme start), so the guide can return to it on open. */
     private const val KEY_GUIDE_FOCUS_CHANNEL = "guide_focus_channel"
     private const val KEY_GUIDE_FOCUS_START = "guide_focus_start"
+    /** 8.0.0 (Nova): programme reminders, one per line, fields
+     * separated by \u0001 (the playlists key's separator): channel
+     * id, channel name, start millis, stop millis, title. The
+     * channel name and title are stored with the reminder so the
+     * prompt and the list can name them even if the playlist has
+     * changed since the reminder was set. */
+    private const val KEY_REMINDERS = "programme_reminders"
     /** How many recent channels are remembered. The overlay strip
      * shows the first 3; 7.0.0 (Nova) keeps 12 so the home screen's
      * Recently watched row and the sidebar History group have a
@@ -595,6 +602,87 @@ object PlaylistRepository {
             .putString(KEY_GUIDE_FOCUS_CHANNEL, channelId)
             .putLong(KEY_GUIDE_FOCUS_START, startMillis)
             .apply()
+    }
+
+    /** 8.0.0 (Nova): one programme reminder. [channelName] and
+     * [title] are snapshots from when the reminder was set, so the
+     * prompt can name the programme even if the playlist or guide
+     * data has moved on since. */
+    data class Reminder(
+        val channelId: String,
+        val channelName: String,
+        val startMillis: Long,
+        val stopMillis: Long,
+        val title: String
+    )
+
+    /** Field separator for a stored reminder line (see KEY_REMINDERS). */
+    private const val REMINDER_SEP = "\u0001"
+
+    /** Reminder text fields are single-line by construction: strip
+     * the separator and any newlines an EPG title might carry. */
+    private fun reminderField(raw: String): String =
+        raw.replace(REMINDER_SEP, " ").replace('\n', ' ').trim()
+
+    private fun saveReminders(context: Context, reminders: List<Reminder>) {
+        val raw = reminders.joinToString("\n") { r ->
+            listOf(
+                reminderField(r.channelId),
+                reminderField(r.channelName),
+                r.startMillis.toString(),
+                r.stopMillis.toString(),
+                reminderField(r.title)
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_REMINDERS, raw).apply()
+    }
+
+    /**
+     * 8.0.0 (Nova): the pending programme reminders, soonest first.
+     * Reading prunes reminders whose programme has already ended —
+     * a reminder that came and went while the app was closed never
+     * prompts late and never lingers in the list. Malformed lines
+     * are dropped the same way, so a corrupt entry costs one
+     * reminder, not the whole list.
+     */
+    fun reminders(context: Context): List<Reminder> {
+        val raw = prefs(context).getString(KEY_REMINDERS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        val now = System.currentTimeMillis()
+        val parsed = raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 5) return@mapNotNull null
+            val start = fields[2].toLongOrNull() ?: return@mapNotNull null
+            val stop = fields[3].toLongOrNull() ?: return@mapNotNull null
+            Reminder(fields[0], fields[1], start, stop, fields[4])
+        }
+        val pending = parsed.filter { it.stopMillis > now }.sortedBy { it.startMillis }
+        if (pending.size != parsed.size) saveReminders(context, pending)
+        return pending
+    }
+
+    /** 8.0.0 (Nova): is there a reminder for this programme? */
+    fun hasReminder(context: Context, channelId: String, startMillis: Long): Boolean =
+        reminders(context).any { it.channelId == channelId && it.startMillis == startMillis }
+
+    /** 8.0.0 (Nova): set (or replace) a programme reminder. One
+     * reminder per programme: re-setting the same programme just
+     * refreshes its stored title/name. */
+    fun addReminder(context: Context, reminder: Reminder) {
+        val current = reminders(context).filterNot {
+            it.channelId == reminder.channelId && it.startMillis == reminder.startMillis
+        }
+        saveReminders(context, current + reminder)
+    }
+
+    /** 8.0.0 (Nova): cancel a programme reminder (also how a fired
+     * reminder retires itself, so it can never prompt twice). */
+    fun removeReminder(context: Context, channelId: String, startMillis: Long) {
+        val current = reminders(context)
+        val kept = current.filterNot {
+            it.channelId == channelId && it.startMillis == startMillis
+        }
+        if (kept.size != current.size) saveReminders(context, kept)
     }
 
     /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */

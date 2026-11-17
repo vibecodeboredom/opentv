@@ -185,6 +185,31 @@ class GuideActivity : FragmentActivity() {
      * groups/channels panel as playback, over the guide grid. */
     private lateinit var channelSidebar: ChannelSidebar
 
+    /** 8.0.0 (Nova): now-playing bar (see the layout comment) — the
+     * channel that was playing when the guide opened, its programme
+     * on now, and a live progress bar. Bound in onCreate, filled by
+     * refreshNowPlayingBar, ticked while the guide sits open. */
+    private lateinit var nowPlayingBar: View
+    private lateinit var npChannel: TextView
+    private lateinit var npTitle: TextView
+    private lateinit var npTime: TextView
+    private lateinit var npProgress: ProgressBar
+    private var nowPlayingJob: Job? = null
+
+    /** 8.0.0 (Nova): programme reminder prompts while the guide is
+     * in front. Watch now plays the reminded channel (the same
+     * CLEAR_TOP start a programme tap uses). */
+    private val reminderWatcher = ReminderWatcher(this) { reminder ->
+        val ch = allChannels.firstOrNull { it.id == reminder.channelId }
+        if (ch != null) {
+            playChannel(ch)
+        } else {
+            Toast.makeText(
+                this, R.string.reminder_channel_gone, Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     /** Channel name views per row, so focus can turn the name blue. */
     private val channelNameViews = mutableMapOf<String, TextView>()
 
@@ -218,6 +243,16 @@ class GuideActivity : FragmentActivity() {
         detailProgress = findViewById(R.id.guide_detail_progress)
         detailRemaining = findViewById(R.id.guide_detail_remaining)
         detailCategory = findViewById(R.id.guide_detail_category)
+
+        // 8.0.0 (Nova): now-playing bar. Tapping it returns to
+        // playback — the same trip BACK makes — so it reads as
+        // "go back to what you were watching".
+        nowPlayingBar = findViewById(R.id.guide_now_playing)
+        npChannel = findViewById(R.id.guide_np_channel)
+        npTitle = findViewById(R.id.guide_np_title)
+        npTime = findViewById(R.id.guide_np_time)
+        npProgress = findViewById(R.id.guide_np_progress)
+        nowPlayingBar.setOnClickListener { finish() }
 
         // Left sidebar (shared ChannelSidebar helper, 4.6.2). Picking a
         // channel here starts playback of it, like tapping a programme
@@ -355,6 +390,10 @@ class GuideActivity : FragmentActivity() {
             }
             buildGuide(allRows)
             scroll.visibility = View.VISIBLE
+            // 8.0.0 (Nova): the now-playing bar goes up with the
+            // grid and ticks while the guide sits open.
+            refreshNowPlayingBar()
+            startNowPlayingTicker()
             // Don't auto-scroll: the channel column (numbers + names)
             // stays pinned at the left, like the reference photo.
             // The red now-line marks the current time; the user scrolls
@@ -367,6 +406,7 @@ class GuideActivity : FragmentActivity() {
                     val arrived = epgDeferred.await()
                     if (arrived.isNotEmpty() && !isDestroyed && !isFinishing) {
                         epg = arrived
+                        refreshNowPlayingBar()
                         scroll.post {
                             if (!isDestroyed && !isFinishing) {
                                 lifecycleScope.launch { updateRowsWithEpg() }
@@ -382,6 +422,67 @@ class GuideActivity : FragmentActivity() {
         super.onResume()
         // Safety net for the favorites cache (see the field comment).
         favoritesCache = PlaylistRepository.favorites(this)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // 8.0.0 (Nova): reminder prompts run while the guide is in
+        // front (see ReminderWatcher).
+        reminderWatcher.start()
+    }
+
+    override fun onStop() {
+        // 8.0.0 (Nova): and stop with it — a prompt must never land
+        // on top of playback or another app.
+        reminderWatcher.stop()
+        super.onStop()
+    }
+
+    /** 8.0.0 (Nova): fill the now-playing bar from the channel that
+     * was playing when the guide opened and the EPG's programme on
+     * now for it. Uses the real clock, not the grid's build-time
+     * nowMillis, so the progress stays honest while the guide sits
+     * open. No channel underneath (guide opened from browse) or a
+     * channel that left the playlist: the bar stays hidden. */
+    private fun refreshNowPlayingBar() {
+        val ch = currentChannelId?.let { id ->
+            allChannels.firstOrNull { it.id == id }
+        }
+        if (ch == null) {
+            nowPlayingBar.visibility = View.GONE
+            return
+        }
+        npChannel.text = if (ch.number > 0) "${ch.number}  ${ch.name}" else ch.name
+        val now = System.currentTimeMillis()
+        val prog = GuideData.programmesForChannel(
+            ch, epg, PlaylistRepository.epgOverrides(this)
+        ).firstOrNull { now in it.startMillis until it.stopMillis }
+        if (prog != null) {
+            npTitle.text = prog.title
+            npTime.text = GuideData.formatTimeRange(prog.startMillis, prog.stopMillis)
+            npProgress.progress =
+                (GuideData.progressFraction(prog, now) * 100).toInt()
+            npProgress.visibility = View.VISIBLE
+        } else {
+            npTitle.text = ""
+            npTime.text = ""
+            npProgress.visibility = View.INVISIBLE
+        }
+        nowPlayingBar.visibility = View.VISIBLE
+    }
+
+    /** 8.0.0 (Nova): the bar's ticker — progress creeps and the
+     * programme rolls over to the next one as time passes, like the
+     * now-line ticker below. lifecycleScope cancels it when the
+     * guide closes. */
+    private fun startNowPlayingTicker() {
+        nowPlayingJob?.cancel()
+        nowPlayingJob = lifecycleScope.launch {
+            while (true) {
+                delay(NOW_PLAYING_TICK_MS)
+                if (!isDestroyed && !isFinishing) refreshNowPlayingBar()
+            }
+        }
     }
 
     /**
@@ -1397,6 +1498,18 @@ class GuideActivity : FragmentActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
+        // 8.0.0 (Nova): the reminders list — labelled with the
+        // pending count, like the playback menus carry their state.
+        val myRemindersRow = view.findViewById<TextView>(R.id.menu_my_reminders)
+        val pendingCount = PlaylistRepository.reminders(this).size
+        if (pendingCount > 0) {
+            myRemindersRow.text = getString(R.string.menu_my_reminders) + " ($pendingCount)"
+        }
+        myRemindersRow.setOnClickListener {
+            dialog.dismiss()
+            showRemindersList()
+        }
+
         view.findViewById<TextView>(R.id.menu_programme_title).text = programme.title
 
         view.findViewById<TextView>(R.id.menu_external_player).setOnClickListener {
@@ -1423,6 +1536,57 @@ class GuideActivity : FragmentActivity() {
         view.findViewById<TextView>(R.id.menu_custom_recording).setOnClickListener {
             dialog.dismiss()
             showCustomRecordingPicker(channel)
+        }
+
+        // 8.0.0 (Nova): remind me when this programme starts. Only
+        // a real future programme can carry a reminder — a programme
+        // on now is one tap from playing, a past one is catch-up's
+        // job, and a "No information" placeholder has no title or
+        // real start to prompt with — so the row hides for those.
+        val reminderRow = view.findViewById<TextView>(R.id.menu_reminder)
+        val reminderEligible = programme.startMillis > nowMillis &&
+            programme.title != GuideData.NO_INFORMATION
+        if (!reminderEligible) {
+            reminderRow.visibility = View.GONE
+        } else {
+            val hasReminder = PlaylistRepository.hasReminder(
+                this, channel.id, programme.startMillis
+            )
+            reminderRow.text = getString(
+                if (hasReminder) R.string.menu_remove_reminder
+                else R.string.menu_set_reminder
+            )
+            reminderRow.setOnClickListener {
+                dialog.dismiss()
+                if (hasReminder) {
+                    PlaylistRepository.removeReminder(
+                        this, channel.id, programme.startMillis
+                    )
+                    Toast.makeText(
+                        this, R.string.reminder_removed_toast, Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    PlaylistRepository.addReminder(
+                        this,
+                        PlaylistRepository.Reminder(
+                            channelId = channel.id,
+                            channelName = channel.name,
+                            startMillis = programme.startMillis,
+                            stopMillis = programme.stopMillis,
+                            title = programme.title
+                        )
+                    )
+                    Toast.makeText(
+                        this,
+                        getString(
+                            R.string.reminder_set_toast,
+                            programme.title,
+                            GuideData.formatClock(programme.startMillis)
+                        ),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
 
         view.findViewById<TextView>(R.id.menu_channel_name).text =
@@ -1519,6 +1683,44 @@ class GuideActivity : FragmentActivity() {
         updateRecentVisibility()
     }
 
+    /**
+     * 8.0.0 (Nova): the pending reminders, soonest first, from the
+     * guide menu. Tapping one cancels it (and says so); when more
+     * remain the list re-opens on what's left, so several can be
+     * cancelled in one visit. An empty list explains itself and how
+     * reminders get set.
+     */
+    private fun showRemindersList() {
+        val pending = PlaylistRepository.reminders(this)
+        if (pending.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.reminders_list_title)
+                .setMessage(R.string.reminders_empty)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+            return
+        }
+        val labels = pending.map { r ->
+            "${r.title}\n${r.channelName} • " +
+                "${GuideData.formatDate(r.startMillis)}, " +
+                GuideData.formatClock(r.startMillis)
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.reminders_list_title)
+            .setItems(labels) { _, which ->
+                val r = pending[which]
+                PlaylistRepository.removeReminder(this, r.channelId, r.startMillis)
+                Toast.makeText(
+                    this, R.string.reminder_cancelled_toast, Toast.LENGTH_SHORT
+                ).show()
+                if (PlaylistRepository.reminders(this).isNotEmpty()) {
+                    showRemindersList()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun openExternalPlayer(channel: Channel) {
         try {
             val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -1603,6 +1805,9 @@ class GuideActivity : FragmentActivity() {
         /** 7.1.0 (Nova): how often the now-line creeps forward
          * while the guide sits open. */
         private const val NOW_LINE_TICK_MS = 60_000L
+        /** 8.0.0 (Nova): how often the now-playing bar refreshes
+         * its programme + progress while the guide sits open. */
+        private const val NOW_PLAYING_TICK_MS = 20_000L
         private const val WINDOW_HOURS = 6
         /** 6.1.2: hours of past programming the guide window reaches
          * back (10 hours total). The default EPG reaches ~4.5 hours
