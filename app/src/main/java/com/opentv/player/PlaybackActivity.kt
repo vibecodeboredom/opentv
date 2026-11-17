@@ -103,6 +103,9 @@ class PlaybackActivity : FragmentActivity() {
          * the info overlay should flash briefly instead of the normal
          * Left/Right duration. */
         const val EXTRA_SHOW_BRIEF_INFO = "show_brief_info"
+        /** 7.1.1: the chosen playback speed, carried across a channel
+         * change so it survives a zap instead of resetting to 1×. */
+        const val EXTRA_PLAYBACK_SPEED = "playback_speed"
         /** Dead streams are common in the playlist — auto-try another random channel this many times. */
         private const val MAX_AUTO_RETRY = 3
         /** Overlay auto-hides after this long with no key press. */
@@ -331,6 +334,13 @@ class PlaybackActivity : FragmentActivity() {
         catchupStartMillis = intent.getLongExtra(EXTRA_CATCHUP_START_MS, 0L)
         catchupStopMillis = intent.getLongExtra(EXTRA_CATCHUP_STOP_MS, 0L)
         retryCount = intent.getIntExtra(EXTRA_RETRY_COUNT, 0)
+        // 7.1.1: a channel change within a viewing session carries
+        // the chosen playback speed along, so it survives a zap
+        // instead of resetting to 1×. A fresh launch has no extra
+        // and starts at 1×. The value is checked against the offered
+        // speeds — a stray float from an old intent is ignored.
+        val carriedSpeed = intent.getFloatExtra(EXTRA_PLAYBACK_SPEED, 1f)
+        if (carriedSpeed in PlaybackComfort.SPEEDS) playbackSpeed = carriedSpeed
         // Started by a channel up/down press: flash the info overlay
         // briefly once the EPG is in, instead of the now/next toast.
         val briefInfo = intent.getBooleanExtra(EXTRA_SHOW_BRIEF_INFO, false)
@@ -757,6 +767,21 @@ class PlaybackActivity : FragmentActivity() {
                         // normal Left/Right focus movement.
                         if (stripTiles.any { it.isFocused }) {
                             moveStripFocus(right)
+                            return true
+                        }
+                        // 7.1.1: during a recording, Left/Right seeks
+                        // when no strip tile has focus — the transport
+                        // buttons do nothing useful while a recording
+                        // plays (prev/next/record/favorite all need a
+                        // channel), so steering focus between them is
+                        // pointless; Up/Down still moves focus. Live
+                        // keeps the old framework focus movement.
+                        if (recordingUri != null) {
+                            seekRecording(
+                                if (right) PlaybackComfort.SEEK_SKIP_MS
+                                else -PlaybackComfort.SEEK_SKIP_MS
+                            )
+                            armHideTimer()
                             return true
                         }
                         return super.dispatchKeyEvent(event)
@@ -1372,9 +1397,20 @@ class PlaybackActivity : FragmentActivity() {
         val intent = Intent(this, PlaybackActivity::class.java)
         intent.putExtra(EXTRA_CHANNEL, pick)
         if (briefInfo) intent.putExtra(EXTRA_SHOW_BRIEF_INFO, true)
+        carrySessionExtras(intent)
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         startActivity(intent)
         finish()
+    }
+
+    /** 7.1.1: carry the viewing-session state across a channel
+     * change — the chosen playback speed, so it survives a zap. A
+     * session that ends (BACK, timer fired) carries nothing, and
+     * the next launch starts fresh at 1×. */
+    private fun carrySessionExtras(intent: Intent) {
+        if (playbackSpeed != 1f) {
+            intent.putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
+        }
     }
 
     /** 5.0.0: leave a catch-up replay and return to the live stream
@@ -1399,6 +1435,9 @@ class PlaybackActivity : FragmentActivity() {
         val intent = Intent(this, GuideActivity::class.java)
         // The guide highlights the current channel in the accent colour.
         channel?.let { intent.putExtra(GuideActivity.EXTRA_CURRENT_CHANNEL_ID, it.id) }
+        // 7.1.1: the guide forwards the chosen speed to whatever
+        // channel it starts, so picking there keeps it too.
+        carrySessionExtras(intent)
         startActivity(intent)
     }
 
@@ -1439,6 +1478,7 @@ class PlaybackActivity : FragmentActivity() {
                 val intent = Intent(this@PlaybackActivity, PlaybackActivity::class.java)
                 intent.putExtra(EXTRA_CHANNEL, pick)
                 intent.putExtra(EXTRA_RETRY_COUNT, retryCount + 1)
+                carrySessionExtras(intent)
                 intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 startActivity(intent)
                 finish()
@@ -1627,19 +1667,27 @@ class PlaybackActivity : FragmentActivity() {
      * clamped to the recording's length. A no-op without a player,
      * and a no-op while the source is still preparing — the
      * position is C.TIME_UNSET then, and seeking from it would
-     * jump to 0 (review catch, 7.1.0). */
+     * jump to 0 (review catch, 7.1.0).
+     * 7.1.1: the toast says where the seek landed — the old "+10s"
+     * toast said nothing about position, and a recording has no
+     * progress bar. */
     private fun seekRecording(deltaMs: Long) {
         val p = player ?: return
         val position = p.currentPosition
         if (position == C.TIME_UNSET) return
         val target = PlaybackComfort.clampSeek(position + deltaMs, p.duration)
         p.seekTo(target)
-        Toast.makeText(
-            this,
-            if (deltaMs >= 0) R.string.recording_skip_forward
-            else R.string.recording_skip_back,
-            Toast.LENGTH_SHORT
-        ).show()
+        val duration = p.duration
+        val text = if (duration > 0) {
+            getString(
+                R.string.recording_seek_position,
+                PlaybackComfort.formatSeekTime(target),
+                PlaybackComfort.formatSeekTime(duration)
+            )
+        } else {
+            PlaybackComfort.formatSeekTime(target)
+        }
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroy() {

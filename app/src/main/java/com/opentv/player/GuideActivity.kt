@@ -203,6 +203,11 @@ class GuideActivity : FragmentActivity() {
      * its number + name are highlighted in the accent colour. */
     private var currentChannelId: String? = null
 
+    /** 7.1.1: the chosen playback speed carried from playback, so
+     * picking another channel in the guide does not reset it to 1×.
+     * 1× when the guide was opened from anywhere else. */
+    private var incomingPlaybackSpeed: Float = 1f
+
     /** Left sidebar (4.6.2, shared ChannelSidebar helper) — the same
      * groups/channels panel as playback, over the guide grid. */
     private lateinit var channelSidebar: ChannelSidebar
@@ -216,6 +221,7 @@ class GuideActivity : FragmentActivity() {
         DeviceType.applyOrientation(this)
         setContentView(R.layout.activity_guide)
         currentChannelId = intent.getStringExtra(EXTRA_CURRENT_CHANNEL_ID)
+        incomingPlaybackSpeed = intent.getFloatExtra(PlaybackActivity.EXTRA_PLAYBACK_SPEED, 1f)
         container = findViewById(R.id.guide_container)
         pinnedCol = findViewById(R.id.guide_pinned_col)
         loading = findViewById(R.id.guide_loading)
@@ -579,8 +585,19 @@ class GuideActivity : FragmentActivity() {
     private fun playChannel(ch: Channel) {
         val intent = Intent(this, PlaybackActivity::class.java)
         intent.putExtra(PlaybackActivity.EXTRA_CHANNEL, ch)
+        forwardSessionExtras(intent)
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         startActivity(intent)
+    }
+
+    /** 7.1.1: forward the viewing-session state to a playback the
+     * guide starts, so a channel picked here keeps the chosen
+     * playback speed instead of resetting to 1×. Catch-up replays
+     * do not get it — speed is live-only. */
+    private fun forwardSessionExtras(intent: Intent) {
+        if (incomingPlaybackSpeed != 1f) {
+            intent.putExtra(PlaybackActivity.EXTRA_PLAYBACK_SPEED, incomingPlaybackSpeed)
+        }
     }
 
     /**
@@ -1457,6 +1474,7 @@ class GuideActivity : FragmentActivity() {
             // stacking a second player on top of it.
             val intent = Intent(this, PlaybackActivity::class.java)
             intent.putExtra(PlaybackActivity.EXTRA_CHANNEL, channel)
+            forwardSessionExtras(intent)
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
             startActivity(intent)
         } else if (programme.stopMillis <= nowMillis) {

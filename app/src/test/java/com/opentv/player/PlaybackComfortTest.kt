@@ -88,4 +88,29 @@ class PlaybackComfortTest {
     fun clampSeekNegativeDurationWithPositivePosition() {
         assertEquals(50L, PlaybackComfort.clampSeek(50L, -100L))
     }
+
+    // 7.1.1: recording seek toast position.
+    @Test
+    fun formatSeekTimeMinutesAndSeconds() {
+        assertEquals("0:00", PlaybackComfort.formatSeekTime(0L))
+        assertEquals("0:05", PlaybackComfort.formatSeekTime(5_000L))
+        assertEquals("1:05", PlaybackComfort.formatSeekTime(65_000L))
+        assertEquals("10:00", PlaybackComfort.formatSeekTime(600_000L))
+    }
+
+    @Test
+    fun formatSeekTimeHours() {
+        assertEquals("1:00:00", PlaybackComfort.formatSeekTime(3_600_000L))
+        assertEquals("1:01:01", PlaybackComfort.formatSeekTime(3_661_000L))
+    }
+
+    @Test
+    fun formatSeekTimeClampsNegative() {
+        assertEquals("0:00", PlaybackComfort.formatSeekTime(-5_000L))
+    }
+
+    @Test
+    fun formatSeekTimeTruncatesMillis() {
+        assertEquals("1:05", PlaybackComfort.formatSeekTime(65_999L))
+    }
 }

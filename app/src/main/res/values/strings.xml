@@ -119,8 +119,7 @@
     <string name="playback_speed_menu">Playback speed: %1$s</string>
     <string name="playback_speed_title">Playback speed</string>
     <string name="playback_speed_set">Playback speed: %1$s</string>
-    <string name="recording_skip_forward">+10s</string>
-    <string name="recording_skip_back">−10s</string>
+    <string name="recording_seek_position">%1$s / %2$s</string>
     <string name="prefs_favorites_only">Guide shows favorites only</string>
     <string name="menu_external_player">Open in external player</string>
     <string name="menu_record">Record</string>

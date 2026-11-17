@@ -5,6 +5,8 @@ package com.opentv.player
  * seek skip. Pure logic — no Android classes — so the option lists,
  * labels and seek clamping are unit-testable; PlaybackActivity owns
  * the player, the timer handler and the dialogs.
+ * 7.1.1 — seek-time formatting, so a recording seek says where
+ * it landed.
  */
 object PlaybackComfort {
 
@@ -20,6 +22,19 @@ object PlaybackComfort {
     /** Menu label for the sleep timer: "Off" when null, else "30 min". */
     fun sleepLabel(minutes: Int?): String =
         minutes?.let { "$it min" } ?: "Off"
+
+    /** 7.1.1: a playback position as "m:ss" or "h:mm:ss" for the
+     * recording seek toast. Negative values clamp to zero. */
+    fun formatSeekTime(ms: Long): String {
+        val totalSeconds = (ms.coerceAtLeast(0L) / 1000).toInt()
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) "$hours:${pad2(minutes)}:${pad2(seconds)}"
+        else "$minutes:${pad2(seconds)}"
+    }
+
+    private fun pad2(value: Int): String = if (value < 10) "0$value" else "$value"
 
     /** Playback speeds offered in the playback menu. */
     val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
