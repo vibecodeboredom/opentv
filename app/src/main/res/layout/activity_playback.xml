@@ -34,6 +34,23 @@
         android:background="@android:color/black"
         android:visibility="gone" />
 
+    <!-- 7.3.1 (Nova): audio-only hint — a centred caption on
+         the black cover that fades a few seconds after the
+         mode turns on: long enough to learn the wake from,
+         short enough not to light the room all night. Not
+         clickable — the wake is any key (see
+         PlaybackActivity.dispatchKeyEvent), and this view
+         must never get in its way. -->
+    <TextView
+        android:id="@+id/audio_only_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/audio_only_hint"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
     <!-- 7.3.0 (Nova): auto-reconnect indicator — a small pill
          under the centre of the screen, shown while a live stream
          that already played is being re-connected after an error

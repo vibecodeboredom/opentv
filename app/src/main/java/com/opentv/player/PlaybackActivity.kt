@@ -22,10 +22,14 @@ import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -123,6 +127,9 @@ class PlaybackActivity : FragmentActivity() {
          * selection picks the best variant at or under it (or the
          * lowest available when every variant is above it). */
         private const val LOW_QUALITY_MAX_BITRATE = 400_000
+        /** 7.3.1 (Nova): how long the audio-only hint stays up
+         * on the black cover before it fades out. */
+        private const val AUDIO_ONLY_HINT_MS = 4_000L
         /** Overlay auto-hides after this long with no key press. */
         private const val OVERLAY_TIMEOUT_MS = 10_000L
         /** 6.0.0-rc3: mobile overlay auto-hide — 5s idle, then it
@@ -239,6 +246,15 @@ class PlaybackActivity : FragmentActivity() {
      * the picture is swallowed too, so the press that wakes the
      * screen does not also fire its normal action. */
     private var audioRestoreSwallowUp: Boolean = false
+    /** 7.3.1 (Nova): the hint centred on the audio-only cover,
+     * and a generation counter that keeps a fade scheduled by
+     * one wake/sleep cycle from hiding the hint a later cycle
+     * has just re-shown. */
+    private lateinit var audioOnlyHint: TextView
+    private var audioOnlyHintGeneration: Int = 0
+    private val audioOnlyHintRunnable = Runnable {
+        fadeAudioOnlyHint(audioOnlyHintGeneration)
+    }
     /** 7.3.0 (Nova): live auto-reconnect — attempts spent on the
      * current stream, the "Reconnecting…" pill, the pending retry
      * and the stall watchdog. Reset whenever the stream reaches
@@ -343,6 +359,7 @@ class PlaybackActivity : FragmentActivity() {
         streamInfo = findViewById(R.id.stream_info)
         dimView = findViewById(R.id.dim_view)
         audioOnlyView = findViewById(R.id.audio_only_view)
+        audioOnlyHint = findViewById(R.id.audio_only_hint)
         reconnectView = findViewById(R.id.reconnect_view)
         // 7.2.0 (Nova): on mobile the top-end corner belongs to the
         // Guide button — drop the stream info panel below it.
@@ -1831,21 +1848,24 @@ class PlaybackActivity : FragmentActivity() {
             // 7.2.0 (Nova): stream info and night dim are not
             // channel options either — a recording has a stream
             // worth describing and a picture worth dimming — so
-            // they join the sleep timer in this menu.
-            val items = arrayOf(
-                sleepTimerMenuLabel(),
-                streamInfoMenuLabel(),
-                nightDimMenuLabel()
-            )
+            // they join the sleep timer in this menu. 7.3.1
+            // (Nova): the menu is built as paired item/action
+            // lists now, like the channel menu below — the track
+            // pickers are conditional, and a positional when is
+            // exactly how an index quietly lands on the wrong
+            // action.
+            val items = mutableListOf<String>()
+            val actions = mutableListOf<() -> Unit>()
+            items += sleepTimerMenuLabel()
+            actions += { showSleepTimerDialog() }
+            items += streamInfoMenuLabel()
+            actions += { setStreamInfo(!streamInfoOn) }
+            items += nightDimMenuLabel()
+            actions += { showDimDialog() }
+            addTrackPickerItems(items, actions)
             AlertDialog.Builder(this)
                 .setTitle(recordingName ?: getString(R.string.recording_label))
-                .setItems(items) { _, which ->
-                    when (which) {
-                        0 -> showSleepTimerDialog()
-                        1 -> setStreamInfo(!streamInfoOn)
-                        2 -> showDimDialog()
-                    }
-                }
+                .setItems(items.toTypedArray()) { _, which -> actions[which]() }
                 .show()
             return
         }
@@ -1910,6 +1930,17 @@ class PlaybackActivity : FragmentActivity() {
         // simply has nothing to steer.
         items += qualityMenuLabel()
         actions += { showQualityDialog() }
+        // 7.3.1 (Nova): subtitle / audio track pickers — only
+        // for track types the running stream actually carries.
+        addTrackPickerItems(items, actions)
+        // 7.3.1 (Nova): reload stream — the manual twin of
+        // auto-reconnect, for a stream that is misbehaving but
+        // has not errored. Live only: restarting a catch-up
+        // stream would lose the viewer's place in it.
+        if (catchupUrl == null) {
+            items += getString(R.string.reload_stream)
+            actions += { reloadStream() }
+        }
         // 7.0.0 (Nova): sleep timer — while one is running the menu
         // doubles as its status (7.1.1: counting down, see
         // sleepTimerMenuLabel).
@@ -2172,6 +2203,12 @@ class PlaybackActivity : FragmentActivity() {
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return
         val delay = RECONNECT_BACKOFF_MS[reconnectAttempts]
         reconnectAttempts++
+        // 7.3.1 (Nova): the pill counts the attempt, so a
+        // viewer watching a stream struggle can see how much
+        // patience the player has left.
+        reconnectView.text = getString(
+            R.string.reconnecting_attempt, reconnectAttempts, MAX_RECONNECT_ATTEMPTS
+        )
         reconnectView.visibility = View.VISIBLE
         infoHandler.removeCallbacks(reconnectRunnable)
         infoHandler.postDelayed(reconnectRunnable, delay)
@@ -2230,13 +2267,45 @@ class PlaybackActivity : FragmentActivity() {
     /** 7.3.0 (Nova): blank / restore the picture for audio-only
      * mode. Only the black cover changes visibility — the player
      * is never paused, stopped or rebuilt, so the sound runs on
-     * uninterrupted. */
+     * uninterrupted. 7.3.1 (Nova): turning the mode on also
+     * shows the hint centred on the cover; it fades after a few
+     * seconds (see fadeAudioOnlyHint) so the room stays dark,
+     * and turning the mode off takes it down at once. */
     private fun setAudioOnly(on: Boolean) {
         audioOnlyOn = on
         audioOnlyView.visibility = if (on) View.VISIBLE else View.GONE
+        // 7.3.1 (Nova): every transition retires the previous
+        // cycle's pending fade before setting up the new state.
+        audioOnlyHintGeneration++
+        infoHandler.removeCallbacks(audioOnlyHintRunnable)
+        audioOnlyHint.animate().cancel()
         if (on) {
+            audioOnlyHint.alpha = 1f
+            audioOnlyHint.visibility = View.VISIBLE
+            infoHandler.postDelayed(audioOnlyHintRunnable, AUDIO_ONLY_HINT_MS)
             Toast.makeText(this, R.string.audio_only_on_toast, Toast.LENGTH_LONG).show()
+        } else {
+            audioOnlyHint.visibility = View.GONE
+            audioOnlyHint.alpha = 1f
         }
+    }
+
+    /** 7.3.1 (Nova): fade the audio-only hint out. The
+     * generation check makes this a no-op when the cycle that
+     * scheduled it has already ended — a stale fade must never
+     * hide a hint the viewer just got back. */
+    private fun fadeAudioOnlyHint(generation: Int) {
+        if (!audioOnlyOn || generation != audioOnlyHintGeneration) return
+        audioOnlyHint.animate()
+            .alpha(0f)
+            .setDuration(400)
+            .withEndAction {
+                if (generation == audioOnlyHintGeneration) {
+                    audioOnlyHint.visibility = View.GONE
+                    audioOnlyHint.alpha = 1f
+                }
+            }
+            .start()
     }
 
     /** 7.3.0 (Nova): the options-menu label for stream quality,
@@ -2307,6 +2376,166 @@ class PlaybackActivity : FragmentActivity() {
         selector.setParameters(builder.build())
     }
 
+    /** 7.3.1 (Nova): one selectable track of the running
+     * stream, flattened out of its Tracks.Group for the picker
+     * dialogs. The group is kept whole because a selection
+     * override names the group, not the flattened position. */
+    private class TrackChoice(val group: Tracks.Group, val index: Int, val label: String)
+
+    /** 7.3.1 (Nova): the running stream's supported tracks of
+     * one type, in group order. Empty when the stream carries
+     * none — the pickers are only offered for types that
+     * exist, so there is no empty menu to land on. */
+    private fun trackChoices(type: Int): List<TrackChoice> {
+        val p = player ?: return emptyList()
+        val choices = mutableListOf<TrackChoice>()
+        var number = 0
+        for (group in p.currentTracks.groups) {
+            if (group.type != type) continue
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i, false)) continue
+                number++
+                choices += TrackChoice(group, i, trackLabel(group.getTrackFormat(i), type, number))
+            }
+        }
+        return choices
+    }
+
+    /** 7.3.1 (Nova): a human name for one track — its own
+     * label when the stream provides one, else its language,
+     * else a numbered fallback. SDH / dub / descriptive role
+     * flags become suffixes, since two tracks often share a
+     * language and differ only in that role. */
+    private fun trackLabel(format: Format, type: Int, number: Int): String {
+        var label = format.label?.takeIf { it.isNotBlank() }
+        if (label == null) {
+            val language = format.language
+            label = if (!language.isNullOrBlank() && language != C.LANGUAGE_UNDETERMINED) {
+                Locale(language).getDisplayLanguage(Locale.getDefault())
+                    .ifBlank { language }
+                    .replaceFirstChar { it.uppercase() }
+            } else {
+                getString(
+                    if (type == C.TRACK_TYPE_TEXT) R.string.subtitle_track_number
+                    else R.string.audio_track_number,
+                    number
+                )
+            }
+        }
+        return when {
+            type == C.TRACK_TYPE_TEXT &&
+                format.roleFlags and C.ROLE_FLAG_DESCRIBES_VIDEO != 0 ->
+                getString(R.string.track_label_sdh, label)
+            type == C.TRACK_TYPE_AUDIO &&
+                format.roleFlags and C.ROLE_FLAG_DESCRIBES_VIDEO != 0 ->
+                getString(R.string.track_label_descriptive, label)
+            type == C.TRACK_TYPE_AUDIO &&
+                format.roleFlags and C.ROLE_FLAG_DUB != 0 ->
+                getString(R.string.track_label_dub, label)
+            else -> label
+        }
+    }
+
+    /** 7.3.1 (Nova): add the subtitle / audio picker entries
+     * to an options menu under construction — each only when
+     * the running stream carries that track type. Shared by
+     * the channel and recording menus. */
+    private fun addTrackPickerItems(
+        items: MutableList<String>,
+        actions: MutableList<() -> Unit>
+    ) {
+        if (trackChoices(C.TRACK_TYPE_TEXT).isNotEmpty()) {
+            items += getString(R.string.subtitles_item)
+            actions += { showSubtitleDialog() }
+        }
+        if (trackChoices(C.TRACK_TYPE_AUDIO).isNotEmpty()) {
+            items += getString(R.string.audio_track_item)
+            actions += { showAudioDialog() }
+        }
+    }
+
+    /** 7.3.1 (Nova): pick a subtitle track, or turn subtitles
+     * off. The current selection is checked; "off" is checked
+     * whenever no text track is selected, which is the
+     * player's own default for most streams. */
+    private fun showSubtitleDialog() {
+        val choices = trackChoices(C.TRACK_TYPE_TEXT)
+        if (choices.isEmpty()) return
+        val selected = choices.indexOfFirst { it.group.isTrackSelected(it.index) }
+        val labels = Array(choices.size + 1) { i ->
+            if (i == 0) getString(R.string.track_off) else choices[i - 1].label
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.subtitles_item)
+            .setSingleChoiceItems(labels, selected + 1) { dialog, which ->
+                if (which == 0) clearTrackChoice(C.TRACK_TYPE_TEXT)
+                else applyTrackChoice(choices[which - 1])
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    /** 7.3.1 (Nova): pick an audio track (language). No "off"
+     * — a stream with audio keeps playing one; the current
+     * selection is checked. */
+    private fun showAudioDialog() {
+        val choices = trackChoices(C.TRACK_TYPE_AUDIO)
+        if (choices.isEmpty()) return
+        val selected = choices.indexOfFirst { it.group.isTrackSelected(it.index) }
+        val labels = choices.map { it.label }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.audio_track_item)
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                applyTrackChoice(choices[which])
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    /** 7.3.1 (Nova): pin one track of its type on the running
+     * player. Goes through the shared track selector's
+     * parameters — the same live re-pointing the quality mode
+     * uses — so playback never restarts, and the quality
+     * constraints stay in force alongside the pin. Pins are
+     * per-stream: a zap rebuilds the selector, and an override
+     * naming the old stream's groups could never match the
+     * new one anyway. */
+    private fun applyTrackChoice(choice: TrackChoice) {
+        val selector = trackSelector ?: return
+        val builder = selector.parameters.buildUpon()
+        builder.setTrackTypeDisabled(choice.group.type, false)
+        builder.setOverrideForType(
+            TrackSelectionOverride(choice.group.mediaTrackGroup, listOf(choice.index))
+        )
+        selector.setParameters(builder.build())
+    }
+
+    /** 7.3.1 (Nova): subtitles off — disable the track type
+     * outright and drop any pin of that type, so turning
+     * subtitles back on later starts from the player's own
+     * selection instead of resurrecting a stale pin. */
+    private fun clearTrackChoice(type: Int) {
+        val selector = trackSelector ?: return
+        val builder = selector.parameters.buildUpon()
+        builder.clearOverridesOfType(type)
+        builder.setTrackTypeDisabled(type, true)
+        selector.setParameters(builder.build())
+    }
+
+    /** 7.3.1 (Nova): restart the live stream from the menu —
+     * the manual twin of auto-reconnect's restartCurrentStream,
+     * minus its "already healthy" abort: the viewer asked, so
+     * it reloads even from READY. stop() keeps the media item,
+     * so prepare() reloads exactly this channel, and a stream
+     * paused on purpose stays paused. */
+    private fun reloadStream() {
+        val p = player ?: return
+        cancelReconnect()
+        p.stop()
+        p.prepare()
+        if (p.playWhenReady) p.play()
+    }
+
     override fun onStop() {
         super.onStop()
         infoHandler.removeCallbacks(hideInfoRunnable)
@@ -2323,6 +2552,15 @@ class PlaybackActivity : FragmentActivity() {
         // READY or error sorts it out.
         infoHandler.removeCallbacks(reconnectRunnable)
         infoHandler.removeCallbacks(stallWatchdogRunnable)
+        // 7.3.1 (Nova): the audio-only hint's fade stops too —
+        // and the hint itself comes down, so a return visit
+        // never finds a stale caption floating over the video.
+        infoHandler.removeCallbacks(audioOnlyHintRunnable)
+        if (::audioOnlyHint.isInitialized) {
+            audioOnlyHint.animate().cancel()
+            audioOnlyHint.visibility = View.GONE
+            audioOnlyHint.alpha = 1f
+        }
         // 7.1.0 (Nova): stream warm-ups stop with playback.
         streamPrefetcher.cancel()
         overlay.visibility = View.GONE

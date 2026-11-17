@@ -206,6 +206,19 @@
     <string name="quality_auto">Auto</string>
     <string name="quality_high">High</string>
     <string name="quality_low">Low</string>
+    <!-- Nova 7.3.1: subtitle / audio track pickers, reload
+         stream, audio-only hint, reconnect attempt count. -->
+    <string name="subtitles_item">Subtitles</string>
+    <string name="audio_track_item">Audio track</string>
+    <string name="track_off">Off</string>
+    <string name="subtitle_track_number">Subtitle %1$d</string>
+    <string name="audio_track_number">Audio %1$d</string>
+    <string name="track_label_sdh">%1$s (SDH)</string>
+    <string name="track_label_dub">%1$s (Dub)</string>
+    <string name="track_label_descriptive">%1$s (Descriptive)</string>
+    <string name="reload_stream">Reload stream</string>
+    <string name="audio_only_hint">Audio only — press any key for picture</string>
+    <string name="reconnecting_attempt">Reconnecting… %1$d of %2$d</string>
     <string name="mobile_refresh">↻ Refresh</string>
     <string name="mobile_retry">Retry</string>
     <string name="mobile_results">Results (%1$d)</string>
