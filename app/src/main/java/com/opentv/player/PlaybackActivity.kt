@@ -171,6 +171,9 @@ class PlaybackActivity : FragmentActivity() {
     private var sleepTimerMinutes: Int = 0
     private var sleepDeadlineMillis: Long = 0L
     private val sleepRunnable = Runnable { onSleepTimerFired() }
+    /** 7.1.0 (Nova): warms the previous / next channels' streams
+     * while this one plays, so a zap to them starts faster. */
+    private val streamPrefetcher = StreamPrefetcher()
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
@@ -548,6 +551,9 @@ class PlaybackActivity : FragmentActivity() {
                         PlaylistRepository.recordRecentChannel(this@PlaybackActivity, it.id)
                         PlaylistRepository.setLastChannelId(this@PlaybackActivity, it.id)
                     }
+                    // 7.1.0 (Nova): this channel is playing — warm
+                    // its neighbours' streams for a faster zap.
+                    prefetchAdjacentChannels()
                     // 6.1.7: on mobile the overlay shows with the video
                     // on first playback, then fades after 5s (see
                     // armHideTimer). Before this the buttons never
@@ -876,6 +882,71 @@ class PlaybackActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * 7.1.0 (Nova): warm the streams of the channels either side of
+     * the current one (the same visible order channel up/down uses),
+     * so zapping to them starts faster. Live channels only — a
+     * recording reads from disk, and a catch-up replay's neighbours
+     * are not where the viewer is likely to zap. The warm-up itself
+     * is capped and silent (see StreamPrefetcher); this only picks
+     * the URLs, next channel first — CH+ is the direction viewers
+     * zap most, so it gets the head start.
+     */
+    private fun prefetchAdjacentChannels() {
+        if (recordingUri != null || catchupUrl != null) return
+        val currentId = channel?.id ?: return
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val channels = result.getOrNull() ?: return@launch
+            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            // Same two-pass visible-order math as
+            // switchToAdjacentChannel, extended to both neighbours:
+            // count the visible channels and the current channel's
+            // visible position, then pick the channels at the
+            // neighbouring visible positions.
+            var visibleIndex = -1
+            var visibleCount = 0
+            for (ch in channels) {
+                if (ch.id in hidden) continue
+                if (ch.id == currentId) visibleIndex = visibleCount
+                visibleCount++
+            }
+            val neighbours: List<Channel> = if (visibleCount > 1 && visibleIndex >= 0) {
+                val prevTarget = (visibleIndex - 1).mod(visibleCount)
+                val nextTarget = (visibleIndex + 1).mod(visibleCount)
+                var prev: Channel? = null
+                var next: Channel? = null
+                var seen = 0
+                for (ch in channels) {
+                    if (ch.id in hidden) continue
+                    if (seen == prevTarget) prev = ch
+                    if (seen == nextTarget) next = ch
+                    seen++
+                }
+                listOfNotNull(next, prev).distinctBy { it.id }
+            } else if (visibleCount == 0 && channels.size > 1) {
+                // Every channel hidden: the full-list fallback,
+                // exactly like switchToAdjacentChannel.
+                val idx = channels.indexOfFirst { it.id == currentId }
+                if (idx < 0) {
+                    emptyList()
+                } else {
+                    listOf(
+                        channels[(idx + 1).mod(channels.size)],
+                        channels[(idx - 1).mod(channels.size)]
+                    ).distinctBy { it.id }
+                }
+            } else {
+                // Zero or one visible channel: no neighbours to warm.
+                emptyList()
+            }
+            // A slow playlist load must not warm the neighbours of
+            // a channel the viewer has already zapped away from.
+            if (channel?.id != currentId) return@launch
+            streamPrefetcher.prefetch(neighbours.map { it.url })
+        }
+    }
+
     // ------------------------------------------------------------------
     // Left sidebar (4.6.2: shared ChannelSidebar helper)
     // ------------------------------------------------------------------
@@ -920,7 +991,13 @@ class PlaybackActivity : FragmentActivity() {
         // DateFormat.format(long) takes the millis directly — the old
         // code wrapped each one in a throwaway Date (3 per overlay open).
         infoDateTime.text = dateTimeFormat.format(now)
-        infoChannelName.text = name
+        // 7.1.0 (Nova): the channel number rides along on the name
+        // line (the mobile centre panel already formats it this
+        // way). Before, the number only appeared inside the now
+        // meta line, so an overlay with no EPG yet — a fresh zap
+        // flash, say — showed no number at all.
+        val numPrefix = if (ch != null && ch.number > 0) "${ch.number}  " else ""
+        infoChannelName.text = "$numPrefix$name"
         // Skip re-loading the same logo — but only for a real URL: a
         // null logo (recording playback) still loads every time (Coil
         // shows the placeholder), exactly as before. 6.1.0:
@@ -1278,6 +1355,10 @@ class PlaybackActivity : FragmentActivity() {
     ) {
         hideOverlay()
         hideSidebar()
+        // 7.1.0 (Nova): the old channel's stream warm-ups are stale
+        // the moment a switch starts — drop them; the new channel's
+        // first READY starts fresh ones for its own neighbours.
+        streamPrefetcher.cancel()
         if (recordingUri != null) {
             val intent = Intent(this, PlaybackActivity::class.java)
             intent.putExtra(EXTRA_CHANNEL, pick)
@@ -1331,6 +1412,15 @@ class PlaybackActivity : FragmentActivity() {
         favoritesCache = PlaylistRepository.favorites(this)
         updateTransportIcons()
         refreshNowNext(briefInfo)
+        // 7.1.0 (Nova): a channel up/down zap flashes the info
+        // overlay NOW — new channel's number, name and logo — instead
+        // of waiting for refreshNowNext's EPG load to land. On a slow
+        // guide load the zap used to show nothing but the buffering
+        // spinner until then. When the EPG does land, it finds the
+        // overlay visible and refreshes it in place with the
+        // now/next titles (see refreshNowNext), keeping the brief
+        // flash timing.
+        if (briefInfo) showChannelInfo(brief = true)
     }
 
     /** 5.0.0: leave a catch-up replay and return to the live stream
@@ -1437,7 +1527,23 @@ class PlaybackActivity : FragmentActivity() {
     private fun showOptions() {
         val ch = channel
         if (ch == null) {
-            // Playing a recording: no channel options.
+            // 7.1.0 (Nova): a recording has no channel options, but
+            // the sleep timer is not a channel option — it only
+            // pauses the player — so recordings get a one-item menu
+            // carrying it instead of no menu at all. 7.0.0 skipped
+            // them because this function returned here; the timer
+            // machinery itself (arm, deadline, fire) never depended
+            // on a channel.
+            if (recordingUri == null) return
+            val sleepItem = if (sleepTimerMinutes > 0) {
+                getString(R.string.sleep_timer_on, sleepTimerMinutes)
+            } else {
+                getString(R.string.sleep_timer)
+            }
+            AlertDialog.Builder(this)
+                .setTitle(recordingName ?: getString(R.string.recording_label))
+                .setItems(arrayOf(sleepItem)) { _, _ -> showSleepTimerDialog() }
+                .show()
             return
         }
         val isFav = ch.id in favoritesCache
@@ -1537,6 +1643,8 @@ class PlaybackActivity : FragmentActivity() {
         // 7.0.0 (Nova): the sleep timer's callback goes too — its
         // deadline is kept, and onStart re-arms it (see there).
         infoHandler.removeCallbacks(sleepRunnable)
+        // 7.1.0 (Nova): stream warm-ups stop with playback.
+        streamPrefetcher.cancel()
         overlay.visibility = View.GONE
         // 6.0.0-rc3: the mobile overlay group hides instantly here
         // (no fade — the activity is leaving). Otherwise the Guide
@@ -1554,6 +1662,13 @@ class PlaybackActivity : FragmentActivity() {
         logWatchSession()
         player?.release()
         player = null
+    }
+
+    override fun onDestroy() {
+        // 7.1.0 (Nova): the prefetcher owns a coroutine scope that
+        // nothing else cancels — tear it down with the activity.
+        streamPrefetcher.shutdown()
+        super.onDestroy()
     }
 
     /** Log the current watch session to the local statistics and

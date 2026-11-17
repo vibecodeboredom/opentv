@@ -1213,6 +1213,31 @@ class GuideActivity : FragmentActivity() {
         nowLine.translationX = ((nowOffsetMinutes * pxPerMinute).toInt()).toFloat()
         nowLine.visibility = View.VISIBLE
         refreshNowLine()
+        startNowLineTicker()
+    }
+
+    /** 7.1.0 (Nova): the job creeping the now-line forward while
+     * the guide sits open (see startNowLineTicker). */
+    private var nowLineJob: Job? = null
+
+    /** 7.1.0 (Nova): the now-line used to be positioned once, when
+     * the guide was built — leave the guide open and it fell behind
+     * real time until the next rebuild. Now it creeps forward once
+     * a minute. The shared nowMillis is deliberately NOT updated:
+     * programme clicks and the details header keep the build-time
+     * "now" they were built with; only the line moves. Restarted by
+     * every build, so a search rebuild never stacks two tickers,
+     * and lifecycleScope cancels it when the guide closes. */
+    private fun startNowLineTicker() {
+        nowLineJob?.cancel()
+        nowLineJob = lifecycleScope.launch {
+            while (true) {
+                delay(NOW_LINE_TICK_MS)
+                if (nowLine.visibility != View.VISIBLE) continue
+                val offsetMinutes = (System.currentTimeMillis() - windowStart) / 60_000L
+                nowLine.translationX = ((offsetMinutes * pxPerMinute).toInt()).toFloat()
+            }
+        }
     }
 
     /** Keep the red now-line spanning the whole grid. The frame grows as
@@ -1575,6 +1600,9 @@ class GuideActivity : FragmentActivity() {
     companion object {
         /** Intent extra: id of the channel playing underneath. */
         const val EXTRA_CURRENT_CHANNEL_ID = "current_channel_id"
+        /** 7.1.0 (Nova): how often the now-line creeps forward
+         * while the guide sits open. */
+        private const val NOW_LINE_TICK_MS = 60_000L
         private const val WINDOW_HOURS = 6
         /** 6.1.2: hours of past programming the guide window reaches
          * back (10 hours total). The default EPG reaches ~4.5 hours
