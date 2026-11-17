@@ -1535,11 +1535,7 @@ class PlaybackActivity : FragmentActivity() {
             // machinery itself (arm, deadline, fire) never depended
             // on a channel.
             if (recordingUri == null) return
-            val sleepItem = if (sleepTimerMinutes > 0) {
-                getString(R.string.sleep_timer_on, sleepTimerMinutes)
-            } else {
-                getString(R.string.sleep_timer)
-            }
+            val sleepItem = sleepTimerMenuLabel()
             AlertDialog.Builder(this)
                 .setTitle(recordingName ?: getString(R.string.recording_label))
                 .setItems(arrayOf(sleepItem)) { _, _ -> showSleepTimerDialog() }
@@ -1556,13 +1552,10 @@ class PlaybackActivity : FragmentActivity() {
             hasRecording -> getString(R.string.record_again)
             else -> getString(R.string.record_channel)
         }
-        // 7.0.0 (Nova): sleep timer — shows the set duration while
-        // one is running, so the menu doubles as its status.
-        items += if (sleepTimerMinutes > 0) {
-            getString(R.string.sleep_timer_on, sleepTimerMinutes)
-        } else {
-            getString(R.string.sleep_timer)
-        }
+        // 7.0.0 (Nova): sleep timer — while one is running the menu
+        // doubles as its status (7.1.1: counting down, see
+        // sleepTimerMenuLabel).
+        items += sleepTimerMenuLabel()
         AlertDialog.Builder(this)
             .setTitle(ch.name)
             .setItems(items.toTypedArray()) { _, which ->
@@ -1593,6 +1586,22 @@ class PlaybackActivity : FragmentActivity() {
                 }
             }
             .show()
+    }
+
+    /** 7.1.1 (Nova): the options-menu label for the sleep timer.
+     * Unarmed it is the plain "Sleep timer"; armed it counts down
+     * from the stored deadline ("Sleep timer: 23 min left",
+     * rounded up so it never claims 0 while still armed) instead
+     * of repeating the duration originally set. If the deadline
+     * has somehow already passed without the callback firing, it
+     * falls back to the set-duration label — the callback is due
+     * immediately anyway. */
+    private fun sleepTimerMenuLabel(): String {
+        if (sleepTimerMinutes <= 0) return getString(R.string.sleep_timer)
+        val remainingMs = sleepDeadlineMillis - System.currentTimeMillis()
+        if (remainingMs <= 0L) return getString(R.string.sleep_timer_on, sleepTimerMinutes)
+        val remainingMin = ((remainingMs + 59_999L) / 60_000L).toInt()
+        return getString(R.string.sleep_timer_remaining, remainingMin)
     }
 
     /** 7.0.0 (Nova): pick a sleep-timer duration (or turn it off). */

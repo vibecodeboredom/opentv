@@ -169,6 +169,7 @@
     <string name="recently_watched">Recently watched</string>
     <string name="sleep_timer">Sleep timer</string>
     <string name="sleep_timer_on">Sleep timer: %1$d min</string>
+    <string name="sleep_timer_remaining">Sleep timer: %1$d min left</string>
     <string name="sleep_timer_off">Off</string>
     <string name="sleep_timer_minutes">%1$d minutes</string>
     <string name="sleep_timer_set">Sleep timer set — playback pauses in %1$d min</string>

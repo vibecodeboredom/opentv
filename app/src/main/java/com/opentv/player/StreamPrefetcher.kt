@@ -7,6 +7,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -32,6 +34,8 @@ import java.net.URL
  * - At most 2 URLs per call, fetched one at a time.
  * - At most [MAX_WARM_BYTES] read per URL, then closed — a
  *   connection/first-bytes warm-up, never a stream download.
+ *   An HLS playlist spends part of that same budget on the first
+ *   URI it lists (7.1.1), so the per-channel total never grows.
  * - 5s connect / read timeouts, so a dead neighbour costs seconds
  *   of background time at most and never blocks anything.
  * - Every failure is swallowed. A warm-up that fails costs
@@ -95,23 +99,44 @@ class StreamPrefetcher {
     }
 
     /** Open one stream URL, read a capped prefix, close. All
-     * failures are swallowed — see the class comment. */
-    private fun warm(url: String) {
+     * failures are swallowed — see the class comment.
+     *
+     * 7.1.1 (Nova): if what came back is an HLS playlist, the
+     * first URI it lists (a variant playlist from a master, or
+     * the first media segment from a media playlist) is warmed
+     * too, spending whatever of this call's byte budget the
+     * playlist itself did not use — the per-channel total stays
+     * capped at [MAX_WARM_BYTES]. */
+    private suspend fun warm(url: String, byteBudget: Int = MAX_WARM_BYTES, followPlaylist: Boolean = true) {
         var connection: HttpURLConnection? = null
         var stream: InputStream? = null
+        var read = 0
+        var followUrl: String? = null
         try {
             connection = URL(url).openConnection() as HttpURLConnection
             activeConnection = connection
+            // cancel() unblocks a live read by disconnecting the
+            // registered connection, but it can slip in just
+            // before this registration, leaving a cancelled job
+            // warming a channel nobody wants. Bail out instead —
+            // the finally block still closes everything.
+            if (!currentCoroutineContext().isActive) return
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
             connection.setRequestProperty("User-Agent", USER_AGENT)
             stream = connection.inputStream
+            // Playlist bytes are only retained when a follow-up
+            // warm is allowed, and never beyond the budget.
+            val playlistBytes = if (followPlaylist) ByteArrayOutputStream() else null
             val buffer = ByteArray(4096)
-            var read = 0
-            while (read < MAX_WARM_BYTES) {
-                val n = stream.read(buffer, 0, minOf(buffer.size, MAX_WARM_BYTES - read))
+            while (read < byteBudget) {
+                val n = stream.read(buffer, 0, minOf(buffer.size, byteBudget - read))
                 if (n < 0) break
+                playlistBytes?.write(buffer, 0, n)
                 read += n
+            }
+            if (playlistBytes != null && read < byteBudget) {
+                followUrl = firstPlaylistUri(url, playlistBytes.toByteArray())
             }
         } catch (e: Exception) {
             // Deliberately ignored — a failed warm-up is free.
@@ -125,6 +150,32 @@ class StreamPrefetcher {
             // while this one was closing — only clear our own.
             if (activeConnection === connection) activeConnection = null
             connection?.disconnect()
+        }
+        // Follow only once this connection is closed, and only
+        // while the job is still wanted.
+        val next = followUrl
+        if (next != null && currentCoroutineContext().isActive) {
+            warm(next, byteBudget - read, followPlaylist = false)
+        }
+    }
+
+    /** The first URI an HLS playlist lists, resolved against the
+     * playlist's own URL — or null when [bytes] are not a playlist
+     * or hold no usable HTTP(S) URI. Comment/blank lines and the
+     * #EXTM3U header are skipped, so the first hit is the first
+     * thing a player would fetch next. */
+    private fun firstPlaylistUri(base: String, bytes: ByteArray): String? {
+        val text = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
+        if (!text.startsWith("#EXTM3U")) return null
+        val uri = text.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() && !it.startsWith("#") }
+            ?: return null
+        return try {
+            val resolved = URL(URL(base), uri).toString()
+            if (resolved.startsWith("http://") || resolved.startsWith("https://")) resolved else null
+        } catch (e: Exception) {
+            null
         }
     }
 }
