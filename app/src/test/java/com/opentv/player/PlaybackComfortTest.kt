@@ -70,4 +70,22 @@ class PlaybackComfortTest {
         assertEquals(0L, PlaybackComfort.clampSeek(-1L, 0L))
         assertEquals(999_999L, PlaybackComfort.clampSeek(999_999L, -1L))
     }
+
+    // Extra cases from a Gemini review pass (7.1.0).
+    @Test(expected = IllegalArgumentException::class)
+    fun sleepDelayRejectsNegative() {
+        PlaybackComfort.sleepDelayMillis(-15)
+    }
+
+    @Test
+    fun clampSeekExactBoundaries() {
+        assertEquals(0L, PlaybackComfort.clampSeek(0L, 100L))
+        assertEquals(100L, PlaybackComfort.clampSeek(100L, 100L))
+        assertEquals(0L, PlaybackComfort.clampSeek(0L, 0L))
+    }
+
+    @Test
+    fun clampSeekNegativeDurationWithPositivePosition() {
+        assertEquals(50L, PlaybackComfort.clampSeek(50L, -100L))
+    }
 }

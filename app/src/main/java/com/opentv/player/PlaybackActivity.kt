@@ -21,6 +21,7 @@ import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -180,10 +181,18 @@ class PlaybackActivity : FragmentActivity() {
     private val sleepHandler = Handler(Looper.getMainLooper())
     private val sleepTimerRunnable = Runnable {
         sleepTimerMinutes = null
+        // Dismiss any options dialog first — finishing with one
+        // up leaks its window (review catch, 7.1.0).
+        currentDialog?.dismiss()
+        currentDialog = null
         Toast.makeText(this, R.string.sleep_timer_ended, Toast.LENGTH_LONG).show()
         player?.pause()
         finish()
     }
+    /** 7.1.0: the options dialog currently on screen (menu, sleep
+     * picker or speed picker), if any — the sleep timer dismisses
+     * it before finishing the activity. */
+    private var currentDialog: AlertDialog? = null
     /** 7.1.0: playback speed for live streams (1× default).
      * Re-applied whenever the player is rebuilt (returning from
      * the guide); a channel change starts a new activity, so it
@@ -1540,6 +1549,17 @@ class PlaybackActivity : FragmentActivity() {
                 entries[which].second()
             }
             .show()
+            .also { trackDialog(it) }
+    }
+
+    /** 7.1.0: remember the dialog on screen (and clear the field
+     * when it goes away) so the sleep timer can dismiss it before
+     * finishing the activity. */
+    private fun trackDialog(dialog: AlertDialog) {
+        currentDialog = dialog
+        dialog.setOnDismissListener {
+            if (currentDialog === dialog) currentDialog = null
+        }
     }
 
     /** 7.1.0: sleep-timer picker — Off / 15 / 30 / 60 / 90 minutes. */
@@ -1557,6 +1577,7 @@ class PlaybackActivity : FragmentActivity() {
                 )
             }
             .show()
+            .also { trackDialog(it) }
     }
 
     /** 7.1.0: set (or clear) the sleep timer. The timer counts
@@ -1599,13 +1620,19 @@ class PlaybackActivity : FragmentActivity() {
                 ).show()
             }
             .show()
+            .also { trackDialog(it) }
     }
 
     /** 7.1.0: skip a recording forward/back by [deltaMs] (±10 s),
-     * clamped to the recording's length. A no-op without a player. */
+     * clamped to the recording's length. A no-op without a player,
+     * and a no-op while the source is still preparing — the
+     * position is C.TIME_UNSET then, and seeking from it would
+     * jump to 0 (review catch, 7.1.0). */
     private fun seekRecording(deltaMs: Long) {
         val p = player ?: return
-        val target = PlaybackComfort.clampSeek(p.currentPosition + deltaMs, p.duration)
+        val position = p.currentPosition
+        if (position == C.TIME_UNSET) return
+        val target = PlaybackComfort.clampSeek(position + deltaMs, p.duration)
         p.seekTo(target)
         Toast.makeText(
             this,
@@ -1618,7 +1645,10 @@ class PlaybackActivity : FragmentActivity() {
     override fun onDestroy() {
         // 7.1.0: the sleep timer dies with the session — a channel
         // change (new activity) starts fresh, and a finished activity
-        // must never fire into a dead player.
+        // must never fire into a dead player. Dismiss any dialog
+        // too, so no window is left attached to this activity.
+        currentDialog?.dismiss()
+        currentDialog = null
         sleepHandler.removeCallbacks(sleepTimerRunnable)
         super.onDestroy()
     }
