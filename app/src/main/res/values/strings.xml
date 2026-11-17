@@ -102,6 +102,17 @@
     <string name="menu_favorites_only_enabled">Showing favorites only</string>
     <string name="menu_favorites_only_disabled">Showing all channels</string>
     <string name="menu_no_favorites">No favorites yet — add some first</string>
+    <!-- Guide, day by day (7.2.0). -->
+    <string name="menu_prev_day">←  Previous day</string>
+    <string name="menu_next_day">Next day  →</string>
+    <string name="menu_go_to_day">📅  Go to day…</string>
+    <string name="menu_tonight">🌙  Tonight</string>
+    <string name="menu_tonight_exit">📺  Full guide</string>
+    <string name="guide_day_today">Today (%1$s)</string>
+    <string name="guide_day_tomorrow">Tomorrow (%1$s)</string>
+    <string name="guide_tonight_header">Tonight · %1$s</string>
+    <string name="guide_already_today">Already on today</string>
+    <string name="guide_day_limit">Guide data only goes a week ahead</string>
     <string name="guide_epg_updated">Guide updated %1$s</string>
     <string name="guide_epg_unknown">Guide data age unknown</string>
     <string name="guide_number_entry">Ch %1$s</string>
@@ -207,4 +218,8 @@
     <string name="prefs_size_small">Small</string>
     <string name="prefs_size_medium">Medium</string>
     <string name="prefs_size_large">Large</string>
+    <string name="prefs_guide_window_size">Guide window size</string>
+    <string name="prefs_window_6h">6 hours</string>
+    <string name="prefs_window_12h">12 hours</string>
+    <string name="prefs_window_24h">24 hours</string>
 </resources>

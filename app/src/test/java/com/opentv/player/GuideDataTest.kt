@@ -305,4 +305,75 @@ class GuideDataTest {
         val now = 1_794_081_600_000L
         assertEquals("3 d ago", GuideData.formatAge(now - 3 * 24 * hour, now))
     }
+
+    // 7.2.0: day navigation + Tonight. tonightWindow uses local-time
+    // Calendar, so these tests pin the default timezone to UTC.
+    private fun withUtc(block: () -> Unit) {
+        val original = java.util.TimeZone.getDefault()
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("UTC"))
+        try {
+            block()
+        } finally {
+            java.util.TimeZone.setDefault(original)
+        }
+    }
+
+    @Test
+    fun dayAnchorTodayIsTopOfHour() {
+        // 2026-11-07 20:30 UTC -> anchor 20:00 UTC.
+        val now = 1_794_083_400_000L
+        assertEquals(1_794_081_600_000L, GuideData.dayAnchorMillis(now, 0))
+    }
+
+    @Test
+    fun dayAnchorTomorrowAdds24Hours() {
+        val now = 1_794_083_400_000L
+        assertEquals(1_794_081_600_000L + 24 * hour, GuideData.dayAnchorMillis(now, 1))
+    }
+
+    @Test
+    fun dayAnchorYesterdaySubtracts24Hours() {
+        val now = 1_794_083_400_000L
+        assertEquals(1_794_081_600_000L - 24 * hour, GuideData.dayAnchorMillis(now, -1))
+    }
+
+    @Test
+    fun tonightWindowMorningIsToday6To11Pm() {
+        withUtc {
+            // 2026-11-07 10:00 UTC -> tonight 18:00–23:00 UTC.
+            val (start, hours) = GuideData.tonightWindow(1_794_045_600_000L)
+            assertEquals(1_794_074_400_000L, start)
+            assertEquals(5, hours)
+        }
+    }
+
+    @Test
+    fun tonightWindowEveningIsStillToday6To11Pm() {
+        withUtc {
+            // 2026-11-07 20:30 UTC -> still tonight 18:00–23:00 UTC.
+            val (start, hours) = GuideData.tonightWindow(1_794_083_400_000L)
+            assertEquals(1_794_074_400_000L, start)
+            assertEquals(5, hours)
+        }
+    }
+
+    @Test
+    fun tonightWindowAfter11PmIsTomorrow() {
+        withUtc {
+            // 2026-11-07 23:30 UTC -> tomorrow 18:00–23:00 UTC.
+            val (start, hours) = GuideData.tonightWindow(1_794_094_200_000L)
+            assertEquals(1_794_160_800_000L, start)
+            assertEquals(5, hours)
+        }
+    }
+
+    @Test
+    fun tonightWindowAt11PmIsTomorrow() {
+        withUtc {
+            // 2026-11-07 23:00 UTC exactly -> tomorrow 18:00 UTC.
+            val (start, hours) = GuideData.tonightWindow(1_794_092_400_000L)
+            assertEquals(1_794_160_800_000L, start)
+            assertEquals(5, hours)
+        }
+    }
 }

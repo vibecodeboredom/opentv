@@ -20,6 +20,7 @@ object AppSettings {
     private const val KEY_GUIDE_SHOW_PAST = "guide_show_past"
     private const val KEY_GUIDE_FAVORITES_ONLY = "guide_favorites_only"
     private const val KEY_CHANNEL_LIST_SIZE = "channel_list_size"
+    private const val KEY_GUIDE_WINDOW_SIZE = "guide_window_size"
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -79,6 +80,26 @@ object AppSettings {
 
     fun setGuideFavoritesOnly(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_GUIDE_FAVORITES_ONLY, value).apply()
+    }
+
+    /** Guide window size (7.2.0): how many hours forward the guide
+     * shows from its anchor. 6 h is the old behaviour; the past
+     * hours from the show-past setting are added on top. */
+    enum class GuideWindowSize(val hours: Int) { SIX(6), TWELVE(12), TWENTY_FOUR(24) }
+
+    fun guideWindowSize(context: Context): GuideWindowSize {
+        return when (prefs(context).getString(KEY_GUIDE_WINDOW_SIZE, "6")) {
+            "12" -> GuideWindowSize.TWELVE
+            "24" -> GuideWindowSize.TWENTY_FOUR
+            else -> GuideWindowSize.SIX
+        }
+    }
+
+    /** Forward hours of the guide window (6/12/24). */
+    fun guideWindowHours(context: Context): Int = guideWindowSize(context).hours
+
+    fun setGuideWindowSize(context: Context, size: GuideWindowSize) {
+        prefs(context).edit().putString(KEY_GUIDE_WINDOW_SIZE, size.hours.toString()).apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */

@@ -129,6 +129,27 @@ class SettingsActivity : FragmentActivity() {
                 )
             }
         }
+        // 7.2.0: guide window size (6/12/24 h forward). The guide
+        // picks it up when it opens, or on return when it is open.
+        findViewById<RadioGroup>(R.id.pref_guide_window_size).apply {
+            check(
+                when (AppSettings.guideWindowSize(this@SettingsActivity)) {
+                    AppSettings.GuideWindowSize.TWELVE -> R.id.pref_window_12h
+                    AppSettings.GuideWindowSize.TWENTY_FOUR -> R.id.pref_window_24h
+                    else -> R.id.pref_window_6h
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setGuideWindowSize(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_window_12h -> AppSettings.GuideWindowSize.TWELVE
+                        R.id.pref_window_24h -> AppSettings.GuideWindowSize.TWENTY_FOUR
+                        else -> AppSettings.GuideWindowSize.SIX
+                    }
+                )
+            }
+        }
 
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)

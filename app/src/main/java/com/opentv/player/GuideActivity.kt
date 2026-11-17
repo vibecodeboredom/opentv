@@ -97,11 +97,21 @@ class GuideActivity : FragmentActivity() {
     private var allChannels: List<Channel> = emptyList()
     private var epg: Map<String, List<EpgParser.Programme>> = emptyMap()
     private var windowStart: Long = 0L
-    /** 6.1.2: the window's total span in hours — WINDOW_HOURS forward
-     * plus the past hours when past programming is on (10 by default).
-     * Set in onCreate from the setting; every span computation uses
-     * this, never the WINDOW_HOURS constant directly. */
-    private var windowHours: Int = WINDOW_HOURS
+    /** 6.1.2: the window's total span in hours — the forward hours
+     * from the guide-window-size setting plus the past hours when
+     * past programming is on (10 by default). Set by computeWindow;
+     * every span computation uses this, never the setting directly. */
+    private var windowHours: Int = 6
+    /** 7.2.0: the window's forward span in hours, from the
+     * guide-window-size setting (6/12/24). */
+    private var forwardHours: Int = 6
+    /** 7.2.0: day navigation — 0 = today, +1 = tomorrow, up to
+     * MAX_DAY_OFFSET. The window anchor is the top of the current
+     * hour shifted by this many whole days. */
+    private var dayOffset: Int = 0
+    /** 7.2.0: Tonight quick view — favorites only, fixed 6–11 PM
+     * window. While on, the window size setting does not apply. */
+    private var tonightMode: Boolean = false
     /** 6.1.2: how many hours of past the window covers (0 when the
      * past-programming setting is off — the old top-of-hour window). */
     private var pastHours: Int = 0
@@ -364,15 +374,10 @@ class GuideActivity : FragmentActivity() {
             // with the ⏪ marker and catch-up playback. The default
             // EPG reaches ~4.5 hours back, so the 4-hour lookback is
             // real data, not empty cells. Turn it off in Settings to
-            // go back to the old top-of-hour window.
-            pastHours = if (AppSettings.guideShowsPast(this@GuideActivity)) {
-                WINDOW_PAST_HOURS
-            } else {
-                0
-            }
-            windowHours = WINDOW_HOURS + pastHours
-            windowStart = GuideData.windowStartMillis(nowMillis) -
-                pastHours * 60L * 60 * 1000
+            // go back to the old top-of-hour window. 7.2.0: the
+            // forward span comes from the guide-window-size setting
+            // (6/12/24 h) — see computeWindow.
+            computeWindow()
             allChannels = channels
             rebuildRows()
             if (allRows.isEmpty()) {
@@ -417,6 +422,24 @@ class GuideActivity : FragmentActivity() {
         super.onResume()
         // Safety net for the favorites cache (see the field comment).
         favoritesCache = PlaylistRepository.favorites(this)
+        // 7.2.0: the window size can change in Settings (opened from
+        // the guide menu) — rebuild the guide when it did. Tonight
+        // mode keeps its fixed 6–11 PM window, so it is untouched.
+        // Guarded on built rows: onResume also fires before the
+        // first build finishes.
+        if (!tonightMode && allRows.isNotEmpty() &&
+            AppSettings.guideWindowHours(this) != forwardHours
+        ) {
+            // The anchor is "now" — refresh it, the guide may have
+            // been open for hours before Settings was opened.
+            nowMillis = System.currentTimeMillis()
+            computeWindow()
+            lifecycleScope.launch {
+                rebuildRows()
+                buildGuide(allRows)
+                updateEpgFreshness()
+            }
+        }
     }
 
     /**
@@ -606,8 +629,23 @@ class GuideActivity : FragmentActivity() {
      * read fresh — they can change from playback, the sidebar or
      * mobile home while the guide is open.
      */
+    /** 7.2.0: (re)compute the window from the settings + day offset.
+     * The anchor is the top of the current hour shifted by [dayOffset]
+     * whole days; the window runs [pastHours] back from it and
+     * [forwardHours] forward. Tonight mode does not use this — it
+     * has its own fixed 6–11 PM window (see setTonightMode). */
+    private fun computeWindow() {
+        pastHours = if (AppSettings.guideShowsPast(this)) WINDOW_PAST_HOURS else 0
+        forwardHours = AppSettings.guideWindowHours(this)
+        windowHours = forwardHours + pastHours
+        windowStart = GuideData.dayAnchorMillis(nowMillis, dayOffset) -
+            pastHours * 60L * 60 * 1000
+    }
+
     private fun guideChannels(): List<Channel> {
-        if (!favoritesOnly) return allChannels
+        // 7.2.0: Tonight is favorites-only by definition, even when
+        // the favorites-only toggle is off.
+        if (!favoritesOnly && !tonightMode) return allChannels
         val favorites = PlaylistRepository.favorites(this)
         return allChannels.filter { it.id in favorites }
     }
@@ -653,8 +691,22 @@ class GuideActivity : FragmentActivity() {
 
     /** Jump back to the programme on now (7.0.0, guide menu): focus
      * the current channel's now programme — or the first one on now —
-     * and scroll the grid so "now" is in view. */
+     * and scroll the grid so "now" is in view. 7.2.0: from a day view
+     * or Tonight, first come home to today and rebuild — then the
+     * normal focus lands on the now programme. */
     private fun jumpToNow() {
+        if (dayOffset != 0 || tonightMode) {
+            dayOffset = 0
+            tonightMode = false
+            nowMillis = System.currentTimeMillis()
+            computeWindow()
+            lifecycleScope.launch {
+                rebuildRows()
+                buildGuide(allRows)
+                updateEpgFreshness()
+            }
+            return
+        }
         nowMillis = System.currentTimeMillis()
         val idx = rowIndexOf(currentChannelId).takeIf { it >= 0 }
             ?: displayRows.indexOfFirst { row ->
@@ -662,6 +714,103 @@ class GuideActivity : FragmentActivity() {
             }
         if (idx < 0) return
         focusNowCard(idx)
+    }
+
+    /** 7.2.0: shift the guide by whole days, clamped to today ..
+     * +MAX_DAY_OFFSET — the EPG has no data for yesterday, and
+     * little past a week out. Rebuilds the grid; the header shows
+     * the viewed day and the now-line is hidden off-today. */
+    private fun shiftDay(delta: Int) {
+        val target = (dayOffset + delta).coerceIn(0, MAX_DAY_OFFSET)
+        if (target == dayOffset) {
+            Toast.makeText(
+                this,
+                if (delta < 0) R.string.guide_already_today else R.string.guide_day_limit,
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        goToDay(target)
+    }
+
+    /** 7.2.0: jump the guide to a day offset (0 = today). Leaves
+     * Tonight mode — the day view is the full guide again. */
+    private fun goToDay(offset: Int) {
+        dayOffset = offset.coerceIn(0, MAX_DAY_OFFSET)
+        tonightMode = false
+        nowMillis = System.currentTimeMillis()
+        computeWindow()
+        lifecycleScope.launch {
+            rebuildRows()
+            buildGuide(allRows)
+            updateEpgFreshness()
+        }
+    }
+
+    /** 7.2.0: pick a day to view — today through +MAX_DAY_OFFSET. */
+    private fun showDayPicker() {
+        // The day labels are dates off "now" — refresh it, the guide
+        // may have been open across midnight.
+        nowMillis = System.currentTimeMillis()
+        val items = (0..MAX_DAY_OFFSET).map { offset ->
+            val dayMillis = GuideData.dayAnchorMillis(nowMillis, offset)
+            when (offset) {
+                0 -> getString(R.string.guide_day_today, GuideData.formatDate(dayMillis))
+                1 -> getString(R.string.guide_day_tomorrow, GuideData.formatDate(dayMillis))
+                else -> GuideData.formatDate(dayMillis)
+            }
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.menu_go_to_day)
+            .setItems(items) { _, which -> goToDay(which) }
+            .show()
+    }
+
+    /** 7.2.0: Tonight quick view — the favorites' prime-time shows,
+     * 6–11 PM, on one screen. Entering sets a fixed 5-hour window
+     * and a favorites-only channel set; leaving comes back to today.
+     * No favorites yet shows the empty view, like favorites-only. */
+    private fun setTonightMode(enabled: Boolean) {
+        tonightMode = enabled
+        nowMillis = System.currentTimeMillis()
+        if (!enabled) {
+            dayOffset = 0
+            computeWindow()
+        } else {
+            val (start, hours) = GuideData.tonightWindow(nowMillis)
+            windowStart = start
+            windowHours = hours
+            pastHours = 0
+        }
+        lifecycleScope.launch {
+            rebuildRows()
+            if (allRows.isEmpty()) {
+                showEmptyGuide()
+                if (enabled) {
+                    Toast.makeText(
+                        this@GuideActivity,
+                        R.string.menu_no_favorites,
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } else {
+                emptyView.visibility = View.GONE
+                scroll.visibility = View.VISIBLE
+                buildGuide(allRows)
+            }
+            updateEpgFreshness()
+        }
+    }
+
+    /** Clear the grid and show the empty view (7.2.0: factored out
+     * of the favorites-only empty branch for Tonight to share). */
+    private fun showEmptyGuide() {
+        container.removeAllViews()
+        pinnedCol.removeAllViews()
+        displayRows = emptyList()
+        builtRowCount = 0
+        scroll.visibility = View.GONE
+        emptyView.visibility = View.VISIBLE
     }
 
     /** Focus a row's programme that's on now (its first card when
@@ -1011,7 +1160,7 @@ class GuideActivity : FragmentActivity() {
      * the columns stay aligned. */
     private fun buildGuideHeader(cellHeight: Int) {
         pinnedCol.addView(TextView(this).apply {
-            text = GuideData.formatDateTime(nowMillis)
+            text = headerDateText()
             setBackgroundColor(0xFF161616.toInt())
             setTextColor(0xFFC9C9D1.toInt())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
@@ -1042,6 +1191,15 @@ class GuideActivity : FragmentActivity() {
             header.addView(label)
         }
         container.addView(header)
+    }
+
+    /** 7.2.0: the date shown in the pinned header cell — the current
+     * time today, the viewed day's anchor time on a day view, and
+     * "Tonight · <date>" in Tonight mode. */
+    private fun headerDateText(): String = when {
+        tonightMode -> getString(R.string.guide_tonight_header, GuideData.formatDate(windowStart))
+        dayOffset != 0 -> GuideData.formatDateTime(windowStart + pastHours * 60L * 60 * 1000)
+        else -> GuideData.formatDateTime(nowMillis)
     }
 
     /** One channel row (4.7.2): the channel cell goes in the pinned
@@ -1414,7 +1572,16 @@ class GuideActivity : FragmentActivity() {
         } else {
             firstNowCard
         }
-        focusCard?.let { card ->
+        // 7.2.0: a day view or Tonight before 6 PM has no "now"
+        // programme — focus the current channel's first card (or the
+        // first row's) so the guide never opens with nothing focused.
+        val landingRow = if (AppSettings.guideOpensOnCurrentChannel(this)) {
+            rowIndexOf(currentChannelId).takeIf { it >= 0 } ?: 0
+        } else {
+            0
+        }
+        val landingCard = focusCard ?: firstCardOfRow(landingRow)
+        landingCard?.let { card ->
             container.post {
                 card.requestFocus()
                 // 6.1.2: with past programming in the window, "now"
@@ -1422,11 +1589,16 @@ class GuideActivity : FragmentActivity() {
                 // scroller so the now-line is in view with ~30 minutes
                 // of past to its left (scroll left for more). Posted
                 // after the focus so it wins over the framework's
-                // minimal focus scroll.
-                if (pastHours > 0) {
+                // minimal focus scroll. 7.2.0: a day view or Tonight
+                // opens at the window start instead — the framework
+                // still scrolls the focused card into view when it
+                // sits further right.
+                if (pastHours > 0 && dayOffset == 0 && !tonightMode) {
                     val nowX = ((nowMillis - windowStart) / 60_000L * pxPerMinute).toInt()
                     val targetX = maxOf(0, nowX - PAST_VISIBLE_MINUTES * pxPerMinute)
                     hscroll.post { hscroll.scrollTo(targetX, 0) }
+                } else {
+                    hscroll.post { hscroll.scrollTo(0, 0) }
                 }
             }
         }
@@ -1434,10 +1606,17 @@ class GuideActivity : FragmentActivity() {
         // Position the red now-line at the current time, spanning all rows.
         // (The frame now starts at the programme area, so there's no
         // channel-column offset any more — 4.7.2.)
-        val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L
-        nowLine.translationX = ((nowOffsetMinutes * pxPerMinute).toInt()).toFloat()
-        nowLine.visibility = View.VISIBLE
-        refreshNowLine()
+        // 7.2.0: only when "now" is inside the viewed window — a day
+        // view or Tonight before 6 PM has no now-line.
+        val windowEndMillis = windowStart + windowHours * 60L * 60 * 1000
+        if (nowMillis in windowStart until windowEndMillis) {
+            val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L
+            nowLine.translationX = ((nowOffsetMinutes * pxPerMinute).toInt()).toFloat()
+            nowLine.visibility = View.VISIBLE
+            refreshNowLine()
+        } else {
+            nowLine.visibility = View.GONE
+        }
     }
 
     /** Keep the red now-line spanning the whole grid. The frame grows as
@@ -1619,6 +1798,29 @@ class GuideActivity : FragmentActivity() {
         favoritesOnlyRow.setOnClickListener {
             dialog.dismiss()
             setFavoritesOnly(!favoritesOnly)
+        }
+
+        // 7.2.0: day navigation + Tonight — guide-level actions, so
+        // they live in this menu with jump-to-now and favorites-only.
+        view.findViewById<TextView>(R.id.menu_prev_day).setOnClickListener {
+            dialog.dismiss()
+            shiftDay(-1)
+        }
+        view.findViewById<TextView>(R.id.menu_next_day).setOnClickListener {
+            dialog.dismiss()
+            shiftDay(1)
+        }
+        view.findViewById<TextView>(R.id.menu_go_to_day).setOnClickListener {
+            dialog.dismiss()
+            showDayPicker()
+        }
+        val tonightRow = view.findViewById<TextView>(R.id.menu_tonight)
+        tonightRow.text = getString(
+            if (tonightMode) R.string.menu_tonight_exit else R.string.menu_tonight
+        )
+        tonightRow.setOnClickListener {
+            dialog.dismiss()
+            setTonightMode(!tonightMode)
         }
 
         view.findViewById<TextView>(R.id.menu_programme_title).text = programme.title
@@ -1824,10 +2026,13 @@ class GuideActivity : FragmentActivity() {
     companion object {
         /** Intent extra: id of the channel playing underneath. */
         const val EXTRA_CURRENT_CHANNEL_ID = "current_channel_id"
-        private const val WINDOW_HOURS = 6
+        /** 7.2.0: how far ahead day navigation goes (today .. +6).
+         * The EPG has no data for yesterday, and little past a week out. */
+        private const val MAX_DAY_OFFSET = 6
         /** 6.1.2: hours of past programming the guide window reaches
          * back (10 hours total). The default EPG reaches ~4.5 hours
-         * back, so the 4-hour lookback is real data. */
+         * back, so the 4-hour lookback is real data. The forward
+         * span is the guide-window-size setting (7.2.0). */
         private const val WINDOW_PAST_HOURS = 4
         /** 6.1.2: minutes of past left visible beside "now" when the
          * guide opens with the past window — scroll left for more. */
