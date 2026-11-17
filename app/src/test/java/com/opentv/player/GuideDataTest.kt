@@ -244,4 +244,65 @@ class GuideDataTest {
         assertTrue(date.contains("Nov"))
         assertTrue(date.contains("7"))
     }
+
+    // 7.0.0: channel-number jump.
+
+    private fun numbered(id: String, number: Int) =
+        Channel(
+            id = id, name = id, url = "https://example.com/$id.m3u8",
+            group = "Test", logo = null, tvgId = id, number = number
+        )
+
+    @Test
+    fun channelByNumberFindsByNumber() {
+        val channels = listOf(numbered("a", 1), numbered("b", 5), numbered("c", 12))
+        assertEquals("b", GuideData.channelByNumber(channels, 5)?.id)
+    }
+
+    @Test
+    fun channelByNumberReturnsNullWhenMissing() {
+        val channels = listOf(numbered("a", 1), numbered("b", 5))
+        assertEquals(null, GuideData.channelByNumber(channels, 7))
+    }
+
+    @Test
+    fun channelByNumberFirstMatchWinsOnDuplicates() {
+        val channels = listOf(numbered("a", 5), numbered("b", 5))
+        assertEquals("a", GuideData.channelByNumber(channels, 5)?.id)
+    }
+
+    // 7.0.0: EPG freshness label.
+
+    @Test
+    fun formatAgeJustNow() {
+        val now = 1_794_081_600_000L
+        assertEquals("just now", GuideData.formatAge(now, now))
+        assertEquals("just now", GuideData.formatAge(now - 30_000L, now))
+    }
+
+    @Test
+    fun formatAgeFutureReadsAsJustNow() {
+        val now = 1_794_081_600_000L
+        assertEquals("just now", GuideData.formatAge(now + 60_000L, now))
+    }
+
+    @Test
+    fun formatAgeMinutes() {
+        val now = 1_794_081_600_000L
+        assertEquals("5 min ago", GuideData.formatAge(now - 5 * 60_000L, now))
+        assertEquals("59 min ago", GuideData.formatAge(now - 59 * 60_000L, now))
+    }
+
+    @Test
+    fun formatAgeHours() {
+        val now = 1_794_081_600_000L
+        assertEquals("2 h ago", GuideData.formatAge(now - 2 * hour, now))
+        assertEquals("23 h ago", GuideData.formatAge(now - 23 * hour, now))
+    }
+
+    @Test
+    fun formatAgeDays() {
+        val now = 1_794_081_600_000L
+        assertEquals("3 d ago", GuideData.formatAge(now - 3 * 24 * hour, now))
+    }
 }

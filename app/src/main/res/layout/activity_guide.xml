@@ -127,13 +127,29 @@
                 android:layout_height="0dp"
                 android:layout_weight="1" />
 
-            <TextView
-                android:id="@+id/guide_detail_category"
-                android:layout_width="wrap_content"
+            <!-- 7.0.0: bottom row — when the guide data was last
+                 updated (left), and the channel's category (right). -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_gravity="end"
-                android:textColor="#9A9AA3"
-                android:textSize="15sp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/guide_epg_freshness"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="#7A7A85"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/guide_detail_category"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#9A9AA3"
+                    android:textSize="15sp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 
@@ -212,6 +228,25 @@
         android:textSize="18sp"
         android:visibility="gone" />
 </LinearLayout>
+
+    <!-- 7.0.0: channel-number entry pill — shows the digits typed
+         on the remote ("Ch 12") until the entry settles and the
+         guide jumps. Top-right, above the grid, below the sidebar. -->
+    <TextView
+        android:id="@+id/guide_number_entry"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="24dp"
+        android:background="@drawable/guide_now_button_bg"
+        android:textColor="#FFFFFF"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:visibility="gone" />
 
     <!-- Left sidebar scrim (4.6.2): 60% black over the guide. -->
     <View

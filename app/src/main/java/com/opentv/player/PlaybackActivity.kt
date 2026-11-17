@@ -107,6 +107,9 @@ class PlaybackActivity : FragmentActivity() {
         private const val MOBILE_OVERLAY_TIMEOUT_MS = 5_000L
         /** 6.0.0-rc3: mobile overlay fade-out duration. */
         private const val OVERLAY_FADE_MS = 200L
+        /** 7.0.0: a typed channel number settles after this long
+         * without another digit, and playback jumps to it. */
+        private const val NUMBER_ENTRY_TIMEOUT_MS = 1500L
         /** Channel up/down flash: half the Left/Right overlay time, so
          * zapping past a channel shows its info only briefly. */
         private const val CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS = 5_000L
@@ -154,6 +157,17 @@ class PlaybackActivity : FragmentActivity() {
     /** Auto-hide for the overlay. */
     private val infoHandler = Handler(Looper.getMainLooper())
     private val hideInfoRunnable = Runnable { hideOverlay() }
+    /** 7.0.0: channel-number entry — digits typed on the remote,
+     * shown in the top pill until the entry settles (timeout or
+     * Enter) and playback jumps to that channel. Reuses infoHandler
+     * (the overlay's handler) for the settle timeout. */
+    private val numberEntry = ChannelNumberEntry()
+    private lateinit var numberEntryView: TextView
+    private val numberJumpRunnable = Runnable { jumpToChannelNumber() }
+    /** 7.0.0: Enter confirmed a number jump on key-DOWN — the
+     * matching key-UP must be swallowed too, or the normal OK action
+     * (open the guide) would also fire. */
+    private var numberEnterConsumed = false
     /** True while the overlay up is a channel up/down flash (short
      * timeout); the first Left/Right press upgrades it to the normal
      * Left/Right timeout instead. */
@@ -248,6 +262,7 @@ class PlaybackActivity : FragmentActivity() {
         transportRecord = findViewById(R.id.transport_record)
         transportFavorite = findViewById(R.id.transport_favorite)
         pausedCluster = findViewById(R.id.paused_cluster)
+        numberEntryView = findViewById(R.id.playback_number_entry)
         channelsButton = findViewById(R.id.mobile_channels_button)
         // 6.0.0-rc3: mobile-only overlay group (top Guide button +
         // centred channel info). Bound here but only ever shown on
@@ -632,6 +647,51 @@ class PlaybackActivity : FragmentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val sidebarUp = channelSidebar.isVisible()
         val overlayUp = overlay.visibility == View.VISIBLE
+        // 7.0.0: swallow the key-UP of an Enter that confirmed a
+        // number jump — the DOWN already jumped, and the UP must not
+        // also run the normal OK action (open the guide).
+        if (event.action == KeyEvent.ACTION_UP && numberEnterConsumed &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                event.keyCode == KeyEvent.KEYCODE_ENTER)
+        ) {
+            numberEnterConsumed = false
+            return true
+        }
+        // 7.0.0: channel-number entry — same as the guide: digits
+        // accumulate in the top pill, Enter jumps immediately, any
+        // other key cancels the entry and proceeds normally, and a
+        // 1.5 s pause jumps on its own. Not during recording
+        // playback (there is no channel list to jump in).
+        if (event.action == KeyEvent.ACTION_DOWN && recordingUri == null) {
+            val digit = when (event.keyCode) {
+                KeyEvent.KEYCODE_0 -> 0
+                KeyEvent.KEYCODE_1 -> 1
+                KeyEvent.KEYCODE_2 -> 2
+                KeyEvent.KEYCODE_3 -> 3
+                KeyEvent.KEYCODE_4 -> 4
+                KeyEvent.KEYCODE_5 -> 5
+                KeyEvent.KEYCODE_6 -> 6
+                KeyEvent.KEYCODE_7 -> 7
+                KeyEvent.KEYCODE_8 -> 8
+                KeyEvent.KEYCODE_9 -> 9
+                else -> -1
+            }
+            if (digit >= 0) {
+                if (sidebarUp) hideSidebar()
+                onNumberDigit(digit)
+                return true
+            }
+            if (!numberEntry.isEmpty()) {
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    event.keyCode == KeyEvent.KEYCODE_ENTER
+                ) {
+                    numberEnterConsumed = true
+                    jumpToChannelNumber()
+                    return true
+                }
+                clearNumberEntry()
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
@@ -836,6 +896,48 @@ class PlaybackActivity : FragmentActivity() {
             // flashes its info briefly (4.7.3) instead of the normal
             // Left/Right overlay duration.
             switchToChannel(pick, briefInfo = true)
+        }
+    }
+
+    /** One digit of a channel number: show it in the top pill and
+     * re-arm the settle timeout (7.0.0). */
+    private fun onNumberDigit(digit: Int) {
+        val text = numberEntry.press(digit)
+        numberEntryView.text = getString(R.string.guide_number_entry, text)
+        numberEntryView.visibility = View.VISIBLE
+        infoHandler.removeCallbacks(numberJumpRunnable)
+        infoHandler.postDelayed(numberJumpRunnable, NUMBER_ENTRY_TIMEOUT_MS)
+    }
+
+    /** Hide the number pill and drop the pending entry. */
+    private fun clearNumberEntry() {
+        infoHandler.removeCallbacks(numberJumpRunnable)
+        numberEntry.clear()
+        numberEntryView.visibility = View.GONE
+    }
+
+    /** Jump to the typed channel number (7.0.0): switch playback to
+     * it, or toast when no (visible) channel has that number. */
+    private fun jumpToChannelNumber() {
+        val number = numberEntry.value()
+        clearNumberEntry()
+        if (number == null) return
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val channels = result.getOrNull() ?: return@launch
+            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            val target = GuideData.channelByNumber(
+                channels.filter { it.id !in hidden }, number
+            )
+            if (target == null) {
+                Toast.makeText(
+                    this@PlaybackActivity,
+                    getString(R.string.guide_no_channel_number, number),
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
+            switchToChannel(target, briefInfo = true)
         }
     }
 

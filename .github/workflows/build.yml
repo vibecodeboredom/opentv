@@ -2,7 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    # juniper-v10: the v10 race branch builds on push too, so its
+    # CI artifacts are available without a PR to main.
+    branches: [main, juniper-v10]
   pull_request:
     branches: [main]
 

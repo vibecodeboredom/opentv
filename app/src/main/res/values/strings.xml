@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OpenTV</string>
+    <!-- juniper-v10: distinct label so the separate package reads
+         as its own app on the TV, next to the main OpenTV. -->
+    <string name="app_name">OpenTV Juniper</string>
     <string name="loading">Loading channels…</string>
     <string name="loading_playlist">Loading playlist…</string>
     <string name="loading_guide">Loading guide…</string>
@@ -93,6 +95,21 @@
     <string name="menu_recent_searches">Recent searches</string>
     <string name="menu_clear_recent">Clear</string>
     <string name="menu_settings">⚙  Settings</string>
+    <string name="menu_jump_to_now">⏱  Jump to now</string>
+    <string name="menu_refresh_epg">⟳  Refresh guide data</string>
+    <string name="menu_favorites_only_on">★  Favorites only: On</string>
+    <string name="menu_favorites_only_off">☆  Favorites only: Off</string>
+    <string name="menu_favorites_only_enabled">Showing favorites only</string>
+    <string name="menu_favorites_only_disabled">Showing all channels</string>
+    <string name="menu_no_favorites">No favorites yet — add some first</string>
+    <string name="guide_epg_updated">Guide updated %1$s</string>
+    <string name="guide_epg_unknown">Guide data age unknown</string>
+    <string name="guide_number_entry">Ch %1$s</string>
+    <string name="guide_refreshing">Refreshing guide data…</string>
+    <string name="guide_refreshed">Guide data refreshed</string>
+    <string name="guide_refresh_failed">Refresh failed — showing saved guide</string>
+    <string name="guide_no_channel_number">No channel %1$d</string>
+    <string name="prefs_favorites_only">Guide shows favorites only</string>
     <string name="menu_external_player">Open in external player</string>
     <string name="menu_record">Record</string>
     <string name="menu_stop_recording">Stop recording</string>

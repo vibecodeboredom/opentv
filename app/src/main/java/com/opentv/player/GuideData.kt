@@ -314,6 +314,27 @@ object GuideData {
     fun formatTimeRange(startMillis: Long, stopMillis: Long): String =
         "${formatClock(startMillis)} – ${formatClock(stopMillis)}"
 
+    /** First channel with this playlist number, or null. Numbers are
+     * the playlist positions (1-based); a playlist can carry gaps, so
+     * the first match wins. 7.0.0: channel-number jump. */
+    fun channelByNumber(
+        channels: List<Channel>,
+        number: Int
+    ): Channel? = channels.firstOrNull { it.number == number }
+
+    /** How long ago [updatedAtMillis] was, as "just now", "5 min ago",
+     * "2 h ago" or "3 d ago". 7.0.0: the guide header's EPG freshness
+     * label. A zero or future timestamp reads as "just now". */
+    fun formatAge(updatedAtMillis: Long, nowMillis: Long): String {
+        val ageMinutes = (nowMillis - updatedAtMillis) / 60_000L
+        return when {
+            ageMinutes < 1 -> "just now"
+            ageMinutes < 60 -> "$ageMinutes min ago"
+            ageMinutes < 60 * 24 -> "${ageMinutes / 60} h ago"
+            else -> "${ageMinutes / (60 * 24)} d ago"
+        }
+    }
+
     /** Fraction of a programme already aired (0.0–1.0) for the progress bar. */
     fun progressFraction(
         programme: EpgParser.Programme,

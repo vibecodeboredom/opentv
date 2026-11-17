@@ -9,6 +9,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.TypedValue
@@ -175,6 +177,26 @@ class GuideActivity : FragmentActivity() {
      * on resume as a safety net for the other readers. */
     private var favoritesCache: Set<String> = emptySet()
 
+    /** 7.0.0: favorites-only view — when on, the guide shows only
+     * favorited channels. Read from the setting in onCreate; the
+     * menu toggle and Settings flip it. */
+    private var favoritesOnly: Boolean = false
+
+    /** 7.0.0: channel-number entry — digits typed on the remote,
+     * shown in the corner pill until the entry settles (timeout or
+     * Enter) and the guide jumps to that channel. */
+    private val numberEntry = ChannelNumberEntry()
+    private lateinit var numberEntryView: TextView
+    private val numberHandler = Handler(Looper.getMainLooper())
+    private val numberJumpRunnable = Runnable { jumpToChannelNumber() }
+    /** 7.0.0: Enter confirmed a number jump on key-DOWN — the
+     * matching key-UP must be swallowed too, or the newly focused
+     * programme card would also be clicked. */
+    private var numberEnterConsumed = false
+
+    /** 7.0.0: "Guide updated …" label in the details header. */
+    private lateinit var epgFreshness: TextView
+
     private fun isFavorite(channelId: String): Boolean = channelId in favoritesCache
 
     /** Id of the channel playing underneath (passed by PlaybackActivity);
@@ -218,6 +240,9 @@ class GuideActivity : FragmentActivity() {
         detailProgress = findViewById(R.id.guide_detail_progress)
         detailRemaining = findViewById(R.id.guide_detail_remaining)
         detailCategory = findViewById(R.id.guide_detail_category)
+        numberEntryView = findViewById(R.id.guide_number_entry)
+        epgFreshness = findViewById(R.id.guide_epg_freshness)
+        favoritesOnly = AppSettings.guideFavoritesOnly(this)
 
         // Left sidebar (shared ChannelSidebar helper, 4.6.2). Picking a
         // channel here starts playback of it, like tapping a programme
@@ -355,6 +380,7 @@ class GuideActivity : FragmentActivity() {
             }
             buildGuide(allRows)
             scroll.visibility = View.VISIBLE
+            updateEpgFreshness()
             // Don't auto-scroll: the channel column (numbers + names)
             // stays pinned at the left, like the reference photo.
             // The red now-line marks the current time; the user scrolls
@@ -369,7 +395,10 @@ class GuideActivity : FragmentActivity() {
                         epg = arrived
                         scroll.post {
                             if (!isDestroyed && !isFinishing) {
-                                lifecycleScope.launch { updateRowsWithEpg() }
+                                lifecycleScope.launch {
+                                    updateRowsWithEpg()
+                                    updateEpgFreshness()
+                                }
                             }
                         }
                     }
@@ -399,6 +428,53 @@ class GuideActivity : FragmentActivity() {
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val sidebarUp = channelSidebar.isVisible()
+        // 7.0.0: swallow the key-UP of an Enter that confirmed a
+        // number jump — the DOWN already jumped, and the UP must not
+        // also click the newly focused programme card.
+        if (event.action == KeyEvent.ACTION_UP && numberEnterConsumed &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                event.keyCode == KeyEvent.KEYCODE_ENTER)
+        ) {
+            numberEnterConsumed = false
+            return true
+        }
+        // 7.0.0: channel-number entry. Digits accumulate in the corner
+        // pill; Enter jumps immediately, any other key cancels the
+        // entry and proceeds normally, and a 1.5 s pause jumps on its
+        // own. Handled before the sidebar branches — a number typed
+        // while the sidebar is up closes it first.
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val digit = when (event.keyCode) {
+                KeyEvent.KEYCODE_0 -> 0
+                KeyEvent.KEYCODE_1 -> 1
+                KeyEvent.KEYCODE_2 -> 2
+                KeyEvent.KEYCODE_3 -> 3
+                KeyEvent.KEYCODE_4 -> 4
+                KeyEvent.KEYCODE_5 -> 5
+                KeyEvent.KEYCODE_6 -> 6
+                KeyEvent.KEYCODE_7 -> 7
+                KeyEvent.KEYCODE_8 -> 8
+                KeyEvent.KEYCODE_9 -> 9
+                else -> -1
+            }
+            if (digit >= 0) {
+                if (channelSidebar.isVisible()) channelSidebar.hide()
+                if (allRows.isNotEmpty()) onNumberDigit(digit)
+                return true
+            }
+            if (!numberEntry.isEmpty()) {
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    event.keyCode == KeyEvent.KEYCODE_ENTER
+                ) {
+                    numberEnterConsumed = true
+                    jumpToChannelNumber()
+                    return true
+                }
+                // Any other key abandons the half-typed number, then
+                // the normal handling below runs for that key.
+                clearNumberEntry()
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
@@ -508,6 +584,175 @@ class GuideActivity : FragmentActivity() {
     }
 
     /**
+     * The channels the guide shows: all of them, or only favorites
+     * when the favorites-only view is on (7.0.0). The favorites are
+     * read fresh — they can change from playback, the sidebar or
+     * mobile home while the guide is open.
+     */
+    private fun guideChannels(): List<Channel> {
+        if (!favoritesOnly) return allChannels
+        val favorites = PlaylistRepository.favorites(this)
+        return allChannels.filter { it.id in favorites }
+    }
+
+    /** One digit of a channel number: show it in the corner pill and
+     * re-arm the settle timeout (7.0.0). */
+    private fun onNumberDigit(digit: Int) {
+        val text = numberEntry.press(digit)
+        numberEntryView.text = getString(R.string.guide_number_entry, text)
+        numberEntryView.visibility = View.VISIBLE
+        numberHandler.removeCallbacks(numberJumpRunnable)
+        numberHandler.postDelayed(numberJumpRunnable, NUMBER_ENTRY_TIMEOUT_MS)
+    }
+
+    /** Hide the number pill and drop the pending entry. */
+    private fun clearNumberEntry() {
+        numberHandler.removeCallbacks(numberJumpRunnable)
+        numberEntry.clear()
+        numberEntryView.visibility = View.GONE
+    }
+
+    /** Jump to the typed channel number (7.0.0): focus its row's now
+     * programme, or toast when no channel has that number. */
+    private fun jumpToChannelNumber() {
+        val number = numberEntry.value()
+        clearNumberEntry()
+        if (number == null) return
+        val rowChannels = (allRows as? GuideData.LazyRows)?.channels
+            ?: allRows.map { it.channel }
+        val target = GuideData.channelByNumber(rowChannels, number)
+        if (target == null) {
+            Toast.makeText(
+                this,
+                getString(R.string.guide_no_channel_number, number),
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        val idx = rowIndexOf(target.id)
+        if (idx < 0) return
+        focusNowCard(idx)
+    }
+
+    /** Jump back to the programme on now (7.0.0, guide menu): focus
+     * the current channel's now programme — or the first one on now —
+     * and scroll the grid so "now" is in view. */
+    private fun jumpToNow() {
+        nowMillis = System.currentTimeMillis()
+        val idx = rowIndexOf(currentChannelId).takeIf { it >= 0 }
+            ?: displayRows.indexOfFirst { row ->
+                row.programmes.any { nowMillis in it.startMillis until it.stopMillis }
+            }
+        if (idx < 0) return
+        focusNowCard(idx)
+    }
+
+    /** Focus a row's programme that's on now (its first card when
+     * nothing is on now), building rows up to it first, and scroll
+     * the grid so the now-line is in view with past to its left —
+     * the same framing the guide opens with. */
+    private fun focusNowCard(rowIndex: Int) {
+        if (rowIndex >= builtRowCount) {
+            appendRows(rowIndex + 1 - builtRowCount)
+        }
+        val rowLayout = programmeRowLayouts.getOrNull(rowIndex) ?: return
+        var target: View? = null
+        var first: View? = null
+        for (i in 0 until rowLayout.childCount) {
+            val card = rowLayout.getChildAt(i)
+            val prog = card.tag as? EpgParser.Programme ?: continue
+            if (first == null) first = card
+            if (nowMillis in prog.startMillis until prog.stopMillis) {
+                target = card
+                break
+            }
+        }
+        (target ?: first)?.requestFocus()
+        if (pastHours > 0) {
+            val nowX = ((nowMillis - windowStart) / 60_000L * pxPerMinute).toInt()
+            val targetX = maxOf(0, nowX - PAST_VISIBLE_MINUTES * pxPerMinute)
+            hscroll.post { hscroll.scrollTo(targetX, 0) }
+        }
+    }
+
+    /** Refresh the "Guide updated …" label from the stored guide
+     * data's save time (7.0.0). */
+    private fun updateEpgFreshness() {
+        val updatedAt = PlaylistRepository.epgUpdatedAt(this)
+        epgFreshness.text = if (updatedAt == null || updatedAt <= 0) {
+            getString(R.string.guide_epg_unknown)
+        } else {
+            getString(
+                R.string.guide_epg_updated,
+                GuideData.formatAge(updatedAt, System.currentTimeMillis())
+            )
+        }
+    }
+
+    /** Flip the favorites-only view and rebuild the guide (7.0.0).
+     * An empty result (no favorites yet) shows the empty view instead
+     * of a blank grid. */
+    private fun setFavoritesOnly(enabled: Boolean) {
+        favoritesOnly = enabled
+        AppSettings.setGuideFavoritesOnly(this, enabled)
+        Toast.makeText(
+            this,
+            if (enabled) R.string.menu_favorites_only_enabled
+            else R.string.menu_favorites_only_disabled,
+            Toast.LENGTH_SHORT
+        ).show()
+        lifecycleScope.launch {
+            rebuildRows()
+            if (allRows.isEmpty()) {
+                container.removeAllViews()
+                pinnedCol.removeAllViews()
+                displayRows = emptyList()
+                builtRowCount = 0
+                scroll.visibility = View.GONE
+                emptyView.visibility = View.VISIBLE
+                if (enabled) {
+                    Toast.makeText(
+                        this@GuideActivity,
+                        R.string.menu_no_favorites,
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            } else {
+                emptyView.visibility = View.GONE
+                scroll.visibility = View.VISIBLE
+                buildGuide(allRows)
+            }
+            updateEpgFreshness()
+        }
+    }
+
+    /** Re-download the guide data now and rebuild the grid (7.0.0).
+     * A failed refresh keeps the saved guide on screen. */
+    private fun refreshGuideData() {
+        Toast.makeText(this, R.string.guide_refreshing, Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val fresh = PlaylistRepository.refreshEpg(this@GuideActivity)
+            if (fresh.isEmpty()) {
+                Toast.makeText(
+                    this@GuideActivity,
+                    R.string.guide_refresh_failed,
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            epg = fresh
+            rebuildRows()
+            buildGuide(allRows)
+            updateEpgFreshness()
+            Toast.makeText(
+                this@GuideActivity,
+                R.string.guide_refreshed,
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    /**
      * Recompute the guide rows for the current channels + EPG.
      * Only the row SOURCE is built here — the hidden filter over the
      * channel list — on Dispatchers.Default, like the old full
@@ -519,7 +764,7 @@ class GuideActivity : FragmentActivity() {
      * captured on the main thread.
      */
     private suspend fun rebuildRows() {
-        val channels = allChannels
+        val channels = guideChannels()
         val epgMap = epg
         val hidden = PlaylistRepository.hiddenChannels(this)
         val overrides = PlaylistRepository.epgOverrides(this)
@@ -561,7 +806,7 @@ class GuideActivity : FragmentActivity() {
             scroll.visibility = View.VISIBLE
             return
         }
-        val channels = allChannels
+        val channels = guideChannels()
         val epgMap = epg
         val hidden = PlaylistRepository.hiddenChannels(this)
         val overrides = PlaylistRepository.epgOverrides(this)
@@ -1335,6 +1580,29 @@ class GuideActivity : FragmentActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
+        // 7.0.0: jump back to now, refresh the guide data, and the
+        // favorites-only view — guide-level actions, so they live in
+        // this menu rather than on a per-programme row.
+        view.findViewById<TextView>(R.id.menu_jump_to_now).setOnClickListener {
+            dialog.dismiss()
+            jumpToNow()
+        }
+
+        view.findViewById<TextView>(R.id.menu_refresh_epg).setOnClickListener {
+            dialog.dismiss()
+            refreshGuideData()
+        }
+
+        val favoritesOnlyRow = view.findViewById<TextView>(R.id.menu_favorites_only)
+        favoritesOnlyRow.text = getString(
+            if (favoritesOnly) R.string.menu_favorites_only_on
+            else R.string.menu_favorites_only_off
+        )
+        favoritesOnlyRow.setOnClickListener {
+            dialog.dismiss()
+            setFavoritesOnly(!favoritesOnly)
+        }
+
         view.findViewById<TextView>(R.id.menu_programme_title).text = programme.title
 
         view.findViewById<TextView>(R.id.menu_external_player).setOnClickListener {
@@ -1574,6 +1842,9 @@ class GuideActivity : FragmentActivity() {
          * scanning (4.9.5) — typing used to launch a full
          * playlist + EPG scan on every keystroke. */
         private const val SEARCH_DEBOUNCE_MS = 250L
+        /** 7.0.0: a typed channel number settles after this long
+         * without another digit, and the guide jumps to it. */
+        private const val NUMBER_ENTRY_TIMEOUT_MS = 1500L
         /** 6.0.0-rc1: mobile guide sizes — the pinned channel column
          * and details header shrink so the programme grid fits a
          * phone screen (TV keeps CHANNEL_COL_DP / 180dp / 300dp). */

@@ -104,6 +104,12 @@ class SettingsActivity : FragmentActivity() {
                 AppSettings.setGuideShowsPast(this@SettingsActivity, checked)
             }
         }
+        findViewById<Switch>(R.id.pref_guide_favorites_only).apply {
+            isChecked = AppSettings.guideFavoritesOnly(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setGuideFavoritesOnly(this@SettingsActivity, checked)
+            }
+        }
         findViewById<RadioGroup>(R.id.pref_channel_list_size).apply {
             check(
                 when (AppSettings.channelListSize(this@SettingsActivity)) {

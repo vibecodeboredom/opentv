@@ -8,11 +8,14 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.opentv.player'
+        // juniper-v10: separate package so this build installs
+        // alongside the main com.opentv.player and never overrides
+        // it. The namespace (R class) stays com.opentv.player.
+        applicationId 'com.opentv.player.juniper'
         minSdk 26
         targetSdk 35
-        versionCode 49
-        versionName '6.1.8'
+        versionCode 50
+        versionName '7.0.0'
     }
 
     // Fixed debug keystore (committed) so every CI build shares one

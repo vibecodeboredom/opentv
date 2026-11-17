@@ -217,6 +217,34 @@ object PlaylistRepository {
         } else null
     }
 
+    /** When the guide data was last saved (in-memory time, else the
+     * snapshot's save time), or null when there is no guide data yet.
+     * 7.0.0: the guide header's freshness label. */
+    fun epgUpdatedAt(context: Context): Long? {
+        epgCache?.let { return it.first }
+        return ParsedCache.epgSavedAt(context, epgUrl(context))
+    }
+
+    /**
+     * Re-download + re-parse the EPG right now, bypassing the 12 h disk
+     * cache, and store the result. Returns the fresh map; when the fetch
+     * fails for every source the map is empty and the stored snapshot is
+     * left alone, so the caller can keep showing the saved guide.
+     * 7.0.0: the guide menu's "Refresh guide data" action.
+     */
+    suspend fun refreshEpg(context: Context): Map<String, List<EpgParser.Programme>> =
+        withContext(Dispatchers.IO) {
+            val appContext = context.applicationContext
+            val url = epgUrl(appContext)
+            val merged = loadEpgFresh(appContext, force = true)
+            if (merged.isNotEmpty()) {
+                storeEpg(appContext, url, merged)
+            } else {
+                epgCache = null
+            }
+            merged
+        }
+
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -884,13 +912,19 @@ object PlaylistRepository {
         }
     }
 
-    /** Fetch + parse every EPG source and merge them (the old loadEpg body). */
-    private fun loadEpgFresh(context: Context): Map<String, List<EpgParser.Programme>> {
+    /** Fetch + parse every EPG source and merge them (the old loadEpg body).
+     * With [force], the per-source disk cache is bypassed and every source
+     * is re-downloaded (a failed fetch still falls back to its stale disk
+     * copy — see epgXml). */
+    private fun loadEpgFresh(
+        context: Context,
+        force: Boolean = false
+    ): Map<String, List<EpgParser.Programme>> {
         val merged = mutableMapOf<String, MutableList<EpgParser.Programme>>()
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
         for (url in urls) {
             try {
-                val text = epgXml(context, url)
+                val text = epgXml(context, url, force)
                 val (parsed, names) = EpgParser.parseWithNames(text)
                 for ((id, list) in parsed) {
                     merged.getOrPut(id) { mutableListOf() } += list
@@ -910,11 +944,13 @@ object PlaylistRepository {
      * Raw EPG XML for one source URL: the disk copy is used when it is
      * fresh (12h TTL), otherwise the URL is fetched and the disk copy
      * refreshed. Falls back to a stale disk copy when the fetch fails.
+     * With [force], the fresh disk copy is skipped and the URL is
+     * always fetched (7.0.0 manual refresh).
      */
-    private fun epgXml(context: Context, url: String): String {
+    private fun epgXml(context: Context, url: String, force: Boolean = false): String {
         val fileName = EPG_CACHE_PREFIX + url.hashCode().toString(16) + ".xml"
         val file = context.getFileStreamPath(fileName)
-        val fresh = file.exists() &&
+        val fresh = !force && file.exists() &&
             System.currentTimeMillis() - file.lastModified() < EPG_TTL_MS
         if (fresh) {
             try {
