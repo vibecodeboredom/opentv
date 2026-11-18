@@ -9,6 +9,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.TypedValue
@@ -95,6 +97,32 @@ class GuideActivity : FragmentActivity() {
     private lateinit var detailCategory: TextView
     /** 9.3.0 (Nova): the programme description under the time row. */
     private lateinit var detailDesc: TextView
+    /** Combined (Juniper 7.0.0): the header's EPG freshness label —
+     * when the guide data on screen was saved. */
+    private lateinit var epgFreshness: TextView
+    /** Combined (Juniper 7.0.0): the channel-number entry pill. */
+    private lateinit var numberEntryView: TextView
+
+    /** Combined (Juniper 7.0.0): favorites-only guide view,
+     * persisted in AppSettings, applied at the row source in
+     * rebuildRows (favorites in the custom 9.1.0 order, inside
+     * the group filter). */
+    private var favoritesOnly: Boolean = false
+    /** Combined (Juniper 7.2.0): Tonight quick view — the
+     * favorites' prime-time shows (18:00–23:00) on one screen.
+     * A mode, not a jump: entering swaps the window + channel
+     * source, leaving restores today's window. Distinct from
+     * Nova's 19:00 Tonight jump; both stay. */
+    private var tonightMode: Boolean = false
+    /** Combined (Juniper 7.0.0): digits typed on the remote,
+     * settled by a 1.5 s timeout or Enter. */
+    private val numberEntry = ChannelNumberEntry()
+    private val numberHandler = Handler(Looper.getMainLooper())
+    private val numberJumpRunnable = Runnable { jumpToChannelNumber() }
+    /** True when the current OK press was spent jumping to a typed
+     * channel number, so its key-up must not also click the
+     * focused card. */
+    private var numberEnterConsumed = false
 
     private var allRows: List<GuideData.GuideRow> = emptyList()
     private var allChannels: List<Channel> = emptyList()
@@ -289,6 +317,8 @@ class GuideActivity : FragmentActivity() {
         detailRemaining = findViewById(R.id.guide_detail_remaining)
         detailCategory = findViewById(R.id.guide_detail_category)
         detailDesc = findViewById(R.id.guide_detail_desc)
+        epgFreshness = findViewById(R.id.guide_epg_freshness)
+        numberEntryView = findViewById(R.id.guide_number_entry)
 
         // 9.0.0 (Nova): the details header's progress bar takes
         // the chosen accent, and the header's texts scale with
@@ -299,7 +329,7 @@ class GuideActivity : FragmentActivity() {
         if (guideTextScale != 1.0f) {
             for (v in listOf(
                 detailTitle, detailTime, detailChannel, detailCategory,
-                detailRemaining, detailDesc
+                detailRemaining, detailDesc, epgFreshness
             )) {
                 v.setTextSize(TypedValue.COMPLEX_UNIT_PX, v.textSize * guideTextScale)
             }
@@ -366,6 +396,9 @@ class GuideActivity : FragmentActivity() {
         pxGuideLogo = dpToPx(guideLogoDp)
         pxCellMargin = dpToPx(CELL_MARGIN_DP)
         favoritesCache = PlaylistRepository.favorites(this)
+        // Combined (Juniper 7.0.0): the favorites-only view
+        // survives guide visits, like the group filter.
+        favoritesOnly = AppSettings.guideFavoritesOnly(this)
 
         // 6.0.0-rc1: the TV grid is built for a wide screen (320dp
         // channel column, 180dp details header with a 300dp preview
@@ -459,7 +492,7 @@ class GuideActivity : FragmentActivity() {
             anchorShiftMillis = 0L
             allChannels = channels
             rebuildRows()
-            if (allRows.isEmpty()) {
+            if (allRows.isEmpty() && !favoritesOnly) {
                 Toast.makeText(
                     this@GuideActivity,
                     R.string.no_guide_data,
@@ -470,6 +503,15 @@ class GuideActivity : FragmentActivity() {
             }
             buildGuide(allRows)
             scroll.visibility = View.VISIBLE
+            updateEpgFreshness()
+            if (allRows.isEmpty()) {
+                // Combined (Juniper 7.0.0): favorites-only was left
+                // on from an earlier visit but the favorites are
+                // gone — the empty state, not a dead guide.
+                emptyView.text = getString(R.string.menu_no_favorites)
+                emptyView.visibility = View.VISIBLE
+                scroll.visibility = View.GONE
+            }
             // 8.0.0 (Nova): the now-playing bar goes up with the
             // grid and ticks while the guide sits open.
             refreshNowPlayingBar()
@@ -515,6 +557,9 @@ class GuideActivity : FragmentActivity() {
         // 8.0.0 (Nova): and stop with it — a prompt must never land
         // on top of playback or another app.
         reminderWatcher.stop()
+        // Combined (Juniper 7.0.0): a half-typed channel number
+        // must not settle into a jump after the guide has closed.
+        numberHandler.removeCallbacks(numberJumpRunnable)
         super.onStop()
     }
 
@@ -589,6 +634,54 @@ class GuideActivity : FragmentActivity() {
      *   else, Left keeps moving between programme cells as before.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // Combined (Juniper 7.0.0): channel-number entry. Digits
+        // accumulate in the corner pill; Enter jumps immediately,
+        // any other key cancels the entry and proceeds normally,
+        // and a 1.5 s pause jumps on its own. Handled before the
+        // sidebar branches — a number typed while the sidebar is
+        // up closes it first.
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val digit = when (event.keyCode) {
+                KeyEvent.KEYCODE_0 -> 0
+                KeyEvent.KEYCODE_1 -> 1
+                KeyEvent.KEYCODE_2 -> 2
+                KeyEvent.KEYCODE_3 -> 3
+                KeyEvent.KEYCODE_4 -> 4
+                KeyEvent.KEYCODE_5 -> 5
+                KeyEvent.KEYCODE_6 -> 6
+                KeyEvent.KEYCODE_7 -> 7
+                KeyEvent.KEYCODE_8 -> 8
+                KeyEvent.KEYCODE_9 -> 9
+                else -> -1
+            }
+            if (digit >= 0) {
+                if (channelSidebar.isVisible()) channelSidebar.hide()
+                if (allRows.isNotEmpty()) onNumberDigit(digit)
+                return true
+            }
+            if (!numberEntry.isEmpty()) {
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    event.keyCode == KeyEvent.KEYCODE_ENTER
+                ) {
+                    numberEnterConsumed = true
+                    jumpToChannelNumber()
+                    return true
+                }
+                // Any other key abandons the half-typed number,
+                // then the normal handling below runs for that key.
+                clearNumberEntry()
+            }
+        }
+        if (event.action == KeyEvent.ACTION_UP &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                event.keyCode == KeyEvent.KEYCODE_ENTER) &&
+            numberEnterConsumed
+        ) {
+            // The press was spent on the number jump — its release
+            // must not also click the newly focused card.
+            numberEnterConsumed = false
+            return true
+        }
         val sidebarUp = channelSidebar.isVisible()
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
@@ -731,10 +824,23 @@ class GuideActivity : FragmentActivity() {
         val groupFilter = GuideData.effectiveGroupFilter(
             channels, AppSettings.guideGroupFilter(this)
         )
-        var rowSource = GuideData.rowChannels(
-            GuideData.filterChannelsByGroup(channels, groupFilter), hidden
-        )
-        if (rowSource.isEmpty() && groupFilter != null) {
+        // Combined (Juniper 7.0.0 + 7.2.0): the favorites-only
+        // view — and the Tonight quick view, which is favorites-
+        // only by definition — restrict the source INSIDE the
+        // group filter, and the favorites come in the user's
+        // custom order (9.1.0), not playlist order: the same
+        // sequence the home rows and the favorites zap use.
+        val favoritesOnlyNow = favoritesOnly || tonightMode
+        var filtered = GuideData.filterChannelsByGroup(channels, groupFilter)
+        if (favoritesOnlyNow) {
+            val freshFavorites = PlaylistRepository.favorites(this)
+            favoritesCache = freshFavorites
+            filtered = PlaylistRepository.applyFavoriteOrder(
+                this, filtered.filter { it.id in freshFavorites }
+            )
+        }
+        var rowSource = GuideData.rowChannels(filtered, hidden)
+        if (rowSource.isEmpty() && groupFilter != null && !favoritesOnlyNow) {
             AppSettings.setGuideGroupFilter(this, null)
             rowSource = GuideData.rowChannels(channels, hidden)
         }
@@ -1041,6 +1147,14 @@ class GuideActivity : FragmentActivity() {
      * day-jump toast names, so browsing a day away never loses
      * track of which day the grid is showing. */
     private fun guideHeaderDateText(): String {
+        // Combined (Juniper 7.2.0): the Tonight quick view names
+        // itself — its window is today's prime time, not the
+        // open-time hour the unshifted text would show.
+        if (tonightMode) {
+            return getString(
+                R.string.guide_tonight_header, GuideData.formatDate(windowStart)
+            )
+        }
         if (dayOffsetDays == 0 && anchorShiftMillis == 0L) {
             return GuideData.formatDateTime(nowMillis)
         }
@@ -1353,6 +1467,11 @@ class GuideActivity : FragmentActivity() {
      */
     private suspend fun updateRowsWithEpg() {
         rebuildRows()
+        // Combined (Juniper 7.0.0): the fill-in can land on a
+        // fresher snapshot than the one the grid opened with
+        // (a background refresh stored it meanwhile) — keep the
+        // header's age honest.
+        updateEpgFreshness()
         // Compare channel sequences, not rows: when both sides are
         // lazy row sources, reading displayRows[it] / allRows[it]
         // here would materialise every row just to check the channels
@@ -1534,7 +1653,14 @@ class GuideActivity : FragmentActivity() {
         // a day's width off the frame's edge.
         val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L
         nowLine.translationX = ((nowOffsetMinutes * pxPerMinute).toInt()).toFloat()
-        nowLine.visibility = if (dayOffsetDays == 0) View.VISIBLE else View.GONE
+        // Combined: an empty grid (no rows at all — the
+        // favorites-only / Tonight empty states, an empty search)
+        // has nothing for the line to span; keep it hidden there.
+        nowLine.visibility = if (dayOffsetDays == 0 && displayRows.isNotEmpty()) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
         refreshNowLine()
         startNowLineTicker()
     }
@@ -1776,6 +1902,43 @@ class GuideActivity : FragmentActivity() {
         view.findViewById<TextView>(R.id.menu_tonight).setOnClickListener {
             dialog.dismiss()
             jumpToTonight()
+        }
+
+        // Combined (Juniper 7.2.0): the Tonight QUICK VIEW — a
+        // mode (favorites' prime time on one screen), not the
+        // jump above; the label flips while the mode is on.
+        val tonightViewRow = view.findViewById<TextView>(R.id.menu_tonight_view)
+        tonightViewRow.text = getString(
+            if (tonightMode) R.string.menu_tonight_view_exit
+            else R.string.menu_tonight_view
+        )
+        tonightViewRow.setOnClickListener {
+            dialog.dismiss()
+            setTonightMode(!tonightMode)
+        }
+
+        // Combined (Juniper 7.0.0): favorites-only view — the
+        // label carries the state, like the group filter row
+        // carries its group.
+        val favoritesOnlyRow = view.findViewById<TextView>(R.id.menu_favorites_only)
+        favoritesOnlyRow.text = getString(
+            if (favoritesOnly) R.string.menu_favorites_only_on
+            else R.string.menu_favorites_only_off
+        )
+        favoritesOnlyRow.setOnClickListener {
+            dialog.dismiss()
+            setFavoritesOnly(!favoritesOnly)
+        }
+
+        // Combined (Juniper 7.0.0): manual EPG refresh, and the
+        // EPG quality surface (8.2.0).
+        view.findViewById<TextView>(R.id.menu_refresh_epg).setOnClickListener {
+            dialog.dismiss()
+            refreshGuideData()
+        }
+        view.findViewById<TextView>(R.id.menu_epg_quality).setOnClickListener {
+            dialog.dismiss()
+            showEpgQuality()
         }
 
         // 9.2.1 (Nova): keyword hits — 9.2.0's ★ markers as a
@@ -2603,6 +2766,13 @@ class GuideActivity : FragmentActivity() {
      * honest however long the guide has been open.
      */
     private fun jumpToNow() {
+        // Combined (Juniper 7.2.0): from the Tonight quick view,
+        // "now" first means leaving the mode — restoring today's
+        // window lands on now like a normal open.
+        if (tonightMode) {
+            setTonightMode(false)
+            return
+        }
         // 8.2.0 (Nova): from a day-shifted grid, "now" first means
         // getting back to today's window — rebuild there, and the
         // fresh build lands on now like a normal open.
@@ -2660,6 +2830,18 @@ class GuideActivity : FragmentActivity() {
      * start, and a toast names the day now on screen.
      */
     private fun shiftGuideDay(deltaDays: Int) {
+        // Combined (Juniper 7.2.0): a day hop leaves the Tonight
+        // quick view — its fixed window has no day to shift, so
+        // restore today's window state first, then shift from it.
+        if (tonightMode) {
+            tonightMode = false
+            pastHours = if (AppSettings.guideShowsPast(this)) {
+                WINDOW_PAST_HOURS
+            } else {
+                0
+            }
+            windowHours = WINDOW_HOURS + pastHours
+        }
         val newOffset = (dayOffsetDays + deltaDays).coerceIn(0, MAX_DAY_OFFSET_DAYS)
         if (newOffset == dayOffsetDays) return
         dayOffsetDays = newOffset
@@ -2753,6 +2935,288 @@ class GuideActivity : FragmentActivity() {
         }
     }
 
+    /** One digit of a channel number: show it in the corner pill
+     * and re-arm the settle timeout (combined: Juniper 7.0.0). */
+    private fun onNumberDigit(digit: Int) {
+        val text = numberEntry.press(digit)
+        numberEntryView.text = getString(R.string.guide_number_entry, text)
+        numberEntryView.visibility = View.VISIBLE
+        numberHandler.removeCallbacks(numberJumpRunnable)
+        numberHandler.postDelayed(numberJumpRunnable, NUMBER_ENTRY_TIMEOUT_MS)
+    }
+
+    /** Hide the number pill and drop the pending entry. */
+    private fun clearNumberEntry() {
+        numberHandler.removeCallbacks(numberJumpRunnable)
+        numberEntry.clear()
+        numberEntryView.visibility = View.GONE
+    }
+
+    /**
+     * Jump to the typed channel number (combined: Juniper 7.0.0):
+     * focus its row's programme on now, or toast when no channel
+     * in the current view has that number. The landing mirrors
+     * jumpToNow's — build up to the row, scroll "now" into view,
+     * focus the on-now card (the row's first card when the
+     * channel has nothing on now in this window).
+     */
+    private fun jumpToChannelNumber() {
+        val number = numberEntry.value()
+        clearNumberEntry()
+        if (number == null) return
+        val rowChannels = (allRows as? GuideData.LazyRows)?.channels
+            ?: allRows.map { it.channel }
+        val target = GuideData.channelByNumber(rowChannels, number)
+        if (target == null) {
+            Toast.makeText(
+                this,
+                getString(R.string.guide_no_channel_number, number),
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        val idx = rowIndexOf(target.id)
+        if (idx < 0) return
+        if (idx >= builtRowCount) appendRows(idx + 1 - builtRowCount)
+        if (tonightMode) {
+            hscroll.post { hscroll.scrollTo(0, 0) }
+        } else if (dayOffsetDays == 0 && anchorShiftMillis == 0L) {
+            val nowX = ((System.currentTimeMillis() - windowStart) / 60_000L * pxPerMinute).toInt()
+            val targetX = maxOf(0, nowX - PAST_VISIBLE_MINUTES * pxPerMinute)
+            hscroll.post { hscroll.scrollTo(targetX, 0) }
+        }
+        val now = System.currentTimeMillis()
+        container.post {
+            if (!focusProgrammeAt(target.id, now)) {
+                firstCardOfRow(idx)?.requestFocus()
+            }
+        }
+    }
+
+    /** Refresh the "Guide updated …" label from the stored guide
+     * data's save time (combined: Juniper 7.0.0). */
+    private fun updateEpgFreshness() {
+        val updatedAt = PlaylistRepository.epgUpdatedAt(this)
+        epgFreshness.text = if (updatedAt == null || updatedAt <= 0) {
+            getString(R.string.guide_epg_unknown)
+        } else {
+            getString(
+                R.string.guide_epg_updated,
+                GuideData.formatAge(updatedAt, System.currentTimeMillis())
+            )
+        }
+    }
+
+    /** Re-download the guide data now and rebuild the grid
+     * (combined: Juniper 7.0.0). A failed refresh keeps the saved
+     * guide on screen. */
+    private fun refreshGuideData() {
+        Toast.makeText(this, R.string.guide_refreshing, Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val fresh = PlaylistRepository.refreshEpg(this@GuideActivity)
+            if (fresh.isEmpty()) {
+                Toast.makeText(
+                    this@GuideActivity,
+                    R.string.guide_refresh_failed,
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            epg = fresh
+            rebuildRows()
+            buildGuide(allRows)
+            if (allRows.isNotEmpty()) {
+                emptyView.visibility = View.GONE
+                scroll.visibility = View.VISIBLE
+            }
+            updateEpgFreshness()
+            Toast.makeText(
+                this@GuideActivity,
+                R.string.guide_refreshed,
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    /** Flip the favorites-only view and rebuild the guide
+     * (combined: Juniper 7.0.0). An empty result (no favorites
+     * yet) shows the empty view instead of a blank grid. */
+    private fun setFavoritesOnly(enabled: Boolean) {
+        favoritesOnly = enabled
+        AppSettings.setGuideFavoritesOnly(this, enabled)
+        Toast.makeText(
+            this,
+            if (enabled) R.string.menu_favorites_only_enabled
+            else R.string.menu_favorites_only_disabled,
+            Toast.LENGTH_SHORT
+        ).show()
+        lifecycleScope.launch {
+            rebuildRows()
+            buildGuide(allRows)
+            if (allRows.isEmpty()) {
+                emptyView.text = getString(R.string.menu_no_favorites)
+                emptyView.visibility = View.VISIBLE
+                scroll.visibility = View.GONE
+            } else {
+                emptyView.visibility = View.GONE
+                scroll.visibility = View.VISIBLE
+            }
+            updateEpgFreshness()
+        }
+    }
+
+    /**
+     * Combined (Juniper 7.2.0): Tonight quick view — the
+     * favorites' prime-time shows, 18:00–23:00, on one screen.
+     * Entering swaps in the fixed window and the favorites-only
+     * source; leaving restores today's window exactly as the
+     * guide opened with it. Nova's 19:00 Tonight JUMP is a
+     * separate feature (it re-anchors the full guide) and is
+     * untouched. The empty states name themselves: no favorites
+     * at all, or favorites with nothing real in the window.
+     */
+    private fun setTonightMode(enabled: Boolean) {
+        tonightMode = enabled
+        if (!enabled) {
+            dayOffsetDays = 0
+            anchorShiftMillis = 0L
+            pastHours = if (AppSettings.guideShowsPast(this)) {
+                WINDOW_PAST_HOURS
+            } else {
+                0
+            }
+            windowHours = WINDOW_HOURS + pastHours
+            windowStart = baseWindowStart
+        } else {
+            dayOffsetDays = 0
+            anchorShiftMillis = 0L
+            val (start, hours) = GuideData.tonightWindow(System.currentTimeMillis())
+            windowStart = start
+            windowHours = hours
+            pastHours = 0
+        }
+        lifecycleScope.launch {
+            rebuildRows()
+            buildGuide(allRows)
+            when {
+                allRows.isEmpty() -> {
+                    emptyView.text = getString(
+                        if (enabled) R.string.guide_empty_no_favorites
+                        else R.string.no_guide_data
+                    )
+                    emptyView.visibility = View.VISIBLE
+                    scroll.visibility = View.GONE
+                }
+                enabled && !GuideData.anyRealProgrammes(
+                    (allRows as? GuideData.LazyRows)?.channels
+                        ?: allRows.map { it.channel },
+                    epg, windowStart, windowHours,
+                    PlaylistRepository.epgOverrides(this@GuideActivity)
+                ) -> {
+                    emptyView.text =
+                        getString(R.string.guide_empty_tonight_no_programmes)
+                    emptyView.visibility = View.VISIBLE
+                    scroll.visibility = View.GONE
+                }
+                else -> {
+                    emptyView.visibility = View.GONE
+                    scroll.visibility = View.VISIBLE
+                }
+            }
+            updateEpgFreshness()
+        }
+    }
+
+    /**
+     * Combined (Juniper 8.2.0): the EPG quality surface. Hers
+     * lives in Settings; here it sits behind the guide menu's
+     * "Guide data quality" row instead — Settings is Juniper's
+     * file area in this combine, and the guide already has the
+     * loaded EPG in hand. Per-source fetch status, the coverage
+     * count, and the channels without guide data, with one-tap
+     * EPG ID fixes.
+     */
+    private fun showEpgQuality() {
+        val now = System.currentTimeMillis()
+        val statuses = PlaylistRepository.epgSourceStatuses(this)
+        val overrides = PlaylistRepository.epgOverrides(this)
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val visible = allChannels.filter { it.id !in hidden }
+        val without = EpgQuality.channelsWithoutGuide(
+            allChannels, epg, overrides, hidden
+        )
+        val sb = StringBuilder()
+        if (statuses.isEmpty()) {
+            sb.append(getString(R.string.epg_quality_no_status))
+        } else {
+            for (s in statuses) {
+                sb.append(s.url).append('\n')
+                    .append(EpgQuality.statusLine(s, now)).append("\n\n")
+            }
+        }
+        sb.append(
+            getString(
+                R.string.epg_quality_coverage,
+                visible.size - without.size, visible.size
+            )
+        )
+        if (without.isNotEmpty()) {
+            sb.append('\n').append(
+                getString(R.string.epg_quality_without_count, without.size)
+            )
+        }
+        val builder = AlertDialog.Builder(this)
+            .setTitle(R.string.epg_quality_title)
+            .setMessage(sb.toString())
+            .setPositiveButton(android.R.string.ok, null)
+        if (without.isNotEmpty()) {
+            builder.setNeutralButton(R.string.epg_quality_fix_button) { _, _ ->
+                showChannelsWithoutGuide(without)
+            }
+        }
+        builder.show()
+    }
+
+    /** The channels with no guide data; tapping one offers the
+     * likely EPG IDs for it (combined: Juniper 8.2.0). */
+    private fun showChannelsWithoutGuide(without: List<Channel>) {
+        val labels = without.map { it.name }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.epg_quality_without_title)
+            .setItems(labels) { _, which -> showEpgIdSuggestions(without[which]) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Ranked EPG ID suggestions for one channel; picking one
+     * sets its EPG override (the same store the channel menu's
+     * Assign EPG writes) and rebuilds the grid. */
+    private fun showEpgIdSuggestions(channel: Channel) {
+        val suggestions = EpgQuality.suggestEpgIds(channel, epg.keys)
+        if (suggestions.isEmpty()) {
+            Toast.makeText(
+                this, R.string.epg_quality_no_suggestions, Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.epg_quality_suggest_title, channel.name))
+            .setItems(suggestions.toTypedArray()) { _, which ->
+                PlaylistRepository.setEpgOverride(
+                    this, channel.id, suggestions[which]
+                )
+                Toast.makeText(
+                    this, R.string.menu_epg_assigned, Toast.LENGTH_SHORT
+                ).show()
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun openExternalPlayer(channel: Channel) {
         try {
             val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -2810,12 +3274,20 @@ class GuideActivity : FragmentActivity() {
     }
 
     private fun showChannelOptions(channel: Channel) {
+        // Combined (Juniper 8.2.0): the details gain the channel's
+        // guide coverage — how much data it actually has, or that
+        // it has none (the full quality surface is the menu's
+        // "Guide data quality" row).
+        val coverage = EpgQuality.coverageFor(
+            channel, epg, PlaylistRepository.epgOverrides(this)
+        )
         val details = getString(
             R.string.menu_channel_details,
             channel.number,
             channel.name,
             channel.group,
-            channel.tvgId ?: "—"
+            channel.tvgId ?: "—",
+            EpgQuality.coverageLine(coverage, System.currentTimeMillis())
         )
         AlertDialog.Builder(this)
             .setTitle(channel.name)
@@ -2865,6 +3337,9 @@ class GuideActivity : FragmentActivity() {
         /** 9.2.1 (Nova): the keyword hits list's cap — a
          * pick-list, not a catalogue. */
         private const val KEYWORD_HITS_MAX = 50
+        /** Combined (Juniper 7.0.0): how long a typed channel
+         * number waits for another digit before it jumps. */
+        private const val NUMBER_ENTRY_TIMEOUT_MS = 1500L
         /** 8.0.0 (Nova): how often the now-playing bar refreshes
          * its programme + progress while the guide sits open. */
         private const val NOW_PLAYING_TICK_MS = 20_000L

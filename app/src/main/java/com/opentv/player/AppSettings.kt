@@ -22,6 +22,7 @@ object AppSettings {
     private const val KEY_GUIDE_OPEN_CURRENT = "guide_open_current_channel"
     private const val KEY_TV_INFO_FADE = "tv_info_fade"
     private const val KEY_GUIDE_SHOW_PAST = "guide_show_past"
+    private const val KEY_GUIDE_FAVORITES_ONLY = "guide_favorites_only"
     private const val KEY_CHANNEL_LIST_SIZE = "channel_list_size"
     private const val KEY_FAVORITES_ZAP = "favorites_zap"
     private const val KEY_SPEAK_CHANNEL_NAMES = "speak_channel_names"
@@ -96,6 +97,16 @@ object AppSettings {
 
     fun setGuideShowsPast(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_GUIDE_SHOW_PAST, value).apply()
+    }
+
+    /** Guide shows favorites only (default OFF). Combined: ported
+     * from Juniper 7.0.0 — toggled from the guide menu; the guide
+     * also turns it on implicitly in the Tonight quick view. */
+    fun guideFavoritesOnly(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_GUIDE_FAVORITES_ONLY, false)
+
+    fun setGuideFavoritesOnly(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_GUIDE_FAVORITES_ONLY, value).apply()
     }
 
     /** 7.2.0 (Nova): favorites zapping — channel up/down cycle

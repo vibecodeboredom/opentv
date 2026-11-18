@@ -143,6 +143,71 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- Combined (Juniper 7.2.0): the Tonight QUICK VIEW — the
+         favorites' prime-time shows (6–11 PM) on one screen. A
+         different feature from the 19:00 jump above; both stay.
+         The label flips to "Full guide" in code while it is on. -->
+    <TextView
+        android:id="@+id/menu_tonight_view"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_tonight_view"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- Combined (Juniper 7.0.0): favorites-only guide view. The
+         label carries the state (set in code): the favorites,
+         in the user's custom order (9.1.0), inside the active
+         group filter. -->
+    <TextView
+        android:id="@+id/menu_favorites_only"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_favorites_only_off"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- Combined (Juniper 7.0.0): re-download the guide data now,
+         bypassing the 12 h cache. -->
+    <TextView
+        android:id="@+id/menu_refresh_epg"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_refresh_epg"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- Combined (Juniper 8.2.0): EPG quality — per-source fetch
+         status, coverage counts, and the channels with no guide
+         data (with one-tap EPG ID fixes). -->
+    <TextView
+        android:id="@+id/menu_epg_quality"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_epg_quality"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <!-- 9.2.1 (Nova): upcoming programmes matching the guide
          keywords (9.2.0's markers, as a list). Hides in code
          when no keywords are set. -->

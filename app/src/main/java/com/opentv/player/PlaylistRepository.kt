@@ -61,6 +61,9 @@ object PlaylistRepository {
     private const val KEY_FAVORITE_ORDER = "favorite_order"
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
+    /** Combined (Juniper 8.2.0): per-source EPG fetch status,
+     * encoded by EpgQuality.encodeStatuses. */
+    private const val KEY_EPG_SOURCE_STATUS = "epg_source_status"
     private const val KEY_RECENT = "recent_channels"
     /** 4.9.3: guide search queries, one per line, most recent first. */
     private const val KEY_RECENT_SEARCHES = "recent_searches"
@@ -170,6 +173,10 @@ object PlaylistRepository {
     private val loadLock = Any()
     @Volatile private var playlistLoad: Deferred<Result<List<Channel>>>? = null
     @Volatile private var epgLoad: Deferred<Map<String, List<EpgParser.Programme>>>? = null
+    /** Combined (Juniper 8.2.1): the forced EPG refresh is
+     * single-flight too — two taps on the guide's "Refresh guide
+     * data" share one download + parse instead of racing two. */
+    @Volatile private var epgRefreshLoad: Deferred<Map<String, List<EpgParser.Programme>>>? = null
 
     private fun playlistLoadDeferred(context: Context): Deferred<Result<List<Channel>>> {
         playlistLoad?.let { return it }
@@ -1407,6 +1414,81 @@ object PlaylistRepository {
     suspend fun loadEpg(context: Context): Map<String, List<EpgParser.Programme>> =
         epgLoadDeferred(context).await()
 
+    /**
+     * When the guide data the user is looking at was saved: the
+     * in-memory cache's stamp, or the disk snapshot's when nothing
+     * has loaded yet this session. Combined: ported from Juniper
+     * 7.0.0 — the guide header's "Guide updated …" freshness label.
+     */
+    fun epgUpdatedAt(context: Context): Long? {
+        epgCache?.let { return it.first }
+        return ParsedCache.epgSavedAt(context, epgUrl(context))
+    }
+
+    /**
+     * Re-download + re-parse the EPG right now, bypassing the 12 h
+     * disk cache, and store the result. Returns the fresh map; when
+     * the fetch fails for every source the map is empty and the
+     * stored snapshot is left alone, so the caller can keep showing
+     * the saved guide. Combined: ported from Juniper 7.0.0 — the
+     * guide menu's "Refresh guide data" action.
+     */
+    suspend fun refreshEpg(context: Context): Map<String, List<EpgParser.Programme>> =
+        refreshEpgDeferred(context).await()
+
+    /** The forced refresh, single-flight like loadEpg (see the
+     * epgRefreshLoad field comment). Runs on refreshScope, so a
+     * caller going away never cancels a refresh another caller is
+     * waiting on. */
+    private fun refreshEpgDeferred(
+        context: Context
+    ): Deferred<Map<String, List<EpgParser.Programme>>> {
+        epgRefreshLoad?.let { return it }
+        synchronized(loadLock) {
+            epgRefreshLoad?.let { return it }
+            val appContext = context.applicationContext
+            val deferred: Deferred<Map<String, List<EpgParser.Programme>>> =
+                refreshScope.async {
+                    try {
+                        val merged = loadEpgFresh(appContext, force = true)
+                        if (merged.isNotEmpty()) {
+                            storeEpg(appContext, epgUrl(appContext), merged)
+                        }
+                        merged
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        emptyMap()
+                    }
+                }
+            epgRefreshLoad = deferred
+            deferred.invokeOnCompletion {
+                synchronized(loadLock) {
+                    if (epgRefreshLoad === deferred) epgRefreshLoad = null
+                }
+            }
+            return deferred
+        }
+    }
+
+    /** Combined (Juniper 8.2.0): per-source EPG fetch status,
+     * recorded on every fresh load (see loadEpgFresh). Survives
+     * restarts; the guide's EPG quality dialog shows one line per
+     * source from this. */
+    fun epgSourceStatuses(context: Context): List<EpgQuality.SourceStatus> =
+        EpgQuality.decodeStatuses(
+            prefs(context).getString(KEY_EPG_SOURCE_STATUS, "") ?: ""
+        )
+
+    private fun setEpgSourceStatuses(
+        context: Context,
+        statuses: List<EpgQuality.SourceStatus>
+    ) {
+        prefs(context).edit()
+            .putString(KEY_EPG_SOURCE_STATUS, EpgQuality.encodeStatuses(statuses))
+            .apply()
+    }
+
     /** The EPG load itself; loadEpg gates it single-flight. */
     private suspend fun loadEpgInternal(context: Context): Map<String, List<EpgParser.Programme>> = withContext(Dispatchers.IO) {
         val cached = epgCache
@@ -1462,41 +1544,111 @@ object PlaylistRepository {
         }
     }
 
-    /** Fetch + parse every EPG source and merge them (the old loadEpg body). */
-    private fun loadEpgFresh(context: Context): Map<String, List<EpgParser.Programme>> {
+    /**
+     * Fetch + parse every EPG source and merge them (the old loadEpg
+     * body). Combined (Juniper 8.2.0/8.2.1): each source's fetch
+     * outcome is recorded for the EPG quality surface, and airings
+     * carried by two sources are merged once — without the dedupe
+     * the guide shows the programme twice and coverage counts
+     * double. [force] bypasses the sources' 12 h disk cache (the
+     * guide's manual refresh).
+     */
+    private fun loadEpgFresh(
+        context: Context,
+        force: Boolean = false
+    ): Map<String, List<EpgParser.Programme>> {
         val merged = mutableMapOf<String, MutableList<EpgParser.Programme>>()
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val statuses = mutableListOf<EpgQuality.SourceStatus>()
+        // Airings already merged under each key, so a programme
+        // carried by two sources is stored once.
+        val seen = mutableMapOf<String, MutableSet<Triple<Long, Long, String>>>()
+        /** Append a source's programmes under [key], skipping airings
+         * already there. Returns how many were added. */
+        fun addProgrammes(key: String, incoming: List<EpgParser.Programme>): Int {
+            val target = merged.getOrPut(key) { mutableListOf() }
+            val keys = seen.getOrPut(key) { HashSet() }
+            var added = 0
+            for (p in incoming) {
+                if (keys.add(Triple(p.startMillis, p.stopMillis, p.title))) {
+                    target += p
+                    added++
+                }
+            }
+            return added
+        }
         for (url in urls) {
             try {
-                val text = epgXml(context, url)
-                val (parsed, names) = EpgParser.parseWithNames(text)
+                val result = epgXml(context, url, force)
+                val (parsed, names) = EpgParser.parseWithNames(result.text)
+                var programmes = 0
                 for ((id, list) in parsed) {
-                    merged.getOrPut(id) { mutableListOf() } += list
+                    programmes += addProgrammes(id, list)
                 }
                 for ((id, name) in names) {
                     val list = parsed[id] ?: continue
-                    merged.getOrPut(name.lowercase()) { mutableListOf() } += list
+                    addProgrammes(name.lowercase(), list)
                 }
-            } catch (ignored: Exception) {
+                statuses += if (result.fetchFailed) {
+                    // The fetch failed and this is the stale disk
+                    // copy: the guide still works, but the status
+                    // must say so instead of claiming a fresh load.
+                    EpgQuality.SourceStatus(
+                        url, result.fetchedAtMillis, false,
+                        "Fetch failed, using cached data",
+                        parsed.size, programmes
+                    )
+                } else {
+                    EpgQuality.SourceStatus(
+                        url, result.fetchedAtMillis, true, null,
+                        parsed.size, programmes
+                    )
+                }
+            } catch (e: Exception) {
                 // One bad source doesn't kill the rest.
+                statuses += EpgQuality.SourceStatus(
+                    url, System.currentTimeMillis(), false,
+                    e.message?.take(80), 0, 0
+                )
             }
         }
+        if (statuses.isNotEmpty()) setEpgSourceStatuses(context, statuses)
         return merged
     }
 
+    /** What epgXml returned, and where it came from. loadEpgFresh
+     * records the per-source status from this, so a failed fetch is
+     * never reported as a fresh load and a cached read is never
+     * stamped with the read time. Combined: ported from Juniper
+     * 8.2.0. */
+    private data class EpgXmlResult(
+        val text: String,
+        /** When the data was actually fetched: the disk file's time
+         * for a cached copy, now for a fresh download. */
+        val fetchedAtMillis: Long,
+        /** True when the fetch failed and [text] is the stale disk
+         * copy. */
+        val fetchFailed: Boolean
+    )
+
     /**
-     * Raw EPG XML for one source URL: the disk copy is used when it is
-     * fresh (12h TTL), otherwise the URL is fetched and the disk copy
-     * refreshed. Falls back to a stale disk copy when the fetch fails.
+     * Raw EPG XML for one source URL: the disk copy is used when it
+     * is fresh (12h TTL), otherwise the URL is fetched and the disk
+     * copy refreshed. Falls back to a stale disk copy when the fetch
+     * fails. [force] skips the fresh-disk read (a fetch failure
+     * still falls back to the stale copy).
      */
-    private fun epgXml(context: Context, url: String): String {
+    private fun epgXml(context: Context, url: String, force: Boolean = false): EpgXmlResult {
         val fileName = EPG_CACHE_PREFIX + url.hashCode().toString(16) + ".xml"
         val file = context.getFileStreamPath(fileName)
-        val fresh = file.exists() &&
+        val fresh = !force && file.exists() &&
             System.currentTimeMillis() - file.lastModified() < EPG_TTL_MS
         if (fresh) {
             try {
-                return file.bufferedReader().use { it.readText() }
+                return EpgXmlResult(
+                    file.bufferedReader().use { it.readText() },
+                    file.lastModified(), false
+                )
             } catch (ignored: Exception) {
                 // Fall through to a fresh fetch.
             }
@@ -1508,10 +1660,15 @@ object PlaylistRepository {
             } catch (ignored: Exception) {
                 // Disk cache is best-effort.
             }
-            text
+            EpgXmlResult(text, System.currentTimeMillis(), false)
         } catch (e: Exception) {
             // Fetch failed: use the stale disk copy if there is one.
-            if (file.exists()) file.bufferedReader().use { it.readText() } else throw e
+            if (file.exists()) {
+                EpgXmlResult(
+                    file.bufferedReader().use { it.readText() },
+                    file.lastModified(), true
+                )
+            } else throw e
         }
     }
 

@@ -263,6 +263,26 @@ object ParsedCache {
         }
     }
 
+    /**
+     * When the stored EPG was saved, or null when there is no snapshot
+     * for this URL. Reads only the meta table — epgSnapshot reads the
+     * whole programme table, which is far too heavy for a freshness
+     * label. Combined: ported from Juniper 7.0.0 (the guide header's
+     * "Guide updated …" line).
+     */
+    fun epgSavedAt(context: Context, url: String): Long? {
+        val db = open(context) ?: return null
+        try {
+            val meta = readMeta(db)
+            if (meta[META_EPG_URL] != url) return null
+            return meta[META_EPG_SAVED_AT]?.toLongOrNull()
+        } catch (ignored: Exception) {
+            return null
+        } finally {
+            closeQuietly(db)
+        }
+    }
+
     /** Replace the stored EPG snapshot (single transaction). */
     fun writeEpg(
         context: Context,

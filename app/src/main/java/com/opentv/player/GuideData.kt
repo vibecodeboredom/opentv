@@ -27,6 +27,50 @@ object GuideData {
         return (nowMillis / hour) * hour
     }
 
+    /** Tonight's prime-time hours (combined: ported from Juniper 7.2.0). */
+    const val TONIGHT_START_HOUR = 18
+    const val TONIGHT_HOURS = 5
+
+    /** Combined (Juniper 7.2.0): tonight's prime-time window, 6–11 PM
+     * local time. Always today's 6–11 PM — after 11 PM it is the
+     * prime time that just aired, so the header never says "Tonight"
+     * about tomorrow's date. Returns (window start, window hours).
+     * The Tonight QUICK VIEW's window — Nova's own Tonight guide
+     * jump (19:00 anchor) is a different feature and stays. */
+    fun tonightWindow(nowMillis: Long): Pair<Long, Int> {
+        val dayStart = midnightMillis(nowMillis)
+        return Pair(dayStart + TONIGHT_START_HOUR * 60L * 60 * 1000, TONIGHT_HOURS)
+    }
+
+    /** Midnight (00:00) of the day containing [millis], local time. */
+    private fun midnightMillis(millis: Long): Long {
+        val cal = calendarFor(millis)
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
+
+    /** Combined (Juniper 7.2.1): true when any channel in [channels]
+     * has a real programme inside the window — the Tonight quick
+     * view's second empty state (favorites exist, but their rows
+     * would be all "No information" placeholders). */
+    fun anyRealProgrammes(
+        channels: List<Channel>,
+        epg: Map<String, List<EpgParser.Programme>>,
+        windowStartMillis: Long,
+        windowHours: Int = 6,
+        epgOverrides: Map<String, String> = emptyMap()
+    ): Boolean {
+        val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
+        return channels.any { channel ->
+            programmesForChannel(channel, epg, epgOverrides).any {
+                it.stopMillis > windowStartMillis && it.startMillis < windowEnd
+            }
+        }
+    }
+
     /** Build the row for one channel: its programmes inside the window,
      * or "No information" placeholders when it has none. Hidden
      * channels get no row (null). The window math lives here so the
@@ -328,6 +372,29 @@ object GuideData {
         val amPm = if (cal.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
         val hour12 = if (hour == 0) 12 else hour
         return if (minute == 0) "$hour12 $amPm" else "$hour12:${twoDigits(minute)} $amPm"
+    }
+
+    /** First channel with this playlist number, or null. Numbers are
+     * the playlist positions (1-based); a playlist can carry gaps, so
+     * the first match wins. Combined: ported from Juniper 7.0.0
+     * (channel-number jump). */
+    fun channelByNumber(
+        channels: List<Channel>,
+        number: Int
+    ): Channel? = channels.firstOrNull { it.number == number }
+
+    /** How long ago [updatedAtMillis] was, as "just now", "5 min ago",
+     * "2 h ago" or "3 d ago". Combined: ported from Juniper 7.0.0 —
+     * the guide header's EPG freshness label and the EPG quality
+     * source lines. A zero or future timestamp reads as "just now". */
+    fun formatAge(updatedAtMillis: Long, nowMillis: Long): String {
+        val ageMinutes = (nowMillis - updatedAtMillis) / 60_000L
+        return when {
+            ageMinutes < 1 -> "just now"
+            ageMinutes < 60 -> "$ageMinutes min ago"
+            ageMinutes < 60 * 24 -> "${ageMinutes / 60} h ago"
+            else -> "${ageMinutes / (60 * 24)} d ago"
+        }
     }
 
     /** Format a clock time as "8:00 PM" (always with minutes). */

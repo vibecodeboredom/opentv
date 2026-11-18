@@ -113,7 +113,7 @@
     <string name="menu_assign_epg_title">Assign EPG to %1$s</string>
     <string name="menu_assign_epg_hint">EPG ID (tvg-id), blank to clear</string>
     <string name="menu_epg_assigned">EPG assigned</string>
-    <string name="menu_channel_details">Channel %1$d\n%2$s\nGroup: %3$s\nEPG ID: %4$s</string>
+    <string name="menu_channel_details">Channel %1$d\n%2$s\nGroup: %3$s\nEPG ID: %4$s\n%5$s</string>
     <string name="playback_error">Couldn\'t play this channel: %1$s</string>
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
@@ -403,4 +403,35 @@
     <string name="playback_speed_title">Playback speed</string>
     <string name="playback_speed_set">Playback speed: %1$s</string>
     <string name="recording_seek_position">%1$s / %2$s</string>
+
+    <!-- Combined (from juniper-v10): guide merge — channel-number
+         jump, favorites-only view, EPG freshness + refresh, Tonight
+         quick view, EPG quality -->
+    <string name="guide_number_entry">Ch %1$s</string>
+    <string name="guide_no_channel_number">No channel %1$d</string>
+    <string name="guide_epg_updated">Guide updated %1$s</string>
+    <string name="guide_epg_unknown">Guide data age unknown</string>
+    <string name="guide_refreshing">Refreshing guide data…</string>
+    <string name="guide_refreshed">Guide data refreshed</string>
+    <string name="guide_refresh_failed">Refresh failed — showing saved guide</string>
+    <string name="menu_refresh_epg">⟳  Refresh guide data</string>
+    <string name="menu_favorites_only_on">★  Favorites only: On</string>
+    <string name="menu_favorites_only_off">☆  Favorites only: Off</string>
+    <string name="menu_favorites_only_enabled">Showing favorites only</string>
+    <string name="menu_favorites_only_disabled">Showing all channels</string>
+    <string name="menu_no_favorites">No favorites yet — add some first</string>
+    <string name="guide_empty_no_favorites">No favorites yet. Star a channel from its programme menu, then come back for tonight.</string>
+    <string name="guide_empty_tonight_no_programmes">No programmes tonight for your favorites. The guide has no data for 6 to 11 PM. Try Refresh guide data in the menu.</string>
+    <string name="menu_tonight_view">🌙  Tonight quick view</string>
+    <string name="menu_tonight_view_exit">📺  Full guide</string>
+    <string name="guide_tonight_header">Tonight · %1$s</string>
+    <string name="menu_epg_quality">Guide data quality</string>
+    <string name="epg_quality_title">Guide data</string>
+    <string name="epg_quality_no_status">No EPG source has been fetched yet.\n\n</string>
+    <string name="epg_quality_coverage">%1$d of %2$d channels have guide data</string>
+    <string name="epg_quality_without_count">%1$d channels have no guide data</string>
+    <string name="epg_quality_fix_button">Fix channels</string>
+    <string name="epg_quality_without_title">Channels without guide data</string>
+    <string name="epg_quality_suggest_title">Use this EPG ID for %1$s?</string>
+    <string name="epg_quality_no_suggestions">No likely EPG ID found for this channel</string>
 </resources>
