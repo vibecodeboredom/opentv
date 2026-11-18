@@ -110,14 +110,11 @@ Rules (from Chuni, 2026-11-17):
 
 ## 8.x — Library & data
 
-### 8.0.0 (planned) — Backup & restore
+### 8.0.0 ✅ (this release) — Backup & restore
 
-- Export playlists, favorites, hidden channels and settings to one
-  file (share / save it), and import it back on another device —
-  so a new TV starts with the same setup instead of from scratch.
-- EPG source manager: the EPG URL list becomes editable in
-  Settings (add / remove sources), instead of one comma-separated
-  field.
+- Export playlists, favorites, hidden channels and settings to one `opentv-backup.json` file (share via the Android share sheet, plus a copy saved to Downloads) and import it back on another device — a new TV starts with the same setup instead of from scratch. Local ("file:") playlists carry their M3U text in the backup so they are recreated on the other device; EPG sources, upload URL, per-channel EPG overrides and per-channel track picks are included too. Bad files are rejected with a toast; a backup with no usable playlist leaves the current list alone.
+- EPG source manager: the EPG URL list is now editable in Settings as a list — add or remove sources one by one (long-press a row to remove) instead of one comma-separated field. Old comma-separated values read back as their sources with no migration; removing the last source is refused.
+- Gemini lite reviewed the diff (2 findings — both wrong on verification: malformed JSON numbers already throw and are caught by decode, and the all-playlists-disabled guard is intentional) and wrote 3 extra unit tests — 2 verified correct and added as-is, 1 fixed (wrong playlist entry fields) and added. GLM 429'd on its review call and sat this one out.
 
 ### 8.1.0 (planned) — Channel library
 
