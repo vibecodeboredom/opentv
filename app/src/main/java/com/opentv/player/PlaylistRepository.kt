@@ -54,6 +54,9 @@ object PlaylistRepository {
     private const val KEY_FAVORITES = "favorites"
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
+    /** 8.2.0: per-source EPG fetch status, one line per source (see
+     * EpgQuality.encodeStatuses). */
+    private const val KEY_EPG_SOURCE_STATUS = "epg_source_status"
     /** 8.1.0: custom channel groups — renames, order, moves. */
     private const val KEY_GROUP_RENAMES = "group_renames"
     private const val KEY_GROUP_ORDER = "group_order"
@@ -1092,29 +1095,60 @@ object PlaylistRepository {
     /** Fetch + parse every EPG source and merge them (the old loadEpg body).
      * With [force], the per-source disk cache is bypassed and every source
      * is re-downloaded (a failed fetch still falls back to its stale disk
-     * copy — see epgXml). */
+     * copy — see epgXml). 8.2.0: each source's outcome is recorded
+     * (loaded/failed, when, how many channels/programmes) so Settings
+     * can show per-source status. */
     private fun loadEpgFresh(
         context: Context,
         force: Boolean = false
     ): Map<String, List<EpgParser.Programme>> {
         val merged = mutableMapOf<String, MutableList<EpgParser.Programme>>()
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val statuses = mutableListOf<EpgQuality.SourceStatus>()
         for (url in urls) {
             try {
                 val text = epgXml(context, url, force)
                 val (parsed, names) = EpgParser.parseWithNames(text)
+                var programmes = 0
                 for ((id, list) in parsed) {
                     merged.getOrPut(id) { mutableListOf() } += list
+                    programmes += list.size
                 }
                 for ((id, name) in names) {
                     val list = parsed[id] ?: continue
                     merged.getOrPut(name.lowercase()) { mutableListOf() } += list
                 }
-            } catch (ignored: Exception) {
+                statuses += EpgQuality.SourceStatus(
+                    url, System.currentTimeMillis(), true, null,
+                    parsed.size, programmes
+                )
+            } catch (e: Exception) {
                 // One bad source doesn't kill the rest.
+                statuses += EpgQuality.SourceStatus(
+                    url, System.currentTimeMillis(), false,
+                    e.message?.take(80), 0, 0
+                )
             }
         }
+        if (statuses.isNotEmpty()) setEpgSourceStatuses(context, statuses)
         return merged
+    }
+
+    /** 8.2.0 — per-source EPG fetch status, recorded on every fresh
+     * load (see loadEpgFresh). Survives restarts; the Settings EPG
+     * list shows one line per source from this. */
+    fun epgSourceStatuses(context: Context): List<EpgQuality.SourceStatus> =
+        EpgQuality.decodeStatuses(
+            prefs(context).getString(KEY_EPG_SOURCE_STATUS, "") ?: ""
+        )
+
+    private fun setEpgSourceStatuses(
+        context: Context,
+        statuses: List<EpgQuality.SourceStatus>
+    ) {
+        prefs(context).edit()
+            .putString(KEY_EPG_SOURCE_STATUS, EpgQuality.encodeStatuses(statuses))
+            .apply()
     }
 
     /**

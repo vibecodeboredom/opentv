@@ -101,19 +101,74 @@
             android:layout_marginTop="12dp"
             android:orientation="vertical" />
 
-        <Button
-            android:id="@+id/add_epg_source_button"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:background="@drawable/settings_button_bg"
-            android:minHeight="48dp"
-            android:paddingStart="20dp"
-            android:paddingEnd="20dp"
-            android:text="@string/epg_source_add"
-            android:textColor="@color/settings_button_text"
-            android:textSize="16sp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/add_epg_source_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/epg_source_add"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/refresh_epg_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/epg_source_refresh"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- 8.2.0: channels without guide data — one-tap EPG assign. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/missing_guide_title"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/missing_guide_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/missing_guide_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
 
     </LinearLayout>
 

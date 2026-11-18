@@ -2284,6 +2284,11 @@ class GuideActivity : FragmentActivity() {
 
     private fun showChannelOptions(channel: Channel) {
         val overrides = PlaylistRepository.groupOverrides(this)
+        // 8.2.0: per-channel guide coverage — how much guide data
+        // this channel actually has, or that it has none.
+        val coverage = EpgQuality.coverageFor(
+            channel, epg, PlaylistRepository.epgOverrides(this)
+        )
         val details = getString(
             R.string.menu_channel_details,
             channel.number,
@@ -2292,7 +2297,8 @@ class GuideActivity : FragmentActivity() {
             GroupOverrides.displayGroup(
                 GroupOverrides.effectiveGroup(channel, overrides), overrides
             ),
-            channel.tvgId ?: "—"
+            channel.tvgId ?: "—",
+            EpgQuality.coverageLine(coverage, System.currentTimeMillis())
         )
         AlertDialog.Builder(this)
             .setTitle(channel.name)

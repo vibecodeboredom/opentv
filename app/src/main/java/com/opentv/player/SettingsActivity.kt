@@ -123,6 +123,7 @@ class SettingsActivity : FragmentActivity() {
 
         buildPlaylistsUi()
         buildEpgSourcesUi()
+        buildMissingGuideUi()
         buildChannelGroupsUi()
 
         // 6.1.2: guide & playback preferences — toggles save
@@ -206,6 +207,18 @@ class SettingsActivity : FragmentActivity() {
             showAddEpgSourceDialog()
         }
 
+        // 8.2.0: re-download + re-parse every EPG source now, then
+        // show the fresh per-source status and the missing list.
+        findViewById<Button>(R.id.refresh_epg_button).setOnClickListener {
+            Toast.makeText(this, R.string.epg_source_refreshing, Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch {
+                PlaylistRepository.refreshEpg(this@SettingsActivity)
+                buildEpgSourcesUi()
+                buildMissingGuideUi()
+                Toast.makeText(this@SettingsActivity, R.string.epg_source_refreshed, Toast.LENGTH_SHORT).show()
+            }
+        }
+
         findViewById<Button>(R.id.export_backup_button).setOnClickListener {
             exportBackup()
         }
@@ -232,6 +245,7 @@ class SettingsActivity : FragmentActivity() {
             uploadUrl.setText("")
             buildPlaylistsUi()
             buildEpgSourcesUi()
+            buildMissingGuideUi()
             buildChannelGroupsUi()
         }
 
@@ -618,17 +632,23 @@ class SettingsActivity : FragmentActivity() {
 
     // ---- EPG sources (8.0.0) --------------------------------------------
 
-    /** One row per EPG source URL. Long-press to remove it (the last
-     * source can't be removed — the app always needs one). Sources
-     * save immediately, like the playlists. */
+    /** One row per EPG source URL, with its last fetch status
+     * underneath (8.2.0: which source loaded, which failed, and
+     * when). Long-press to remove it (the last source can't be
+     * removed — the app always needs one). Sources save
+     * immediately, like the playlists. */
     private fun buildEpgSourcesUi() {
         val container = findViewById<LinearLayout>(R.id.epg_sources_list)
         container.removeAllViews()
         val density = resources.displayMetrics.density
         fun dp(v: Int): Int = (v * density).toInt()
+        val statuses = PlaylistRepository.epgSourceStatuses(this)
+            .associateBy { it.url }
+        val now = System.currentTimeMillis()
         for (url in PlaylistRepository.epgUrls(this)) {
+            val status = statuses[url]
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
+                orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
                 isFocusable = true
                 isFocusableInTouchMode = true
@@ -645,9 +665,28 @@ class SettingsActivity : FragmentActivity() {
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
             }
             row.addView(urlView)
+            val statusView = TextView(this).apply {
+                text = EpgQuality.statusLine(status, now)
+                // A failed source reads red; anything else is muted.
+                setTextColor(
+                    if (status != null && !status.lastOk) 0xFFFF9E80.toInt()
+                    else 0xB3FFFFFF.toInt()
+                )
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(2) }
+            }
+            row.addView(statusView)
             row.setOnLongClickListener {
                 showRemoveEpgSourceDialog(url)
                 true
@@ -697,6 +736,134 @@ class SettingsActivity : FragmentActivity() {
                 PlaylistRepository.setEpgUrls(this, current - url)
                 Toast.makeText(this, R.string.epg_source_removed, Toast.LENGTH_SHORT).show()
                 buildEpgSourcesUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---- Channels without guide data (8.2.0) -------------------------
+    //
+    // Channels with no programmes in the merged guide. Tap one to
+    // pick a suggested EPG id (the common mismatches: case,
+    // punctuation, country/HD suffix, display-name spelling) or
+    // type one in. Assigning sets the per-channel EPG override, so
+    // the channel drops off this list on the next build. The list
+    // builds asynchronously once the playlist + guide have loaded.
+
+    private fun buildMissingGuideUi() {
+        val container = findViewById<LinearLayout>(R.id.missing_guide_list)
+        container.removeAllViews()
+        lifecycleScope.launch {
+            val channels = PlaylistRepository.loadPlaylist(this@SettingsActivity)
+                .getOrNull() ?: emptyList()
+            val epg = PlaylistRepository.loadEpg(this@SettingsActivity)
+            renderMissingGuide(channels, epg)
+        }
+    }
+
+    private fun renderMissingGuide(
+        channels: List<Channel>,
+        epg: Map<String, List<EpgParser.Programme>>
+    ) {
+        val container = findViewById<LinearLayout>(R.id.missing_guide_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val missing = EpgQuality.channelsWithoutGuide(
+            channels, epg,
+            PlaylistRepository.epgOverrides(this),
+            PlaylistRepository.hiddenChannels(this)
+        )
+        if (missing.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.missing_guide_none)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+            })
+            return
+        }
+        for (channel in missing) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            row.addView(TextView(this).apply {
+                text = channel.name
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            row.addView(TextView(this).apply {
+                text = getString(R.string.missing_guide_no_data)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            })
+            // Tap (not long-press): a remote's OK button opens the
+            // assign dialog — long-press-only rows are dead on TV.
+            row.setOnClickListener {
+                showAssignMissingEpgDialog(channel, epg)
+            }
+            container.addView(row)
+        }
+    }
+
+    /** One-tap EPG assign: the suggested ids first, then "Enter
+     * manually…" for the rest. With no suggestions at all, go
+     * straight to the manual field. */
+    private fun showAssignMissingEpgDialog(
+        channel: Channel,
+        epg: Map<String, List<EpgParser.Programme>>
+    ) {
+        val suggestions = EpgQuality.suggestEpgIds(channel, epg.keys)
+        if (suggestions.isEmpty()) {
+            showManualAssignDialog(channel)
+            return
+        }
+        val items = (suggestions + getString(R.string.missing_guide_enter_manually))
+            .toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.missing_guide_assign_title, channel.name))
+            .setItems(items) { _, which ->
+                if (which == suggestions.size) {
+                    showManualAssignDialog(channel)
+                } else {
+                    PlaylistRepository.setEpgOverride(this, channel.id, suggestions[which])
+                    Toast.makeText(this, R.string.menu_epg_assigned, Toast.LENGTH_SHORT).show()
+                    buildMissingGuideUi()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Type an EPG id in by hand (prefilled with the current
+     * override or the playlist's tvg-id, blank to clear). */
+    private fun showManualAssignDialog(channel: Channel) {
+        val input = EditText(this).apply {
+            setText(
+                PlaylistRepository.epgOverrides(this@SettingsActivity)[channel.id]
+                    ?: channel.tvgId.orEmpty()
+            )
+            hint = getString(R.string.menu_assign_epg_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.menu_assign_epg_title, channel.name))
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                PlaylistRepository.setEpgOverride(this, channel.id, input.text.toString())
+                Toast.makeText(this, R.string.menu_epg_assigned, Toast.LENGTH_SHORT).show()
+                buildMissingGuideUi()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

@@ -163,7 +163,7 @@
     <string name="menu_assign_epg_title">Assign EPG to %1$s</string>
     <string name="menu_assign_epg_hint">EPG ID (tvg-id), blank to clear</string>
     <string name="menu_epg_assigned">EPG assigned</string>
-    <string name="menu_channel_details">Channel %1$d\n%2$s\nGroup: %3$s\nEPG ID: %4$s</string>
+    <string name="menu_channel_details">Channel %1$d\n%2$s\nGroup: %3$s\nEPG ID: %4$s\n%5$s</string>
     <string name="playback_error">Couldn\'t play this channel: %1$s</string>
     <string name="recording_in_progress">Recording %1$d channel(s)</string>
     <string name="recording_idle">Recordings ready</string>
@@ -225,6 +225,15 @@
     <string name="epg_source_remove_confirm">Remove this EPG source?</string>
     <string name="epg_source_removed">Removed EPG source</string>
     <string name="epg_source_cannot_remove_last">You need at least one EPG source.</string>
+    <string name="epg_source_refresh">Refresh now</string>
+    <string name="epg_source_refreshing">Refreshing guide data…</string>
+    <string name="epg_source_refreshed">Guide data refreshed</string>
+    <string name="missing_guide_title">Channels without guide data</string>
+    <string name="missing_guide_hint">Channels with no programmes in the guide. Tap one to assign its EPG id — the usual mismatches are suggested, or type it in.</string>
+    <string name="missing_guide_none">All channels have guide data.</string>
+    <string name="missing_guide_no_data">No guide data</string>
+    <string name="missing_guide_assign_title">Assign EPG to %1$s</string>
+    <string name="missing_guide_enter_manually">Enter manually…</string>
     <!-- Backup &amp; restore (8.0.0). -->
     <string name="backup_title">Backup &amp; restore</string>
     <string name="backup_hint">Save your playlists, favorites, hidden channels and settings to one file, and restore it on another device so it starts with the same setup.</string>

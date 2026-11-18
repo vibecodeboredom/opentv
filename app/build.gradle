@@ -14,8 +14,8 @@ android {
         applicationId 'com.opentv.player.juniper'
         minSdk 26
         targetSdk 35
-        versionCode 59
-        versionName '8.1.1'
+        versionCode 60
+        versionName '8.2.0'
     }
 
     // Fixed debug keystore (committed) so every CI build shares one
