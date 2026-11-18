@@ -27,7 +27,6 @@ object GuideData {
         return (nowMillis / hour) * hour
     }
 
-<<<<<<< HEAD
     /** Tonight's prime-time hours (combined: ported from Juniper 7.2.0). */
     const val TONIGHT_START_HOUR = 18
     const val TONIGHT_HOURS = 5
@@ -38,7 +37,7 @@ object GuideData {
      * about tomorrow's date. Returns (window start, window hours).
      * The Tonight QUICK VIEW's window — Nova's own Tonight guide
      * jump (19:00 anchor) is a different feature and stays. */
-=======
+
     /** 7.2.0: the guide window's anchor — the top of the current
      * hour, shifted by whole days for day navigation (0 = today,
      * +1 = tomorrow). Calendar day math, not a fixed 24 h — a
@@ -56,7 +55,6 @@ object GuideData {
      * that just aired (shown with the past styling), so the header
      * never says "Tonight" about tomorrow's date. Returns
      * (window start, window hours). */
->>>>>>> fbc17e2 (Combine (Juniper): merge ChannelSidebar / SidebarAdapter / GuideData / ParsedCache — Juniper appearance (font size, larger text, high-contrast focus), effective groups, recents count, channel-number + EPG freshness helpers, EPG saved-at; Nova formatElapsedClock kept)
     fun tonightWindow(nowMillis: Long): Pair<Long, Int> {
         val dayStart = midnightMillis(nowMillis)
         return Pair(dayStart + TONIGHT_START_HOUR * 60L * 60 * 1000, TONIGHT_HOURS)
@@ -72,24 +70,10 @@ object GuideData {
         return cal.timeInMillis
     }
 
-<<<<<<< HEAD
     /** Combined (Juniper 7.2.1): true when any channel in [channels]
      * has a real programme inside the window — the Tonight quick
      * view's second empty state (favorites exist, but their rows
-     * would be all "No information" placeholders). */
-=======
-    /** Tonight's prime-time hours (7.2.0). */
-    const val TONIGHT_START_HOUR = 18
-    const val TONIGHT_HOURS = 5
-
-    /** True when any channel in [channels] has a real (non-placeholder)
-     * programme inside the window. 7.2.1: Tonight's empty states — a
-     * favorite with no EPG in the window still gets a "No
-     * information" placeholder row, so an empty row list is not the
-     * only empty case; this checks the EPG directly, without building
-     * any rows (placeholders only exist when nothing overlaps). */
->>>>>>> fbc17e2 (Combine (Juniper): merge ChannelSidebar / SidebarAdapter / GuideData / ParsedCache — Juniper appearance (font size, larger text, high-contrast focus), effective groups, recents count, channel-number + EPG freshness helpers, EPG saved-at; Nova formatElapsedClock kept)
-    fun anyRealProgrammes(
+     * would be all "No information" placeholders). */    fun anyRealProgrammes(
         channels: List<Channel>,
         epg: Map<String, List<EpgParser.Programme>>,
         windowStartMillis: Long,
@@ -462,27 +446,6 @@ object GuideData {
             "$hours:${twoDigits(minutes.toInt())}:${twoDigits(seconds.toInt())}"
         } else {
             "${minutes}:${twoDigits(seconds.toInt())}"
-        }
-    }
-
-    /** First channel with this playlist number, or null. Numbers are
-     * the playlist positions (1-based); a playlist can carry gaps, so
-     * the first match wins. 7.0.0: channel-number jump. */
-    fun channelByNumber(
-        channels: List<Channel>,
-        number: Int
-    ): Channel? = channels.firstOrNull { it.number == number }
-
-    /** How long ago [updatedAtMillis] was, as "just now", "5 min ago",
-     * "2 h ago" or "3 d ago". 7.0.0: the guide header's EPG freshness
-     * label. A zero or future timestamp reads as "just now". */
-    fun formatAge(updatedAtMillis: Long, nowMillis: Long): String {
-        val ageMinutes = (nowMillis - updatedAtMillis) / 60_000L
-        return when {
-            ageMinutes < 1 -> "just now"
-            ageMinutes < 60 -> "$ageMinutes min ago"
-            ageMinutes < 60 * 24 -> "${ageMinutes / 60} h ago"
-            else -> "${ageMinutes / (60 * 24)} d ago"
         }
     }
 
