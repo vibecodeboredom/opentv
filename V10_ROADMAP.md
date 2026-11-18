@@ -311,13 +311,30 @@ Rules (from Chuni, 2026-11-17):
 - Gemini lite reviewed the diff (no findings) and wrote 1 extra
   unit test; GLM 429'd on its review call and sat this one out.
 
-### 9.2.0 (planned) — Performance
+### 9.2.0 ✅ (this release) — Performance
 
-- Startup-time pass: faster cold start to first channel.
-- Memory pass: lower steady-state use on long viewing sessions.
-- Logo cache on disk, so logos survive a restart without
-  re-downloading.
-- Guide scroll smoothness pass on large playlists.
+- Startup-time pass: the EPG warm-up in preload waits 2 s so the
+  playlist load (critical path to the first screen) gets the IO/CPU
+  first on a 1 GB box; the stale-logo refresh waits 10 s after
+  process start instead of firing 25 network fetches at launch. A
+  screen opening the guide still starts the EPG load immediately
+  (single-flight), so the delays only reorder background work.
+- Memory pass: ExoPlayer max buffer 30 s → 20 s (min/startup
+  unchanged, ~7 MB less held at a typical 6 Mbps live stream);
+  onTrimMemory releases the in-memory playlist + EPG caches when
+  the system is under pressure or the app is backgrounded (they
+  rebuild from the SQLite snapshot in milliseconds).
+- Logo cache on disk: explicit Coil disk cache (LogoCache, 2% of
+  usable space clamped 16–64 MB, dedicated logo_cache directory)
+  instead of the implicit default — logos survive a restart without
+  re-downloading, and the cache can never grow to hundreds of MB.
+- Guide scroll smoothness pass on large playlists: append chunks
+  24 → 8 rows with the focus buffer 6 → 12 (GuideScrollTuning), so
+  scrolling builds ~70 views per chunk instead of ~200.
+- Gemini reviewed the diff (no findings, SHIP) and wrote 6 extra
+  unit tests (1 wrong expectation dropped); GLM 429'd and sat this
+  one out. First CI run failed on my own test arithmetic (2% of
+  1 GiB is 21,474,836 bytes, not 20 MiB) — fixed, re-run green.
 
 ### 9.2.1 (planned) — Patch
 
