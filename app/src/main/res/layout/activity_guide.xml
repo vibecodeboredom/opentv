@@ -122,6 +122,23 @@
                     android:textSize="15sp" />
             </LinearLayout>
 
+            <!-- 9.3.0 (Nova): the programme description (XMLTV
+                 <desc>), two lines ellipsized — the header is a
+                 fixed 180dp, so a scrolling text box would fight
+                 the grid for focus; two lines at this width hold a
+                 typical synopsis. Hidden when the guide carries
+                 no description for the programme. -->
+            <TextView
+                android:id="@+id/guide_detail_desc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="#C9C9D1"
+                android:textSize="14sp"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:visibility="gone" />
+
             <View
                 android:layout_width="match_parent"
                 android:layout_height="0dp"

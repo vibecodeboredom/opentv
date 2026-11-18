@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputFilter
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
@@ -65,10 +66,43 @@ class SettingsActivity : FragmentActivity() {
             }
         }
 
+    /** 9.3.0 (Nova): the Settings PIN gate — true once no PIN is
+     * set or the PIN has been entered this visit. Until then the
+     * settings UI is never built, so nothing behind the PIN
+     * prompt can be seen or reached. */
+    private var pinUnlocked = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
         DeviceType.applyOrientation(this)
+        if (AppSettings.settingsPinSet(this)) {
+            // Locked: no content view at all until the PIN checks
+            // out — the screen stays blank behind the prompt, and
+            // cancelling leaves Settings entirely.
+            showPinEntryDialog(
+                title = getString(R.string.pin_enter_title),
+                onCancelled = { finish() },
+                onUnlocked = { unlockSettings() }
+            )
+        } else {
+            pinUnlocked = true
+            buildSettingsUi()
+        }
+    }
+
+    /** 9.3.0 (Nova): the PIN checked out — build the UI and do
+     * the onResume work that ran (gated) while the prompt was up. */
+    private fun unlockSettings() {
+        pinUnlocked = true
+        buildSettingsUi()
+        updateShareUi()
+        startShareTicker()
+    }
+
+    /** Everything onCreate always built, run either immediately
+     * (no PIN set) or after the PIN gate opens. */
+    private fun buildSettingsUi() {
         setContentView(R.layout.activity_settings)
 
         findViewById<TextView>(R.id.about_version).text =
@@ -212,6 +246,12 @@ class SettingsActivity : FragmentActivity() {
             showKeywordsDialog()
         }
 
+        // 9.3.0 (Nova): the Settings PIN — set / change / remove.
+        updatePinButton()
+        findViewById<Button>(R.id.pref_pin_button).setOnClickListener {
+            showPinManageDialog()
+        }
+
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)
 
@@ -249,6 +289,9 @@ class SettingsActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 9.3.0 (Nova): while the PIN gate is up the settings UI
+        // doesn't exist yet — the share views included.
+        if (!pinUnlocked) return
         updateShareUi()
         startShareTicker()
     }
@@ -507,6 +550,131 @@ class SettingsActivity : FragmentActivity() {
                 showKeywordsDialog()
             }
             .setNegativeButton(android.R.string.cancel) { _, _ -> showKeywordsDialog() }
+            .show()
+    }
+
+    // ---- Settings PIN (9.3.0, Nova) ------------------------------------
+
+    /** The PIN button's label follows the state: set one, or
+     * change/remove the one that's set. */
+    private fun updatePinButton() {
+        findViewById<Button>(R.id.pref_pin_button).text = getString(
+            if (AppSettings.settingsPinSet(this)) {
+                R.string.prefs_pin_change_remove
+            } else {
+                R.string.prefs_pin_set
+            }
+        )
+    }
+
+    /** A 4-digit numeric password field — the shape every PIN
+     * prompt on this screen shares. */
+    private fun pinInput(): EditText = EditText(this).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER or
+            InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        filters = arrayOf(InputFilter.LengthFilter(4))
+        setSingleLine(true)
+    }
+
+    /** A PIN prompt that only lets the caller through when the
+     * entered PIN verifies against the stored record. A wrong PIN
+     * gets a toast and a fresh prompt; cancelling runs
+     * [onCancelled] (the entry gate finishes the activity, the
+     * in-Settings prompts just give up). The entered PIN is never
+     * logged, shown or stored anywhere. */
+    private fun showPinEntryDialog(
+        title: String,
+        onCancelled: () -> Unit = {},
+        onUnlocked: () -> Unit
+    ) {
+        val input = pinInput()
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                if (AppSettings.verifySettingsPin(this, input.text.toString())) {
+                    onUnlocked()
+                } else {
+                    Toast.makeText(this, R.string.pin_wrong, Toast.LENGTH_SHORT).show()
+                    showPinEntryDialog(title, onCancelled, onUnlocked)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> onCancelled() }
+            .setOnCancelListener { onCancelled() }
+            .show()
+    }
+
+    /** The PIN button's dialog: with no PIN set it goes straight
+     * to setting one; with one set, Change and Remove both first
+     * prove the current PIN — a TV left unlocked on the couch
+     * must not be enough to strip the lock off. */
+    private fun showPinManageDialog() {
+        if (!AppSettings.settingsPinSet(this)) {
+            showSetPinDialog()
+            return
+        }
+        val items = arrayOf(
+            getString(R.string.pin_change),
+            getString(R.string.pin_remove)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.prefs_settings_pin)
+            .setItems(items) { _, which ->
+                showPinEntryDialog(
+                    title = getString(R.string.pin_current_title),
+                    onUnlocked = {
+                        if (which == 0) {
+                            showSetPinDialog()
+                        } else {
+                            AppSettings.clearSettingsPin(this)
+                            Toast.makeText(
+                                this, R.string.pin_removed, Toast.LENGTH_SHORT
+                            ).show()
+                            updatePinButton()
+                        }
+                    }
+                )
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Set (or replace) the PIN: enter it, then enter it again —
+     * one mistyped digit would otherwise lock the user out of
+     * their own settings with no recovery short of clearing the
+     * app's data. */
+    private fun showSetPinDialog() {
+        val input = pinInput()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.pin_new_title)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val pin = input.text.toString()
+                if (pin.length != 4) {
+                    Toast.makeText(this, R.string.pin_must_be_4, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val confirm = pinInput()
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.pin_confirm_title)
+                    .setView(confirm)
+                    .setPositiveButton(android.R.string.ok) { _, _ ->
+                        if (confirm.text.toString() == pin) {
+                            AppSettings.setSettingsPin(this, pin)
+                            Toast.makeText(
+                                this, R.string.pin_set_toast, Toast.LENGTH_SHORT
+                            ).show()
+                            updatePinButton()
+                        } else {
+                            Toast.makeText(
+                                this, R.string.pin_mismatch, Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 

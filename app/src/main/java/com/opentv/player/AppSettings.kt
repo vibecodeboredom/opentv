@@ -2,6 +2,10 @@ package com.opentv.player
 
 import android.content.Context
 import android.content.SharedPreferences
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 /**
  * User preferences for the 6.1.2 guide / playback behaviours, all
@@ -411,4 +415,106 @@ object AppSettings {
      * per-cell check is a set scan + contains, nothing more. */
     fun guideKeywordSetLower(context: Context): Set<String> =
         guideKeywords(context).map { it.lowercase() }.toSet()
+
+    // ---- 9.3.0 (Nova): Settings PIN --------------------------------
+    //
+    // An optional 4-digit PIN that gates the Settings screen only
+    // (SettingsActivity asks for it before building its UI). The
+    // PIN itself is never stored: the record is "saltHex:hashHex",
+    // a per-PIN random salt + a PBKDF2 derivation (deliberately
+    // expensive — a 4-digit PIN has only 10,000 combinations, so
+    // a fast hash would let anyone who extracted the record try
+    // them all instantly; the iterations make each guess cost
+    // real time). There is no recovery path by design — a
+    // forgotten PIN means clearing the app's data, which the
+    // Settings caption says out loud.
+
+    private const val KEY_SETTINGS_PIN = "settings_pin"
+
+    /** PBKDF2 iteration count for the Settings PIN — high enough
+     * to make offline guessing of a 4-digit PIN slow, low enough
+     * that unlocking Settings on a TV's modest CPU still feels
+     * instant (one derivation, ~a tenth of a second class). */
+    private const val PIN_HASH_ITERATIONS = 100_000
+
+    /** True when a Settings PIN is set. Default: none set. */
+    fun settingsPinSet(context: Context): Boolean =
+        prefs(context).getString(KEY_SETTINGS_PIN, null) != null
+
+    fun setSettingsPin(context: Context, pin: String) {
+        prefs(context).edit()
+            .putString(KEY_SETTINGS_PIN, settingsPinRecord(pin))
+            .apply()
+    }
+
+    fun clearSettingsPin(context: Context) {
+        prefs(context).edit().remove(KEY_SETTINGS_PIN).apply()
+    }
+
+    /** True when [pin] matches the stored record. A missing or
+     * malformed record never matches. */
+    fun verifySettingsPin(context: Context, pin: String): Boolean {
+        val stored = prefs(context).getString(KEY_SETTINGS_PIN, null) ?: return false
+        return settingsPinMatches(stored, pin)
+    }
+
+    /** Build a stored record for [pin]: a fresh random salt and
+     * the PBKDF2 hash, hex-encoded as "salt:hash". Pure JVM (no
+     * Context), so the PIN maths is unit-testable. */
+    internal fun settingsPinRecord(pin: String): String {
+        val salt = ByteArray(16)
+        SecureRandom().nextBytes(salt)
+        val saltHex = salt.toHex()
+        return saltHex + ":" + settingsPinHash(saltHex, pin)
+    }
+
+    /** PBKDF2-HmacSHA256 of [pin] under the record's salt
+     * ([PIN_HASH_ITERATIONS] rounds, 256-bit output), hex-encoded. */
+    internal fun settingsPinHash(saltHex: String, pin: String): String {
+        val spec = PBEKeySpec(
+            pin.toCharArray(),
+            saltHex.hexToBytes(),
+            PIN_HASH_ITERATIONS,
+            256
+        )
+        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            .generateSecret(spec).encoded.toHex()
+    }
+
+    /** True when [pin] reproduces the hash in a stored record.
+     * MessageDigest.isEqual compares without short-circuiting on
+     * the first differing byte. */
+    internal fun settingsPinMatches(stored: String, pin: String): Boolean {
+        val salt = stored.substringBefore(':', "")
+        val hash = stored.substringAfter(':', "")
+        if (salt.isEmpty() || hash.isEmpty()) return false
+        return MessageDigest.isEqual(
+            settingsPinHash(salt, pin).toByteArray(Charsets.UTF_8),
+            hash.toByteArray(Charsets.UTF_8)
+        )
+    }
+
+    private fun ByteArray.toHex(): String {
+        val hex = "0123456789abcdef"
+        val sb = StringBuilder(size * 2)
+        for (b in this) {
+            val v = b.toInt() and 0xFF
+            sb.append(hex[v shr 4])
+            sb.append(hex[v and 0x0F])
+        }
+        return sb.toString()
+    }
+
+    /** Inverse of [toHex] for the stored salt. A malformed salt
+     * (odd length, non-hex digits) decodes to garbage bytes
+     * rather than throwing — the derived hash then simply never
+     * matches, which is the right answer for a corrupt record. */
+    private fun String.hexToBytes(): ByteArray {
+        val out = ByteArray(length / 2)
+        for (i in out.indices) {
+            out[i] = ((Character.digit(this[2 * i], 16) shl 4) +
+                Character.digit(this[2 * i + 1], 16)).toByte()
+        }
+        return out
+    }
 }

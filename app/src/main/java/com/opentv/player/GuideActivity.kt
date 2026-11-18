@@ -93,6 +93,8 @@ class GuideActivity : FragmentActivity() {
     private lateinit var detailProgress: ProgressBar
     private lateinit var detailRemaining: TextView
     private lateinit var detailCategory: TextView
+    /** 9.3.0 (Nova): the programme description under the time row. */
+    private lateinit var detailDesc: TextView
 
     private var allRows: List<GuideData.GuideRow> = emptyList()
     private var allChannels: List<Channel> = emptyList()
@@ -286,15 +288,18 @@ class GuideActivity : FragmentActivity() {
         detailProgress = findViewById(R.id.guide_detail_progress)
         detailRemaining = findViewById(R.id.guide_detail_remaining)
         detailCategory = findViewById(R.id.guide_detail_category)
+        detailDesc = findViewById(R.id.guide_detail_desc)
 
         // 9.0.0 (Nova): the details header's progress bar takes
         // the chosen accent, and the header's texts scale with
         // the comfort text size — their base sizes live in the
         // layout, so the inflated px sizes are scaled in place.
+        // 9.3.0 (Nova): the description text scales with them.
         detailProgress.progressDrawable = AccentDrawables.progressDrawable(this)
         if (guideTextScale != 1.0f) {
             for (v in listOf(
-                detailTitle, detailTime, detailChannel, detailCategory, detailRemaining
+                detailTitle, detailTime, detailChannel, detailCategory,
+                detailRemaining, detailDesc
             )) {
                 v.setTextSize(TypedValue.COMPLEX_UNIT_PX, v.textSize * guideTextScale)
             }
@@ -376,6 +381,9 @@ class GuideActivity : FragmentActivity() {
             pinnedCol.layoutParams.width = channelColWidth
             guideHeader.layoutParams.height = dpToPx(MOBILE_HEADER_HEIGHT_DP)
             guidePreviewBox.layoutParams.width = dpToPx(MOBILE_PREVIEW_WIDTH_DP)
+            // 9.3.0 (Nova): the shrunken mobile header has room
+            // for one description line, not two.
+            detailDesc.maxLines = 1
         }
 
         pxPerMinute = pxPerMinuteForZoom(AppSettings.guideZoomHours(this))
@@ -842,6 +850,15 @@ class GuideActivity : FragmentActivity() {
             CatchUp.isAvailable(channel, programme, nowMillis)
         detailTitle.text = markedTitle(programme, isCatchup)
         detailTime.text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
+        // 9.3.0 (Nova): the programme description, when the guide
+        // carries one (placeholder cells and desc-less programmes
+        // hide the view, so the header keeps its old shape).
+        if (programme.desc.isNotEmpty()) {
+            detailDesc.text = programme.desc
+            detailDesc.visibility = View.VISIBLE
+        } else {
+            detailDesc.visibility = View.GONE
+        }
         if (channelChanged) {
             detailChannel.text = if (channel.number > 0) {
                 "${channel.number}  ${channel.name}"

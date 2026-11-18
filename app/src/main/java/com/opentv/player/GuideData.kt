@@ -145,7 +145,16 @@ object GuideData {
             if (matchesWords(channel.name, words)) {
                 buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { channelMatches += it }
-            } else if (programmes.any { matchesWords(it.title, words) }) {
+            } else if (programmes.any {
+                    // 9.3.0 (Nova): the description matches too —
+                    // a word that only appears in a programme's
+                    // synopsis ("documentary about the 1969 moon
+                    // landing") now finds the programme, ranked
+                    // with the title matches.
+                    matchesWords(it.title, words) ||
+                        (it.desc.isNotEmpty() && matchesWords(it.desc, words))
+                }
+            ) {
                 buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { programmeMatches += it }
             }
@@ -368,6 +377,28 @@ object GuideData {
     /** Whole minutes left in a programme ("48 min"). */
     fun remainingMinutes(programme: EpgParser.Programme, nowMillis: Long): Long =
         maxOf((programme.stopMillis - nowMillis) / 60_000L, 0L)
+
+    /** 9.3.0 (Nova): a span until something starts, compactly —
+     * "45m" under an hour, "2h 15m" under a day (whole hours drop
+     * the minutes: "2h"), "3d 4h" beyond (whole days: "3d"). The
+     * watchlist cards prefix it with "in". A span of a minute or
+     * less still reads "1m" — the countdown never claims "0m"
+     * for something that hasn't started yet; a non-positive span
+     * (already started) reads "0m" and callers show "On now"
+     * instead. */
+    fun formatCountdown(deltaMillis: Long): String {
+        if (deltaMillis <= 0L) return "0m"
+        val minutes = maxOf(deltaMillis / 60_000L, 1L)
+        if (minutes < 60L) return "${minutes}m"
+        val hours = minutes / 60L
+        val remMinutes = minutes % 60L
+        if (hours < 24L) {
+            return if (remMinutes > 0L) "${hours}h ${remMinutes}m" else "${hours}h"
+        }
+        val days = hours / 24L
+        val remHours = hours % 24L
+        return if (remHours > 0L) "${days}d ${remHours}h" else "${days}d"
+    }
 
     /** Format date + clock as "Sat, Nov 7, 10:12 PM" for the guide header. */
     fun formatDateTime(millis: Long): String =

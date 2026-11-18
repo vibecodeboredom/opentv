@@ -289,4 +289,40 @@ class GuideDataTest {
             GuideData.filterChannelsByGroup(channels, null)
         )
     }
+
+    @Test
+    fun searchMatchesProgrammeDescriptions() {
+        // 9.3.0: a word that only appears in a programme's
+        // description finds the programme, like a title match.
+        val windowStart = 1_794_081_600_000L
+        val ch = channel("doc.1", "Documentaries")
+        val rows = GuideData.searchRows(
+            listOf(ch),
+            mapOf("doc.1" to listOf(
+                EpgParser.Programme(
+                    "doc.1", windowStart, windowStart + hour, "Space Hour",
+                    desc = "The 1969 moon landing, restored."
+                )
+            )),
+            windowStart, 6, query = "moon landing"
+        )
+        assertEquals(1, rows.size)
+        assertEquals("Documentaries", rows[0].channel.name)
+    }
+
+    @Test
+    fun formatCountdownShapes() {
+        // 9.3.0: the watchlist countdown — minutes under an hour,
+        // hours (+ minutes) under a day, days (+ hours) beyond;
+        // sub-minute still reads "1m", never "0m" before the start.
+        val minute = 60_000L
+        assertEquals("0m", GuideData.formatCountdown(0L))
+        assertEquals("0m", GuideData.formatCountdown(-5 * minute))
+        assertEquals("1m", GuideData.formatCountdown(30_000L))
+        assertEquals("45m", GuideData.formatCountdown(45 * minute))
+        assertEquals("2h", GuideData.formatCountdown(2 * 60 * minute))
+        assertEquals("2h 15m", GuideData.formatCountdown(135 * minute))
+        assertEquals("1d", GuideData.formatCountdown(24 * 60 * minute))
+        assertEquals("3d 4h", GuideData.formatCountdown((3 * 24 + 4) * 60 * minute))
+    }
 }

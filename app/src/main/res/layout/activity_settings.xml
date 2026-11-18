@@ -481,6 +481,35 @@
             android:minHeight="48dp"
             android:text="@string/prefs_keywords_manage" />
 
+        <!-- 9.3.0 (Nova): the Settings PIN — when one is set,
+             opening Settings asks for it first. The caption is
+             honest about the recovery: there isn't one short of
+             clearing the app's data. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_settings_pin"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/prefs_settings_pin_caption"
+            android:textColor="#9A9AA3"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/pref_pin_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_pin_set" />
+
     </LinearLayout>
 
     <!-- Share playlist (4.7.1): temporarily host a playlist on this

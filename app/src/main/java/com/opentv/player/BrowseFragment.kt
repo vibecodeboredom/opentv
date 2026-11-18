@@ -395,11 +395,14 @@ class BrowseFragment : BrowseSupportFragment() {
      * 8.3.0 (Nova): insert, update or hide the "Watchlist" row,
      * directly under "On now" (or at the top while that row is
      * away). Called when the rows are built, on resume, and on
-     * the "On now" ticker. Unlike that row there is no in-place
-     * rebind: a watchlist card's text only changes when a
-     * programme starts (which flips its signature) or a reminder
-     * is added or ends, so an unchanged signature leaves the row
-     * — and its focus — alone.
+     * the "On now" ticker. A programme starting flips its
+     * signature (the ":now" marker), and a reminder added or
+     * ended changes the set — both rebuild the row.
+     * 9.3.0 (Nova): an unchanged signature now rebinds in place
+     * (the 8.2.1 "On now" pattern) instead of leaving the row
+     * alone — the cards' countdown text is computed at bind
+     * time, so the rebind is what advances it on the ticker.
+     * No rebuild, so focus stays put.
      */
     private fun refreshWatchlistRow() {
         if (!isAdded || homeChannels.isEmpty()) return
@@ -414,7 +417,13 @@ class BrowseFragment : BrowseSupportFragment() {
             watchlistSignature = ""
             return
         }
-        if (signature == watchlistSignature && watchlistRow != null) return
+        if (signature == watchlistSignature && watchlistRow != null) {
+            val rowAdapter = watchlistRow?.adapter as? ArrayObjectAdapter
+            if (rowAdapter != null && rowAdapter.size() > 0) {
+                rowAdapter.notifyArrayItemRangeChanged(0, rowAdapter.size())
+            }
+            return
+        }
         val adapter = ArrayObjectAdapter(WatchlistPresenter())
         entries.forEach { adapter.add(it) }
         val row = ListRow(HeaderItem(getString(R.string.watchlist)), adapter)

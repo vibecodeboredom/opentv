@@ -316,10 +316,14 @@ internal fun watchlistStartLabel(context: android.content.Context, startMillis: 
 /**
  * 8.3.0 (Nova): card for the home screen's "Watchlist" row — a
  * programme the user set a reminder for. Programme title on top,
- * channel + start underneath ("Today 8:00 PM" style); once the
- * programme is on, the line leads with "On now" instead and the
- * tap plays the channel. Channel logo up top, like the On now
- * cards.
+ * channel + start underneath; once the programme is on, the line
+ * leads with "On now" instead and the tap plays the channel.
+ * Channel logo up top, like the On now cards.
+ * 9.3.0 (Nova): a future programme's line carries the countdown
+ * — "Channel • in 2h 15m • 8:00 PM" — computed at bind time, so
+ * the row's 60-second ticker rebind (see BrowseFragment) keeps
+ * it honest. The absolute day ("Tomorrow 8:00 PM") still shows
+ * in the tap toast via [watchlistStartLabel].
  */
 class WatchlistPresenter : Presenter() {
 
@@ -340,7 +344,13 @@ class WatchlistPresenter : Presenter() {
             cardView.context.getString(R.string.on_now) + " • " + entry.channel.name
         } else {
             entry.channel.name + " • " +
-                watchlistStartLabel(cardView.context, entry.reminder.startMillis)
+                cardView.context.getString(
+                    R.string.watchlist_in,
+                    GuideData.formatCountdown(
+                        entry.reminder.startMillis - System.currentTimeMillis()
+                    )
+                ) + " • " +
+                GuideData.formatClock(entry.reminder.startMillis)
         }
         cardView.mainImageView.load(entry.channel.logo) {
             size(CARD_WIDTH, CARD_HEIGHT)
