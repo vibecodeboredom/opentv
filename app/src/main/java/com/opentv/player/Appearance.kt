@@ -1,5 +1,6 @@
 package com.opentv.player
 
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -36,13 +37,52 @@ object Appearance {
     }
 
     /** Thinnest a guide row is allowed to get (dp) — below this the
-     * single-line programme title would clip vertically. */
+     * single-line programme title would clip vertically. 9.1.1: the
+     * floor is font-aware — a Large title needs more room than a
+     * Medium one (see [minGuideRowHeightDp]), so the absolute floor
+     * is only the starting point. */
     const val MIN_GUIDE_ROW_HEIGHT_DP = 28
 
+    /** Programme title size (sp) in a guide cell, before the font
+     * scale — the text the row height has to fit. */
+    const val PROGRAMME_TITLE_SP = 15f
+
+    /** Safe line-height estimate for the bold programme title
+     * (Roboto's real line height is ~1.17x; 1.2x leaves slack). */
+    const val TITLE_LINE_HEIGHT_FACTOR = 1.2f
+
+    /** Vertical padding inside a programme card (dp, top + bottom)
+     * — the title's line box sits inside this, so the row has to
+     * clear both. */
+    const val CARD_VERTICAL_PADDING_DP = 8
+
+    /** The thinnest a guide row may be for a font size: the scaled
+     * programme title's line box plus the card's vertical padding,
+     * never below the absolute floor. At Medium that is 28dp (the
+     * old floor); at Large it is 29dp — a Compact row that ignored
+     * the font size would clip the title's top and bottom. */
+    fun minGuideRowHeightDp(fontSize: FontSize): Int = max(
+        MIN_GUIDE_ROW_HEIGHT_DP,
+        ceil(PROGRAMME_TITLE_SP * fontSize.scale * TITLE_LINE_HEIGHT_FACTOR).toInt() +
+            CARD_VERTICAL_PADDING_DP
+    )
+
     /** The guide row height for a channel-list-size base height and a
-     * density. Compact thins the row; comfortable leaves it alone. */
+     * density. Compact thins the row; comfortable leaves it alone.
+     * Never below the font-aware floor. */
+    fun guideRowHeightDp(
+        baseHeightDp: Int,
+        density: GuideDensity,
+        fontSize: FontSize
+    ): Int = max(
+        minGuideRowHeightDp(fontSize),
+        (baseHeightDp * density.rowHeightScale).roundToInt()
+    )
+
+    /** The guide row height for a channel-list-size base height and a
+     * density, at the default (Medium) font size. */
     fun guideRowHeightDp(baseHeightDp: Int, density: GuideDensity): Int =
-        max(MIN_GUIDE_ROW_HEIGHT_DP, (baseHeightDp * density.rowHeightScale).roundToInt())
+        guideRowHeightDp(baseHeightDp, density, FontSize.MEDIUM)
 
     /** A text size (sp) scaled by the font-size setting. */
     fun scaledTextSp(baseSp: Float, fontSize: FontSize): Float =

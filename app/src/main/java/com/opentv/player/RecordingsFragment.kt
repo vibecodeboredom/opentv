@@ -90,9 +90,11 @@ class RecordingsFragment : BrowseSupportFragment() {
         rowsAdapter.clear()
         // 8.3.0: sort & filter controls, always on top so the list
         // order can change without leaving the screen.
+        // 9.1.1: the high-contrast focus setting reaches these rails too.
+        val highContrast = AppSettings.highContrastFocus(requireContext())
         val sort = AppSettings.recordingsSort(requireContext())
         val filter = AppSettings.recordingsFilter(requireContext())
-        val controlsAdapter = ArrayObjectAdapter(ActionPresenter())
+        val controlsAdapter = ArrayObjectAdapter(ActionPresenter(highContrast))
         controlsAdapter.add(
             MenuAction("sort", getString(R.string.recordings_sort), sortLabel(sort))
         )
@@ -106,7 +108,7 @@ class RecordingsFragment : BrowseSupportFragment() {
         // the guide. Tap one to cancel it.
         val scheduled = PlaylistRepository.scheduledRecordings(requireContext())
         if (scheduled.isNotEmpty()) {
-            val schedAdapter = ArrayObjectAdapter(ActionPresenter())
+            val schedAdapter = ArrayObjectAdapter(ActionPresenter(highContrast))
             for (rec in scheduled) {
                 schedAdapter.add(
                     MenuAction(
@@ -128,7 +130,7 @@ class RecordingsFragment : BrowseSupportFragment() {
             }
             return
         }
-        val adapter = ArrayObjectAdapter(RecordingPresenter())
+        val adapter = ArrayObjectAdapter(RecordingPresenter(highContrast))
         shown.forEach { adapter.add(it) }
         rowsAdapter.add(ListRow(HeaderItem(getString(R.string.recordings)), adapter))
     }

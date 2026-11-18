@@ -35,6 +35,72 @@ class AppearanceTest {
         )
     }
 
+    // ---- 9.1.1: font-aware row floor ----------------------------------
+
+    @Test
+    fun mediumFontKeepsTheOldFloor() {
+        // 15sp * 1.0 * 1.2 = 18dp line + 8dp card padding = 26dp,
+        // below the absolute 28dp floor, so the floor stays 28.
+        assertEquals(28, Appearance.minGuideRowHeightDp(Appearance.FontSize.MEDIUM))
+    }
+
+    @Test
+    fun smallFontDoesNotRaiseTheFloor() {
+        // 15sp * 0.9 * 1.2 = 16.2dp -> 17 + 8 = 25dp, below the floor.
+        assertEquals(28, Appearance.minGuideRowHeightDp(Appearance.FontSize.SMALL))
+    }
+
+    @Test
+    fun largeFontRaisesTheFloor() {
+        // 15sp * 1.15 * 1.2 = 20.7dp -> 21 + 8 = 29dp: a row at the
+        // old 28dp floor would clip the Large title's top and bottom.
+        assertEquals(29, Appearance.minGuideRowHeightDp(Appearance.FontSize.LARGE))
+    }
+
+    @Test
+    fun largeFontFloorsAThinRow() {
+        // A hypothetical 24dp base thinned to 19dp by Compact still
+        // floors at 29dp with Large text, not 28dp.
+        assertEquals(
+            29,
+            Appearance.guideRowHeightDp(
+                24, Appearance.GuideDensity.COMPACT, Appearance.FontSize.LARGE
+            )
+        )
+        assertEquals(
+            29,
+            Appearance.guideRowHeightDp(
+                20, Appearance.GuideDensity.COMFORTABLE, Appearance.FontSize.LARGE
+            )
+        )
+    }
+
+    @Test
+    fun compactSmallLargeStillFits() {
+        // The thinnest real row (40dp * 0.8 = 32dp) is still above
+        // the 29dp Large floor, so no real row changes height.
+        assertEquals(
+            32,
+            Appearance.guideRowHeightDp(
+                40, Appearance.GuideDensity.COMPACT, Appearance.FontSize.LARGE
+            )
+        )
+    }
+
+    // ---- Gemini-generated (verified by hand) --------------------------
+
+    @Test
+    fun comfortableLargeKeepsTheBaseHeight() {
+        // The 40dp Comfortable base is above the 29dp Large floor,
+        // so Large text does not grow a Comfortable row.
+        assertEquals(
+            40,
+            Appearance.guideRowHeightDp(
+                40, Appearance.GuideDensity.COMFORTABLE, Appearance.FontSize.LARGE
+            )
+        )
+    }
+
     // ---- Font size ----------------------------------------------------
 
     @Test

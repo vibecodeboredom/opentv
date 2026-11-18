@@ -6,15 +6,21 @@ import androidx.leanback.widget.ImageCardView
 import androidx.leanback.widget.Presenter
 import coil.load
 
-/** Card for a channel: logo (or play icon) + name + number + group. Rounded dark card. */
-class ChannelPresenter : Presenter() {
+/** Card for a channel: logo (or play icon) + name + number + group. Rounded dark card.
+ *
+ * 9.1.1: with high-contrast focus on, the card gets the thick
+ * accent outline background — the home rails were the one focus
+ * surface the setting never reached. */
+class ChannelPresenter(private val highContrast: Boolean = false) : Presenter() {
 
     override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
         val cardView = ImageCardView(parent.context)
         cardView.isFocusable = true
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
-        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        cardView.setBackgroundResource(
+            if (highContrast) R.drawable.card_rounded_bg_hc else R.drawable.card_rounded_bg
+        )
         return ViewHolder(cardView)
     }
 
@@ -48,15 +54,20 @@ class ChannelPresenter : Presenter() {
     }
 }
 
-/** Card for a menu action (change playlist / refresh / guide / recordings). */
-class ActionPresenter : Presenter() {
+/** Card for a menu action (change playlist / refresh / guide / recordings).
+ *
+ * 9.1.1: same high-contrast outline as the channel cards — the
+ * actions row is a home rail too. */
+class ActionPresenter(private val highContrast: Boolean = false) : Presenter() {
 
     override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
         val cardView = ImageCardView(parent.context)
         cardView.isFocusable = true
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
-        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        cardView.setBackgroundResource(
+            if (highContrast) R.drawable.card_rounded_bg_hc else R.drawable.card_rounded_bg
+        )
         return ViewHolder(cardView)
     }
 
@@ -87,15 +98,19 @@ class ActionPresenter : Presenter() {
     }
 }
 
-/** Card for a local recording: channel name + size / date. */
-class RecordingPresenter : Presenter() {
+/** Card for a local recording: channel name + size / date.
+ *
+ * 9.1.1: same high-contrast outline as the other rails. */
+class RecordingPresenter(private val highContrast: Boolean = false) : Presenter() {
 
     override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
         val cardView = ImageCardView(parent.context)
         cardView.isFocusable = true
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
-        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        cardView.setBackgroundResource(
+            if (highContrast) R.drawable.card_rounded_bg_hc else R.drawable.card_rounded_bg
+        )
         return ViewHolder(cardView)
     }
 

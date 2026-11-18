@@ -326,7 +326,9 @@ class GuideActivity : FragmentActivity() {
         highContrastFocus = AppSettings.highContrastFocus(this)
         pxCellHeight = dpToPx(
             if (isMobileDevice) CELL_HEIGHT_DP
-            else Appearance.guideRowHeightDp(guideSizing.guideRowHeightDp, guideDensity)
+            else Appearance.guideRowHeightDp(
+                guideSizing.guideRowHeightDp, guideDensity, guideFontSize
+            )
         )
         guideLogoDp = if (isMobileDevice) 40 else guideSizing.logoDp
         pxGuideLogo = dpToPx(guideLogoDp)
@@ -345,9 +347,49 @@ class GuideActivity : FragmentActivity() {
         if (DeviceType.isMobile(this)) {
             channelColWidth = dpToPx(MOBILE_CHANNEL_COL_DP)
             pinnedCol.layoutParams.width = channelColWidth
-            guideHeader.layoutParams.height = dpToPx(MOBILE_HEADER_HEIGHT_DP)
             guidePreviewBox.layoutParams.width = dpToPx(MOBILE_PREVIEW_WIDTH_DP)
         }
+        // 9.1.1: the details header's text scales with the font-size
+        // setting (it was fixed sizes in the layout, so Large left
+        // the grid text bigger than the header it describes). The
+        // header is wrap_content with the platform height as its
+        // minimum, so the scaled text can never push the bottom row
+        // (freshness / category) out of the header — at Large with a
+        // two-line title the fixed 180dp (120dp on mobile) clipped
+        // it, and on mobile it clipped even at Medium.
+        detailTitle.setTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            Appearance.scaledTextSp(22f, guideFontSize)
+        )
+        detailChannel.setTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            Appearance.scaledTextSp(14f, guideFontSize)
+        )
+        detailStar.setTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            Appearance.scaledTextSp(26f, guideFontSize)
+        )
+        detailTime.setTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            Appearance.scaledTextSp(15f, guideFontSize)
+        )
+        detailRemaining.setTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            Appearance.scaledTextSp(15f, guideFontSize)
+        )
+        detailCategory.setTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            Appearance.scaledTextSp(15f, guideFontSize)
+        )
+        epgFreshness.setTextSize(
+            TypedValue.COMPLEX_UNIT_SP,
+            Appearance.scaledTextSp(13f, guideFontSize)
+        )
+        guideHeader.layoutParams.height =
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        guideHeader.minimumHeight = dpToPx(
+            if (isMobileDevice) MOBILE_HEADER_HEIGHT_DP else HEADER_HEIGHT_DP
+        )
 
         // The star is a touch target only — it must never steal DPAD
         // focus, or the guide opens with nothing in the grid focused
@@ -1273,6 +1315,11 @@ class GuideActivity : FragmentActivity() {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
             setPadding(px12, 0, px12, 0)
+            // 9.1.1: a long date ("Tonight · Sat, Nov 7") at Large
+            // would run past the cell and clip — on the 160dp mobile
+            // column it clips even at Medium. One line, ellipsized.
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(channelColWidth, cellHeight)
         })
         val header = LinearLayout(this).apply {
@@ -1294,6 +1341,10 @@ class GuideActivity : FragmentActivity() {
                 )
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
+                // 9.1.1: same as the date cell — a wide label at Large
+                // must ellipsize, not clip past its 30-minute cell.
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 layoutParams = LinearLayout.LayoutParams(
                     (pxPerMinute * 30).toInt(), cellHeight
                 )
@@ -1397,11 +1448,16 @@ class GuideActivity : FragmentActivity() {
                 // Focused name turns accent, with a subtle panel
                 // highlight, and the details header shows this row's
                 // programme that's on now. 9.1.0: high-contrast
-                // focus brightens the highlight further.
+                // focus brightens the highlight further. 9.1.1: with
+                // high-contrast on it also gets the thick accent
+                // outline, like the programme cells — a brighter fill
+                // alone was the one focus surface without one.
                 nameView.setTextColor(0xFF86C739.toInt())
-                channelCell.setBackgroundColor(
-                    if (highContrastFocus) 0xFF3A3E42.toInt() else 0xFF232629.toInt()
-                )
+                if (highContrastFocus) {
+                    channelCell.setBackgroundResource(R.drawable.guide_channel_cell_bg_hc)
+                } else {
+                    channelCell.setBackgroundColor(0xFF232629.toInt())
+                }
                 val current = displayRows.getOrNull(index)
                 val nowProg = current?.programmes?.firstOrNull {
                     nowMillis in it.startMillis until it.stopMillis
@@ -2469,7 +2525,11 @@ class GuideActivity : FragmentActivity() {
         private const val NUMBER_ENTRY_TIMEOUT_MS = 1500L
         /** 6.0.0-rc1: mobile guide sizes — the pinned channel column
          * and details header shrink so the programme grid fits a
-         * phone screen (TV keeps CHANNEL_COL_DP / 180dp / 300dp). */
+         * phone screen (TV keeps CHANNEL_COL_DP / 180dp / 300dp).
+         * 9.1.1: the header height is the header's MINIMUM — the
+         * header is wrap_content, so it grows past this when the
+         * font-size setting makes its text taller. */
+        private const val HEADER_HEIGHT_DP = 180
         private const val MOBILE_CHANNEL_COL_DP = 160
         private const val MOBILE_HEADER_HEIGHT_DP = 120
         private const val MOBILE_PREVIEW_WIDTH_DP = 120

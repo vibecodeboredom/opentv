@@ -110,6 +110,9 @@ class TvHomeFragment : BrowseSupportFragment() {
         hasContent = channels.isNotEmpty()
 
         val context = requireContext()
+        // 9.1.1: the high-contrast focus setting reaches the home
+        // rails here too.
+        val highContrast = AppSettings.highContrastFocus(context)
         val rails = HomeRails.buildRails(
             channels = channels,
             favorites = PlaylistRepository.favorites(context),
@@ -120,12 +123,12 @@ class TvHomeFragment : BrowseSupportFragment() {
             recentsTitle = getString(R.string.home_recent_channels)
         )
         for (rail in rails) {
-            val railAdapter = ArrayObjectAdapter(ChannelPresenter())
+            val railAdapter = ArrayObjectAdapter(ChannelPresenter(highContrast))
             rail.channels.forEach { railAdapter.add(it) }
             rowsAdapter.add(ListRow(HeaderItem(rail.title), railAdapter))
         }
 
-        val actionsAdapter = ArrayObjectAdapter(ActionPresenter())
+        val actionsAdapter = ArrayObjectAdapter(ActionPresenter(highContrast))
         actionsAdapter.add(
             MenuAction(
                 "guide",

@@ -79,6 +79,9 @@ class BrowseFragment : BrowseSupportFragment() {
         // Single pass for the favorites row and the group rows — the
         // old code scanned the whole playlist three times (two filters
         // + groupBy) to build the same rows.
+        // 9.1.1: the high-contrast focus setting reaches the home
+        // rails here too.
+        val highContrast = AppSettings.highContrastFocus(requireContext())
         val favoriteChannels = mutableListOf<Channel>()
         val grouped = linkedMapOf<String, MutableList<Channel>>()
         for (ch in channels) {
@@ -87,18 +90,18 @@ class BrowseFragment : BrowseSupportFragment() {
             (grouped.getOrPut(ch.group) { mutableListOf() }) += ch
         }
         if (favoriteChannels.isNotEmpty()) {
-            val favAdapter = ArrayObjectAdapter(ChannelPresenter())
+            val favAdapter = ArrayObjectAdapter(ChannelPresenter(highContrast))
             favoriteChannels.forEach { favAdapter.add(it) }
             rowsAdapter.add(ListRow(HeaderItem(getString(R.string.favorites)), favAdapter))
         }
 
         for ((group, groupChannels) in grouped) {
-            val groupAdapter = ArrayObjectAdapter(ChannelPresenter())
+            val groupAdapter = ArrayObjectAdapter(ChannelPresenter(highContrast))
             groupChannels.forEach { groupAdapter.add(it) }
             rowsAdapter.add(ListRow(HeaderItem(group), groupAdapter))
         }
 
-        val actionsAdapter = ArrayObjectAdapter(ActionPresenter())
+        val actionsAdapter = ArrayObjectAdapter(ActionPresenter(highContrast))
         actionsAdapter.add(
             MenuAction(
                 "guide",

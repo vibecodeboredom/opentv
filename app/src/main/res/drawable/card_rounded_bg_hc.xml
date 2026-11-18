@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 9.1.1: high-contrast home-rail card background. Same as
+     card_rounded_bg, but the focused state adds a 3dp accent
+     outline around a brighter fill — the home rails were the one
+     focus surface the high-contrast setting never reached (the
+     guide cells and sidebar rows already had theirs). Used when
+     the high-contrast focus setting is on. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#232629" />
+            <corners android:radius="16dp" />
+            <stroke
+                android:width="3dp"
+                android:color="#86C739" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#232629" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#161616" />
+            <corners android:radius="16dp" />
+            <stroke
+                android:width="1dp"
+                android:color="#333639" />
+        </shape>
+    </item>
+</selector>
