@@ -365,13 +365,12 @@ Rules (from Chuni, 2026-11-17):
   stalled-playlist async returned Unit, not a Result) — fixed,
   re-run 44224931219 green.
 
-### 9.3.0 (planned) — Accessibility & remote
+### 9.3.0 ✅ (this release) — Accessibility & remote
 
-- Spoken channel names: announce the channel on change (TTS),
-  toggleable in Settings.
-- Larger-text mode for the guide and sidebar.
-- Long-press OK action choice: what a held OK does in playback
-  (menu, guide, or nothing).
+- Spoken channel names: the channel name is announced (TTS) whenever playback switches to a channel, toggleable in Settings → Guide & playback (default off). One process-lifetime engine, lazy init, QUEUE_FLUSH so zapping fast only speaks the latest channel; a speak before init finishes is held and spoken in onInit. The device default locale is used when the engine has it, otherwise the engine default.
+- Larger-text mode: a toggle on top of the font-size setting (extra 1.25x) for the guide + sidebar text — Small + larger lands between Medium and Large, Large + larger is the biggest the guide gets. The guide row-height floor grows with the effective scale (Large + larger needs 34dp), so a Compact row can never clip a larger title. Rides in backups.
+- Long-press OK action choice: what a held OK does in playback when nothing is up — the playback menu (today's behaviour, the default), the guide, or nothing at all (the hold is swallowed, so the short-press action doesn't fire on key-up either). Takes effect immediately; rides in backups.
+- Gemini lite reviewed the diff (no findings) and wrote 4 extra unit tests — 1 dropped as wrong on verification (it expected mixed-case keys to parse — the parse is case-sensitive, keys are lowercase) and 2 dropped as duplicates of existing tests; GLM 429'd on its review call and sat this one out.
 
 ### 9.3.1 (planned) — Patch
 
