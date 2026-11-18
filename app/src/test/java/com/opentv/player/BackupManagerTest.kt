@@ -353,7 +353,7 @@ class BackupManagerTest {
         val decoded = BackupManager.decode(
             """{"format":"opentv-nova-backup","version":1,"favorites":["a"]}"""
         ).getOrThrow()
-        assertEquals(listOf("a"), decoded.favorites)
+        assertEquals(setOf("a"), decoded.favorites)
         assertTrue(decoded.hasNovaData)
         assertTrue(decoded.reminders.isEmpty())
         assertTrue(decoded.keywords.isEmpty())
