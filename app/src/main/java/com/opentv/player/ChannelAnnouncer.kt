@@ -39,6 +39,29 @@ object ChannelAnnouncer {
      * Pure, so it is unit-testable. */
     fun utteranceFor(channelName: String): String = channelName
 
+    /** Pick the best locale for the TTS engine: the device locale
+     * when the engine has it, else the bare language ("en" when
+     * "en_US" has no voice data), else null (leave the engine
+     * default rather than failing the announce). 9.3.1: an engine
+     * with "en" data but no "en_US" voice used to fall through to
+     * its own default — which may be no language at all. Pure, so
+     * it is unit-testable. */
+    fun pickLocale(
+        defaultLocale: Locale,
+        availability: (Locale) -> Int
+    ): Locale? {
+        if (availability(defaultLocale) >= TextToSpeech.LANG_AVAILABLE) {
+            return defaultLocale
+        }
+        val languageOnly = Locale(defaultLocale.language)
+        if (languageOnly != defaultLocale &&
+            availability(languageOnly) >= TextToSpeech.LANG_AVAILABLE
+        ) {
+            return languageOnly
+        }
+        return null
+    }
+
     /** Announce a channel change. No-ops when the setting is off,
      * the name is blank, or the engine can't be started. Safe to
      * call from any thread; the engine calls happen on the main
@@ -47,6 +70,17 @@ object ChannelAnnouncer {
         if (!AppSettings.speakChannelNames(context)) return
         val text = utteranceFor(channelName)
         if (text.isBlank()) return
+        // 9.3.1: a failed init must not silence announcements
+        // forever — the engine may have been missing or busy at
+        // first use, so a later announce starts init again instead
+        // of returning on the dead engine.
+        if (initDone && !initOk) {
+            tts?.shutdown()
+            tts = null
+            initDone = false
+            initOk = false
+            initializing = false
+        }
         val engine = tts
         if (engine != null && initDone) {
             if (initOk) speak(engine, text)
@@ -63,14 +97,11 @@ object ChannelAnnouncer {
             if (initOk) {
                 val engine2 = tts
                 if (engine2 != null) {
-                    // Default locale when the engine has it; a
-                    // missing/unsupported locale leaves the engine
+                    // Default locale when the engine has it, else
+                    // the bare language; neither leaves the engine
                     // default rather than failing the whole announce.
-                    val locale = Locale.getDefault()
-                    val availability = engine2.isLanguageAvailable(locale)
-                    if (availability >= TextToSpeech.LANG_AVAILABLE) {
-                        engine2.language = locale
-                    }
+                    pickLocale(Locale.getDefault()) { engine2.isLanguageAvailable(it) }
+                        ?.let { engine2.language = it }
                     pendingText?.let { speak(engine2, it) }
                 }
             }

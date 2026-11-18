@@ -124,6 +124,20 @@ object Appearance {
     fun scaledTextSp(baseSp: Float, fontSize: FontSize): Float =
         baseSp * fontSize.scale
 
+    /** 9.3.1 — the width (dp) a channel-number column needs for a
+     * font size: today's width at Medium, growing with the font
+     * scale so a 3-digit number at Large + larger text never clips
+     * its last digit. Never shrinks below the base width — Small
+     * keeps today's column. */
+    fun numberColumnWidthDp(
+        baseWidthDp: Int,
+        fontSize: FontSize,
+        largerText: Boolean
+    ): Int = max(
+        baseWidthDp,
+        (baseWidthDp * effectiveFontScale(fontSize, largerText)).roundToInt()
+    )
+
     /** 9.3.0 — a text size scaled by the font-size setting and the
      * larger-text mode. */
     fun scaledTextSp(baseSp: Float, fontSize: FontSize, largerText: Boolean): Float =

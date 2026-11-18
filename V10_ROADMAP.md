@@ -372,10 +372,30 @@ Rules (from Chuni, 2026-11-17):
 - Long-press OK action choice: what a held OK does in playback when nothing is up — the playback menu (today's behaviour, the default), the guide, or nothing at all (the hold is swallowed, so the short-press action doesn't fire on key-up either). Takes effect immediately; rides in backups.
 - Gemini lite reviewed the diff (no findings) and wrote 4 extra unit tests — 1 dropped as wrong on verification (it expected mixed-case keys to parse — the parse is case-sensitive, keys are lowercase) and 2 dropped as duplicates of existing tests; GLM 429'd on its review call and sat this one out.
 
-### 9.3.1 (planned) — Patch
+### 9.3.1 ✅ (this release) — Patch
 
-- Fixes + polish from 9.3.0 testing on the TV: TTS language and
-  timing, large-text overflow, and the long-press choice sticking.
+- TTS language and timing: the channel name is now announced on
+  first real playback (STATE_READY) instead of in onCreate — it is
+  spoken when the channel is actually on, never for a stream that
+  fails to start, and never twice for one switch. Language falls
+  back from the full device locale to the bare language ("en" when
+  "en_US" has no voice), and a failed engine init is retried on
+  the next announce instead of silencing announcements forever.
+- Large-text overflow: the channel-number columns (guide pinned
+  column and sidebar) now grow with the font scale, and the number
+  takes what its digits need (WRAP_CONTENT with a scaled minimum
+  width) — a 3-digit number at Large + larger text no longer clips
+  its last digit.
+- Long-press choice sticking: restoring a pre-9.3.0 backup no
+  longer wipes the user's accessibility settings — restore only
+  overwrites them when the backup actually carried them (new
+  hasAccessibilitySettings presence flag, same fix as 8.1.1's
+  group overrides).
+- Gemini lite reviewed the diff (no findings) and wrote 5 extra
+  unit tests — 4 verified correct and added (1 fixed to unwrap
+  the decode Result, 1 dropped as a duplicate, 2 dropped as
+  near-duplicates). GLM 429'd on its test-generation call and sat
+  this one out.
 
 ## 10.0.0 (planned) — Juniper v10
 

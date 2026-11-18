@@ -1,9 +1,11 @@
 package com.opentv.player
 
+import android.speech.tts.TextToSpeech
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
 
 /** 9.3.0: accessibility & remote — larger-text math, the held-OK
  * action parsing, and the spoken-name utterance text. */
@@ -164,5 +166,138 @@ class AccessibilityTest {
     fun utteranceForWhitespaceAndSpecialCharacters() {
         assertEquals("   ", ChannelAnnouncer.utteranceFor("   "))
         assertEquals("Channel 123!@#", ChannelAnnouncer.utteranceFor("Channel 123!@#"))
+    }
+
+    // ---- 9.3.1: TTS language fallback (ChannelAnnouncer) -------------
+
+    @Test
+    fun pickLocalePrefersTheFullDeviceLocale() {
+        assertEquals(
+            Locale("en", "US"),
+            ChannelAnnouncer.pickLocale(Locale("en", "US")) {
+                TextToSpeech.LANG_AVAILABLE
+            }
+        )
+    }
+
+    @Test
+    fun pickLocaleFallsBackToTheBareLanguage() {
+        // Engine has "en" data but no "en_US" voice: speak English
+        // instead of falling through to the engine default.
+        assertEquals(
+            Locale("en"),
+            ChannelAnnouncer.pickLocale(Locale("en", "US")) { locale ->
+                if (locale == Locale("en", "US")) TextToSpeech.LANG_NOT_SUPPORTED
+                else TextToSpeech.LANG_AVAILABLE
+            }
+        )
+    }
+
+    @Test
+    fun pickLocaleReturnsNullWhenNeitherIsAvailable() {
+        assertEquals(
+            null,
+            ChannelAnnouncer.pickLocale(Locale("en", "US")) {
+                TextToSpeech.LANG_NOT_SUPPORTED
+            }
+        )
+    }
+
+    @Test
+    fun pickLocaleHandlesALanguageOnlyDefault() {
+        assertEquals(
+            Locale("es"),
+            ChannelAnnouncer.pickLocale(Locale("es")) {
+                TextToSpeech.LANG_COUNTRY_AVAILABLE
+            }
+        )
+    }
+
+    // ---- 9.3.1: channel-number column width (Appearance) -------------
+
+    @Test
+    fun numberColumnWidthIsTheBaseAtMedium() {
+        assertEquals(
+            40,
+            Appearance.numberColumnWidthDp(40, Appearance.FontSize.MEDIUM, false)
+        )
+        assertEquals(
+            28,
+            Appearance.numberColumnWidthDp(28, Appearance.FontSize.MEDIUM, false)
+        )
+    }
+
+    @Test
+    fun numberColumnWidthGrowsWithTheFontScale() {
+        // Large: 40 * 1.15 = 46; Large + larger: 40 * 1.4375 = 57.5 -> 58.
+        assertEquals(
+            46,
+            Appearance.numberColumnWidthDp(40, Appearance.FontSize.LARGE, false)
+        )
+        assertEquals(
+            58,
+            Appearance.numberColumnWidthDp(40, Appearance.FontSize.LARGE, true)
+        )
+        // Sidebar Small base: 28 * 1.4375 = 40.25 -> 40.
+        assertEquals(
+            40,
+            Appearance.numberColumnWidthDp(28, Appearance.FontSize.LARGE, true)
+        )
+        // Medium + larger: 28 * 1.25 = 35.
+        assertEquals(
+            35,
+            Appearance.numberColumnWidthDp(28, Appearance.FontSize.MEDIUM, true)
+        )
+    }
+
+    @Test
+    fun numberColumnWidthNeverShrinksBelowTheBase() {
+        // Small scales down (0.9x) but the column keeps today's width.
+        assertEquals(
+            40,
+            Appearance.numberColumnWidthDp(40, Appearance.FontSize.SMALL, false)
+        )
+        assertEquals(
+            28,
+            Appearance.numberColumnWidthDp(28, Appearance.FontSize.SMALL, false)
+        )
+    }
+
+    // ---- Extra tests from Gemini lite (verified by hand) -----------
+
+    @Test
+    fun numberColumnWidthScalesForEverySizeWithLargerText() {
+        val base = 100
+        // SMALL 0.9 * 1.25 = 1.125 -> 112.5 -> 113.
+        assertEquals(
+            113,
+            Appearance.numberColumnWidthDp(
+                base, Appearance.FontSize.SMALL, true
+            )
+        )
+        // MEDIUM 1.0 * 1.25 = 1.25 -> 125.
+        assertEquals(
+            125,
+            Appearance.numberColumnWidthDp(
+                base, Appearance.FontSize.MEDIUM, true
+            )
+        )
+        // LARGE 1.15 * 1.25 = 1.4375 -> 143.75 -> 144.
+        assertEquals(
+            144,
+            Appearance.numberColumnWidthDp(
+                base, Appearance.FontSize.LARGE, true
+            )
+        )
+    }
+
+    @Test
+    fun numberColumnWidthOfZeroStaysZero() {
+        assertEquals(
+            0,
+            Appearance.numberColumnWidthDp(
+                0, Appearance.FontSize.MEDIUM, false
+            )
+        )
     }
 }

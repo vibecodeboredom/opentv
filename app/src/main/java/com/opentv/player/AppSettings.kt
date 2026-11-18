@@ -298,25 +298,28 @@ object AppSettings {
      * text at the call site (same helper). 9.3.0: larger-text mode
      * folds in too, through the effective scale. */
     fun sidebarSizing(context: Context): SidebarSizing {
-        val fontScale = Appearance.effectiveFontScale(
-            fontSize(context), largerText(context)
-        )
+        val fontSize = fontSize(context)
+        val larger = largerText(context)
+        val fontScale = Appearance.effectiveFontScale(fontSize, larger)
         return when (channelListSize(context)) {
             ChannelListSize.SMALL -> SidebarSizing(
                 panelDp = 220, rowMinHeightDp = 48, rowPaddingDp = 8, groupPaddingDp = 10,
-                numberWidthDp = 28, logoDp = 28,
+                numberWidthDp = Appearance.numberColumnWidthDp(28, fontSize, larger),
+                logoDp = 28,
                 nameSp = 13f * fontScale, programmeSp = 11f * fontScale,
                 guideRowHeightDp = 40
             )
             ChannelListSize.MEDIUM -> SidebarSizing(
                 panelDp = 260, rowMinHeightDp = 56, rowPaddingDp = 10, groupPaddingDp = 12,
-                numberWidthDp = 32, logoDp = 32,
+                numberWidthDp = Appearance.numberColumnWidthDp(32, fontSize, larger),
+                logoDp = 32,
                 nameSp = 14f * fontScale, programmeSp = 12f * fontScale,
                 guideRowHeightDp = 48
             )
             ChannelListSize.LARGE -> SidebarSizing(
                 panelDp = 300, rowMinHeightDp = 64, rowPaddingDp = 12, groupPaddingDp = 14,
-                numberWidthDp = 36, logoDp = 36,
+                numberWidthDp = Appearance.numberColumnWidthDp(36, fontSize, larger),
+                logoDp = 36,
                 nameSp = 15f * fontScale, programmeSp = 13f * fontScale,
                 guideRowHeightDp = 56
             )

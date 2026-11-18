@@ -132,7 +132,7 @@ class GuideActivity : FragmentActivity() {
     private var px4: Int = 0
     private var px12: Int = 0
     private var px16: Int = 0
-    private var px40: Int = 0
+    private var pxNumberWidth: Int = 0
     /** 6.1.0: row height / margin in px, computed once in onCreate —
      * appendRows and updateRowsWithEpg used to run dpToPx on every
      * call (scroll + focus appends), and TypedValue.applyDimension
@@ -313,7 +313,6 @@ class GuideActivity : FragmentActivity() {
         px4 = dpToPx(4)
         px12 = dpToPx(12)
         px16 = dpToPx(16)
-        px40 = dpToPx(40)
         // 6.1.4: TV guide rows follow the channel-list size (default
         // Small = 40dp thin rows, ~29% shorter than the old 56dp, so
         // ~37% more channels fit on screen). The logo shrinks with
@@ -329,6 +328,12 @@ class GuideActivity : FragmentActivity() {
         guideDensity = AppSettings.guideDensity(this)
         guideFontSize = AppSettings.fontSize(this)
         guideLargerText = AppSettings.largerText(this)
+        // 9.3.1: the channel-number column grows with the font
+        // scale, so a 3-digit number at Large + larger text never
+        // clips its last digit in the fixed 40dp slot.
+        pxNumberWidth = dpToPx(
+            Appearance.numberColumnWidthDp(40, guideFontSize, guideLargerText)
+        )
         highContrastFocus = AppSettings.highContrastFocus(this)
         pxCellHeight = dpToPx(
             if (isMobileDevice) CELL_HEIGHT_DP
@@ -1443,8 +1448,12 @@ class GuideActivity : FragmentActivity() {
                 )
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
+                // 9.3.1: the number takes what its digits need but
+                // never less than the font-scaled column width, so
+                // numbers stay aligned and never clip.
+                minWidth = pxNumberWidth
                 layoutParams = LinearLayout.LayoutParams(
-                    px40,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.MATCH_PARENT
                 )
             })

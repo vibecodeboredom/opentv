@@ -73,6 +73,8 @@ class BackupManagerTest {
         assertTrue(decoded.largerText)
         assertTrue(decoded.speakChannelNames)
         assertEquals("guide", decoded.longPressOkAction)
+        // 9.3.1: a current backup carries the accessibility keys.
+        assertTrue(decoded.hasAccessibilitySettings)
     }
 
     @Test
@@ -86,6 +88,9 @@ class BackupManagerTest {
         assertFalse(decoded.largerText)
         assertFalse(decoded.speakChannelNames)
         assertEquals("menu", decoded.longPressOkAction)
+        // 9.3.1: an old backup has no accessibility keys, so a
+        // restore must leave the user's current choices alone.
+        assertFalse(decoded.hasAccessibilitySettings)
     }
 
     @Test
@@ -96,6 +101,32 @@ class BackupManagerTest {
         // 8.1.1: the missing key is remembered, so a restore of
         // this old backup does not wipe the overrides on the device.
         assertFalse(decoded.hasGroupOverrides)
+    }
+
+    // ---- Extra tests from Gemini lite (verified by hand, fixed to
+    // unwrap the Result) ------------------------------------------
+
+    @Test
+    fun backupWithoutSettingsObjectFlagsAccessibilityAbsent() {
+        val text = """{"format":"opentv-backup","version":1,"playlists":[],"epgUrls":[],"uploadUrl":"","favorites":[],"hiddenChannels":[],"epgOverrides":{},"trackPrefs":{}}"""
+        val decoded = BackupManager.decode(text).getOrThrow()
+        assertFalse(decoded.hasAccessibilitySettings)
+    }
+
+    @Test
+    fun backupWithSettingsButNoLongPressKeyFlagsAccessibilityAbsent() {
+        val text = """{"format":"opentv-backup","version":1,"playlists":[],"epgUrls":[],"uploadUrl":"","favorites":[],"hiddenChannels":[],"epgOverrides":{},"trackPrefs":{},"settings":{"someOtherSetting":true}}"""
+        val decoded = BackupManager.decode(text).getOrThrow()
+        assertFalse(decoded.hasAccessibilitySettings)
+    }
+
+    @Test
+    fun backupWithLongPressKeyFlagsAccessibilityPresent() {
+        // Presence is what matters — even an unknown key value
+        // marks the batch as carried; parsing happens at restore.
+        val text = """{"format":"opentv-backup","version":1,"playlists":[],"epgUrls":[],"uploadUrl":"","favorites":[],"hiddenChannels":[],"epgOverrides":{},"trackPrefs":{},"settings":{"longPressOkAction":"info"}}"""
+        val decoded = BackupManager.decode(text).getOrThrow()
+        assertTrue(decoded.hasAccessibilitySettings)
     }
 
     @Test

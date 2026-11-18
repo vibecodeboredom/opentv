@@ -79,7 +79,14 @@ object BackupManager {
          * decode to the defaults. */
         val largerText: Boolean = false,
         val speakChannelNames: Boolean = false,
-        val longPressOkAction: String = "menu"
+        val longPressOkAction: String = "menu",
+        /** 9.3.1 — whether this backup actually carried the 9.3.0
+         * accessibility settings. A pre-9.3.0 backup has no keys
+         * and decodes to the defaults; restore must not let those
+         * defaults wipe the user's current choices (same fix as
+         * 8.1.1's group overrides). Defaults true: data built in
+         * code is a current-version backup. */
+        val hasAccessibilitySettings: Boolean = true
     )
 
     /** What a restore did, for the toast. */
@@ -171,6 +178,9 @@ object BackupManager {
         // backup says overrides are empty".
         val groupOverridesRaw = root["groupOverrides"] as? Map<*, *>
         val hasGroupOverrides = root.containsKey("groupOverrides")
+        // 9.3.1: the 9.3.0 accessibility settings were added as one
+        // batch — the held-OK key marks the batch.
+        val hasAccessibilitySettings = settings?.containsKey("longPressOkAction") ?: false
         val groupOverrides = GroupOverrides(
             renames = stringMap(groupOverridesRaw?.get("renames")),
             order = stringList(groupOverridesRaw?.get("order")),
@@ -214,7 +224,8 @@ object BackupManager {
                 reducedAnimations = settings?.get("reducedAnimations") as? Boolean ?: false,
                 largerText = settings?.get("largerText") as? Boolean ?: false,
                 speakChannelNames = settings?.get("speakChannelNames") as? Boolean ?: false,
-                longPressOkAction = settings?.get("longPressOkAction") as? String ?: "menu"
+                longPressOkAction = settings?.get("longPressOkAction") as? String ?: "menu",
+                hasAccessibilitySettings = hasAccessibilitySettings
             )
         )
     }
@@ -374,11 +385,18 @@ object BackupManager {
         AppSettings.setFontSize(context, Appearance.parseFontSize(data.fontSize))
         AppSettings.setHighContrastFocus(context, data.highContrastFocus)
         AppSettings.setReducedAnimations(context, data.reducedAnimations)
-        AppSettings.setLargerText(context, data.largerText)
-        AppSettings.setSpeakChannelNames(context, data.speakChannelNames)
-        AppSettings.setLongPressOkAction(
-            context, AppSettings.parseLongPressOkAction(data.longPressOkAction)
-        )
+        // 9.3.1: only replace the accessibility settings when the
+        // backup actually carried them — a pre-9.3.0 backup decodes
+        // them to the defaults, and applying those would wipe the
+        // user's current choices (same fix as 8.1.1's group
+        // overrides).
+        if (data.hasAccessibilitySettings) {
+            AppSettings.setLargerText(context, data.largerText)
+            AppSettings.setSpeakChannelNames(context, data.speakChannelNames)
+            AppSettings.setLongPressOkAction(
+                context, AppSettings.parseLongPressOkAction(data.longPressOkAction)
+            )
+        }
         return RestoreReport(
             playlists = playlistCount,
             favorites = data.favorites.size,

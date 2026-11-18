@@ -396,10 +396,6 @@ class PlaybackActivity : FragmentActivity() {
             return
         }
         channel = ch
-        // 9.3.0: spoken channel names — a channel change restarts
-        // this activity, so onCreate is the announce point.
-        // Recordings have no channel to name.
-        ch?.let { ChannelAnnouncer.announce(this, it.name) }
         // 7.3.1: per-channel persistence — a stored choice for this
         // channel wins over the carried session choice; a channel
         // with nothing stored keeps the carried choice (or Auto /
@@ -661,6 +657,14 @@ class PlaybackActivity : FragmentActivity() {
                     channel?.let {
                         PlaylistRepository.recordRecentChannel(this@PlaybackActivity, it.id)
                         PlaylistRepository.setLastChannelId(this@PlaybackActivity, it.id)
+                        // 9.3.1: spoken channel names — announce on
+                        // first real playback, not in onCreate: the
+                        // name is spoken when the channel is actually
+                        // on, never for a stream that fails to start,
+                        // and never twice for one switch (everPlayed
+                        // guards this block; pause/resume doesn't
+                        // re-enter it).
+                        ChannelAnnouncer.announce(this@PlaybackActivity, it.name)
                     }
                     // 6.1.7: on mobile the overlay shows with the video
                     // on first playback, then fades after 5s (see

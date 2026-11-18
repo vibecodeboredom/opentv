@@ -210,7 +210,15 @@ class SidebarAdapter(
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sizing.nameSp)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(dp(sizing.numberWidthDp, density), LinearLayout.LayoutParams.MATCH_PARENT)
+            // 9.3.1: the number takes what its digits need — a
+            // 3-digit number at Large + larger text is wider than
+            // the old fixed column — but never less than the
+            // font-scaled column width, so numbers stay aligned.
+            minWidth = dp(sizing.numberWidthDp, density)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT
+            )
         }
         val logoView = ImageView(context).apply {
             layoutParams = LinearLayout.LayoutParams(dp(sizing.logoDp, density), dp(sizing.logoDp, density)).apply {
