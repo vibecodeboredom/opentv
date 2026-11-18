@@ -29,3 +29,11 @@ data class MenuAction(
     val title: String,
     val subtitle: String
 ) : Serializable
+
+/** 8.2.0 (Nova): one card of the home screen's "On now" row — a
+ * favorite channel plus the programme on it right now. Tapping the
+ * card plays the channel; the programme is display data only. */
+data class OnNowEntry(
+    val channel: Channel,
+    val programme: EpgParser.Programme
+)

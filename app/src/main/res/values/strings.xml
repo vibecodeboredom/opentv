@@ -241,6 +241,22 @@
     <string name="guide_zoom_hours">%1$d hours</string>
     <string name="menu_unhide_all">Unhide all channels</string>
     <string name="menu_channels_unhidden">All channels are visible again</string>
+    <!-- Nova 8.2.0: On now home row, scheduled recordings, guide
+         day jump. Scheduled recordings use the same alarm pattern
+         as the scheduled stop: the start alarm fires the recorder,
+         so the string says plainly that OpenTV must be running. -->
+    <string name="on_now">On now</string>
+    <string name="on_now_remaining">%1$s left</string>
+    <string name="menu_record_programme">Record this programme</string>
+    <string name="menu_cancel_scheduled_recording">Cancel scheduled recording</string>
+    <string name="scheduled_recording_set_toast">Recording scheduled — %1$s at %2$s. It starts automatically while OpenTV is running.</string>
+    <string name="scheduled_recording_cancelled_toast">Scheduled recording cancelled</string>
+    <string name="scheduled_recordings">Scheduled recordings</string>
+    <string name="scheduled_recording_info">%1$s\n%2$s • %3$s</string>
+    <string name="scheduled_recording_cancel_action">Cancel recording</string>
+    <string name="menu_next_day">Next day</string>
+    <string name="menu_prev_day">Previous day</string>
+    <string name="guide_showing_day">Showing %1$s</string>
     <string name="track_label_sdh">%1$s (SDH)</string>
     <string name="track_label_dub">%1$s (Dub)</string>
     <string name="track_label_descriptive">%1$s (Descriptive)</string>

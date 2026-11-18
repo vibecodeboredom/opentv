@@ -145,6 +145,61 @@ object RecordingManager {
         alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, stopAtMillis, pending)
     }
 
+    /** The PendingIntent that fires [RecordStartReceiver] for one
+     * scheduled recording. One request code per programme (channel
+     * + start), so scheduling, cancelling and firing all address
+     * the same alarm. */
+    private fun recordStartPendingIntent(
+        context: Context,
+        scheduled: PlaylistRepository.ScheduledRecording
+    ): PendingIntent {
+        val intent = Intent(context, RecordStartReceiver::class.java).apply {
+            putExtra(RecordStartReceiver.EXTRA_CHANNEL_ID, scheduled.channelId)
+            putExtra(RecordStartReceiver.EXTRA_CHANNEL_NAME, scheduled.channelName)
+            putExtra(RecordStartReceiver.EXTRA_CHANNEL_URL, scheduled.channelUrl)
+            putExtra(RecordStartReceiver.EXTRA_START_MILLIS, scheduled.startMillis)
+            putExtra(RecordStartReceiver.EXTRA_STOP_MILLIS, scheduled.stopMillis)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            (scheduled.channelId + "@" + scheduled.startMillis).hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * 8.2.0 (Nova): schedule a recording to START at a programme's
+     * start time. Same inexact-alarm pattern as [scheduleStopRecording]:
+     * fires [RecordStartReceiver], which starts the recording and
+     * arms the matching stop. The receiver can only run while the
+     * app process can be started by the system, so — like the
+     * reminders — this is an OpenTV-is-running feature, and the UI
+     * string says so.
+     */
+    fun scheduleRecordingStart(
+        context: Context,
+        scheduled: PlaylistRepository.ScheduledRecording
+    ) {
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            scheduled.startMillis,
+            recordStartPendingIntent(context, scheduled)
+        )
+    }
+
+    /** 8.2.0 (Nova): cancel a scheduled recording's start alarm. */
+    fun cancelRecordingStart(
+        context: Context,
+        scheduled: PlaylistRepository.ScheduledRecording
+    ) {
+        val pending = recordStartPendingIntent(context, scheduled)
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.cancel(pending)
+        pending.cancel()
+    }
+
     /** True while a channel's recording is actively downloading.
      * 6.1.0: does NOT create the DownloadManager. updateTransportIcons
      * calls this on every play/pause change and overlay open, and the

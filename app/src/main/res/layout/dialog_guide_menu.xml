@@ -128,6 +128,35 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.2.0 (Nova): browse a day forward/back — the grid's
+         window shifts by 24h. Previous day hides in code while
+         the grid is on today; jump to now returns from any day. -->
+    <TextView
+        android:id="@+id/menu_next_day"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_next_day"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <TextView
+        android:id="@+id/menu_prev_day"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_prev_day"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <!-- 8.1.0 (Nova): restrict the grid to one channel group; the
          label carries the active filter (set in code) and the row
          hides in code when the playlist has fewer than two groups. -->
@@ -229,6 +258,21 @@
         android:layout_height="wrap_content"
         android:background="@drawable/guide_menu_item_bg"
         android:text="@string/menu_set_reminder"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.2.0 (Nova): schedule a recording of this programme.
+         Same visibility rule as the reminder row — future real
+         programmes only; the label flips to a cancel in code. -->
+    <TextView
+        android:id="@+id/menu_record_programme"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_record_programme"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:padding="16dp"

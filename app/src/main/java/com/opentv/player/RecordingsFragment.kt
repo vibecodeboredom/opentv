@@ -31,7 +31,11 @@ class RecordingsFragment : BrowseSupportFragment() {
         title = getString(R.string.recordings)
         adapter = rowsAdapter
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
-            if (item is Recording) showRecordingOptions(item)
+            when (item) {
+                is Recording -> showRecordingOptions(item)
+                is PlaylistRepository.ScheduledRecording ->
+                    showScheduledRecordingOptions(item)
+            }
         }
     }
 
@@ -47,6 +51,11 @@ class RecordingsFragment : BrowseSupportFragment() {
 
     private fun loadRecordings() {
         val recordings = RecordingManager.listRecordings(requireContext())
+        // 8.2.0 (Nova): scheduled recordings get their own row at
+        // the top — they are not downloads yet, so they don't count
+        // toward the title's size line, but they belong on this
+        // screen: it's where a user looks to manage them.
+        val scheduled = PlaylistRepository.scheduledRecordings(requireContext())
         // Total bytes from the list already fetched — the old code
         // called totalBytesUsed, which re-ran the whole DownloadIndex
         // query just to sum the same rows.
@@ -61,13 +70,56 @@ class RecordingsFragment : BrowseSupportFragment() {
             )
         }
         rowsAdapter.clear()
+        if (scheduled.isNotEmpty()) {
+            val scheduledAdapter = ArrayObjectAdapter(ScheduledRecordingPresenter())
+            scheduled.forEach { scheduledAdapter.add(it) }
+            rowsAdapter.add(
+                ListRow(HeaderItem(getString(R.string.scheduled_recordings)), scheduledAdapter)
+            )
+        }
         if (recordings.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.no_recordings, Toast.LENGTH_LONG).show()
+            if (scheduled.isEmpty()) {
+                Toast.makeText(requireContext(), R.string.no_recordings, Toast.LENGTH_LONG).show()
+            }
             return
         }
         val adapter = ArrayObjectAdapter(RecordingPresenter())
         recordings.forEach { adapter.add(it) }
         rowsAdapter.add(ListRow(HeaderItem(getString(R.string.recordings)), adapter))
+    }
+
+    /** 8.2.0 (Nova): a scheduled recording's options — its details
+     * and the one action that makes sense before it starts: cancel
+     * it (store entry + start alarm both go). */
+    private fun showScheduledRecordingOptions(
+        scheduled: PlaylistRepository.ScheduledRecording
+    ) {
+        val whenText = GuideData.formatDate(scheduled.startMillis) + ", " +
+            GuideData.formatTimeRange(scheduled.startMillis, scheduled.stopMillis)
+        AlertDialog.Builder(requireContext())
+            .setTitle(scheduled.title)
+            .setMessage(
+                getString(
+                    R.string.scheduled_recording_info,
+                    scheduled.title,
+                    scheduled.channelName,
+                    whenText
+                )
+            )
+            .setPositiveButton(R.string.scheduled_recording_cancel_action) { _, _ ->
+                PlaylistRepository.removeScheduledRecording(
+                    requireContext(), scheduled.channelId, scheduled.startMillis
+                )
+                RecordingManager.cancelRecordingStart(requireContext(), scheduled)
+                Toast.makeText(
+                    requireContext(),
+                    R.string.scheduled_recording_cancelled_toast,
+                    Toast.LENGTH_SHORT
+                ).show()
+                loadRecordings()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showRecordingOptions(recording: Recording) {

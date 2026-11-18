@@ -74,6 +74,10 @@ object PlaylistRepository {
      * prompt and the list can name them even if the playlist has
      * changed since the reminder was set. */
     private const val KEY_REMINDERS = "programme_reminders"
+
+    /** 8.2.0 (Nova): scheduled recordings, same one-per-line
+     * storage as the reminders above. */
+    private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"
     /** How many recent channels are remembered. The overlay strip
      * shows the first 3; 7.0.0 (Nova) keeps 12 so the home screen's
      * Recently watched row and the sidebar History group have a
@@ -683,6 +687,88 @@ object PlaylistRepository {
             it.channelId == channelId && it.startMillis == startMillis
         }
         if (kept.size != current.size) saveReminders(context, kept)
+    }
+
+    /** 8.2.0 (Nova): one scheduled recording. Like [Reminder], the
+     * channel name and programme title are snapshots from when the
+     * recording was scheduled; the channel URL is stored too, so
+     * the start alarm can begin the recording even if the playlist
+     * has been refreshed since. */
+    data class ScheduledRecording(
+        val channelId: String,
+        val channelName: String,
+        val channelUrl: String,
+        val startMillis: Long,
+        val stopMillis: Long,
+        val title: String
+    )
+
+    private fun saveScheduledRecordings(
+        context: Context,
+        scheduled: List<ScheduledRecording>
+    ) {
+        val raw = scheduled.joinToString("\n") { r ->
+            listOf(
+                reminderField(r.channelId),
+                reminderField(r.channelName),
+                reminderField(r.channelUrl),
+                r.startMillis.toString(),
+                r.stopMillis.toString(),
+                reminderField(r.title)
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_SCHEDULED_RECORDINGS, raw).apply()
+    }
+
+    /**
+     * 8.2.0 (Nova): the pending scheduled recordings, soonest
+     * first. Reading prunes entries whose programme has already
+     * ended — one that came and went without firing (the TV was
+     * off, say) never lingers in the list. Malformed lines are
+     * dropped the same way as malformed reminders.
+     */
+    fun scheduledRecordings(context: Context): List<ScheduledRecording> {
+        val raw = prefs(context).getString(KEY_SCHEDULED_RECORDINGS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        val now = System.currentTimeMillis()
+        val parsed = raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 6) return@mapNotNull null
+            val start = fields[3].toLongOrNull() ?: return@mapNotNull null
+            val stop = fields[4].toLongOrNull() ?: return@mapNotNull null
+            ScheduledRecording(fields[0], fields[1], fields[2], start, stop, fields[5])
+        }
+        val pending = parsed.filter { it.stopMillis > now }.sortedBy { it.startMillis }
+        if (pending.size != parsed.size) saveScheduledRecordings(context, pending)
+        return pending
+    }
+
+    /** 8.2.0 (Nova): is there a scheduled recording for this programme? */
+    fun hasScheduledRecording(
+        context: Context,
+        channelId: String,
+        startMillis: Long
+    ): Boolean = scheduledRecordings(context).any {
+        it.channelId == channelId && it.startMillis == startMillis
+    }
+
+    /** 8.2.0 (Nova): schedule (or replace) a programme recording.
+     * One per programme, like reminders. */
+    fun addScheduledRecording(context: Context, scheduled: ScheduledRecording) {
+        val current = scheduledRecordings(context).filterNot {
+            it.channelId == scheduled.channelId && it.startMillis == scheduled.startMillis
+        }
+        saveScheduledRecordings(context, current + scheduled)
+    }
+
+    /** 8.2.0 (Nova): cancel a scheduled recording (also how a fired
+     * one retires itself once the recording has started). */
+    fun removeScheduledRecording(context: Context, channelId: String, startMillis: Long) {
+        val current = scheduledRecordings(context)
+        val kept = current.filterNot {
+            it.channelId == channelId && it.startMillis == startMillis
+        }
+        if (kept.size != current.size) saveScheduledRecordings(context, kept)
     }
 
     /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */

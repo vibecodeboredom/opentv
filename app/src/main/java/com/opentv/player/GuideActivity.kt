@@ -95,6 +95,14 @@ class GuideActivity : FragmentActivity() {
     private var allChannels: List<Channel> = emptyList()
     private var epg: Map<String, List<EpgParser.Programme>> = emptyMap()
     private var windowStart: Long = 0L
+    /** 8.2.0 (Nova): the window start as computed at open time,
+     * before any day jump. Day jumps shift [windowStart] by whole
+     * days from this anchor, and jump-to-now returns to it. */
+    private var baseWindowStart: Long = 0L
+    /** 8.2.0 (Nova): whole days the grid has been shifted into the
+     * future (0 = today). Only ever moves forward — the window's
+     * own past hours already cover earlier today. */
+    private var dayOffsetDays: Int = 0
     /** 6.1.2: the window's total span in hours — WINDOW_HOURS forward
      * plus the past hours when past programming is on (10 by default).
      * Set in onCreate from the setting; every span computation uses
@@ -388,6 +396,8 @@ class GuideActivity : FragmentActivity() {
             windowHours = WINDOW_HOURS + pastHours
             windowStart = GuideData.windowStartMillis(nowMillis) -
                 pastHours * 60L * 60 * 1000
+            baseWindowStart = windowStart
+            dayOffsetDays = 0
             allChannels = channels
             rebuildRows()
             if (allRows.isEmpty()) {
@@ -1351,9 +1361,12 @@ class GuideActivity : FragmentActivity() {
         // Position the red now-line at the current time, spanning all rows.
         // (The frame now starts at the programme area, so there's no
         // channel-column offset any more — 4.7.2.)
+        // 8.2.0 (Nova): on a day-shifted grid the line belongs to a
+        // day that isn't on screen — hide it rather than parking it
+        // a day's width off the frame's edge.
         val nowOffsetMinutes = (nowMillis - windowStart) / 60_000L
         nowLine.translationX = ((nowOffsetMinutes * pxPerMinute).toInt()).toFloat()
-        nowLine.visibility = View.VISIBLE
+        nowLine.visibility = if (dayOffsetDays == 0) View.VISIBLE else View.GONE
         refreshNowLine()
         startNowLineTicker()
     }
@@ -1559,6 +1572,29 @@ class GuideActivity : FragmentActivity() {
             jumpToNow()
         }
 
+        // 8.2.0 (Nova): day jump — shift the whole grid a day
+        // forward or back. The next-day row hides at the offset
+        // cap (a week out, the EPG has nothing real left to show);
+        // the previous-day row hides while the grid is on today.
+        val nextDayRow = view.findViewById<TextView>(R.id.menu_next_day)
+        if (dayOffsetDays >= MAX_DAY_OFFSET_DAYS) {
+            nextDayRow.visibility = View.GONE
+        } else {
+            nextDayRow.setOnClickListener {
+                dialog.dismiss()
+                shiftGuideDay(1)
+            }
+        }
+        val prevDayRow = view.findViewById<TextView>(R.id.menu_prev_day)
+        if (dayOffsetDays <= 0) {
+            prevDayRow.visibility = View.GONE
+        } else {
+            prevDayRow.setOnClickListener {
+                dialog.dismiss()
+                shiftGuideDay(-1)
+            }
+        }
+
         // 8.1.0 (Nova): the group filter — restrict the grid to one
         // of the playlist's groups. Only offered when the playlist
         // actually has more than one group to choose from; the
@@ -1690,6 +1726,61 @@ class GuideActivity : FragmentActivity() {
                             GuideData.formatClock(programme.startMillis)
                         ),
                         Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+
+        // 8.2.0 (Nova): record this programme — the scheduled
+        // sibling of the reminder above, with the same eligibility
+        // (a future, real programme) and the same toggle shape.
+        // Scheduling stores the programme in PlaylistRepository and
+        // arms the start alarm in RecordingManager; cancelling
+        // removes both. The toast carries the honest contract:
+        // the start alarm runs the recorder, so OpenTV must be
+        // running when the programme begins.
+        val recordProgrammeRow = view.findViewById<TextView>(R.id.menu_record_programme)
+        if (!reminderEligible) {
+            recordProgrammeRow.visibility = View.GONE
+        } else {
+            val existing = PlaylistRepository.scheduledRecordings(this)
+                .firstOrNull {
+                    it.channelId == channel.id && it.startMillis == programme.startMillis
+                }
+            recordProgrammeRow.text = getString(
+                if (existing != null) R.string.menu_cancel_scheduled_recording
+                else R.string.menu_record_programme
+            )
+            recordProgrammeRow.setOnClickListener {
+                dialog.dismiss()
+                if (existing != null) {
+                    PlaylistRepository.removeScheduledRecording(
+                        this, channel.id, programme.startMillis
+                    )
+                    RecordingManager.cancelRecordingStart(this, existing)
+                    Toast.makeText(
+                        this, R.string.scheduled_recording_cancelled_toast,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    val scheduled = PlaylistRepository.ScheduledRecording(
+                        channelId = channel.id,
+                        channelName = channel.name,
+                        channelUrl = channel.url,
+                        startMillis = programme.startMillis,
+                        stopMillis = programme.stopMillis,
+                        title = programme.title
+                    )
+                    PlaylistRepository.addScheduledRecording(this, scheduled)
+                    RecordingManager.scheduleRecordingStart(this, scheduled)
+                    Toast.makeText(
+                        this,
+                        getString(
+                            R.string.scheduled_recording_set_toast,
+                            programme.title,
+                            GuideData.formatClock(programme.startMillis)
+                        ),
+                        Toast.LENGTH_LONG
                     ).show()
                 }
             }
@@ -1895,6 +1986,18 @@ class GuideActivity : FragmentActivity() {
      * honest however long the guide has been open.
      */
     private fun jumpToNow() {
+        // 8.2.0 (Nova): from a day-shifted grid, "now" first means
+        // getting back to today's window — rebuild there, and the
+        // fresh build lands on now like a normal open.
+        if (dayOffsetDays != 0) {
+            dayOffsetDays = 0
+            windowStart = baseWindowStart
+            lifecycleScope.launch {
+                rebuildRows()
+                buildGuide(allRows)
+            }
+            return
+        }
         val now = System.currentTimeMillis()
         val nowX = ((now - windowStart) / 60_000L * pxPerMinute).toInt()
         val targetX = maxOf(0, nowX - PAST_VISIBLE_MINUTES * pxPerMinute)
@@ -1920,6 +2023,41 @@ class GuideActivity : FragmentActivity() {
                     return
                 }
             }
+        }
+    }
+
+    /**
+     * 8.2.0 (Nova): shift the guide a whole day forward or back.
+     * The window itself doesn't change shape — same span, same past
+     * hours, same group filter and zoom — only its anchor moves by
+     * 24h from [baseWindowStart], and the grid rebuilds on the
+     * shifted window exactly like a filter or zoom change. The
+     * lazy rows re-derive from the EPG map, so tomorrow's real
+     * programmes show wherever the EPG reaches; beyond it, the
+     * usual "No information" placeholders fill the grid. Focus
+     * lands on the first card of the first row (there is no "now"
+     * to land on a day away), both scrollers reset to the window
+     * start, and a toast names the day now on screen.
+     */
+    private fun shiftGuideDay(deltaDays: Int) {
+        val newOffset = (dayOffsetDays + deltaDays).coerceIn(0, MAX_DAY_OFFSET_DAYS)
+        if (newOffset == dayOffsetDays) return
+        dayOffsetDays = newOffset
+        windowStart = baseWindowStart + dayOffsetDays * DAY_MILLIS
+        lifecycleScope.launch {
+            rebuildRows()
+            buildGuide(allRows)
+            scroll.scrollTo(0, 0)
+            hscroll.scrollTo(0, 0)
+            container.post { firstCardOfRow(0)?.requestFocus() }
+            Toast.makeText(
+                this@GuideActivity,
+                getString(
+                    R.string.guide_showing_day,
+                    GuideData.formatDate(windowStart + pastHours * 60L * 60 * 1000)
+                ),
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -2022,6 +2160,11 @@ class GuideActivity : FragmentActivity() {
         /** 7.1.0 (Nova): how often the now-line creeps forward
          * while the guide sits open. */
         private const val NOW_LINE_TICK_MS = 60_000L
+        /** 8.2.0 (Nova): one day in millis, and how far ahead the
+         * guide's day jump can go — a week covers any realistic
+         * EPG horizon and any reminder/recording worth setting. */
+        private const val DAY_MILLIS = 24L * 60 * 60 * 1000
+        private const val MAX_DAY_OFFSET_DAYS = 7
         /** 8.0.0 (Nova): how often the now-playing bar refreshes
          * its programme + progress while the guide sits open. */
         private const val NOW_PLAYING_TICK_MS = 20_000L

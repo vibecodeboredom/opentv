@@ -78,6 +78,10 @@
             android:name=".RecordStopReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".RecordStartReceiver"
+            android:exported="false" />
+
     </application>
 
 </manifest>
