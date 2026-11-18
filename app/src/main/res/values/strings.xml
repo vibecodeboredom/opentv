@@ -292,6 +292,14 @@
     <string name="menu_next_day">Next day</string>
     <string name="menu_prev_day">Previous day</string>
     <string name="guide_showing_day">Showing %1$s</string>
+    <!-- Nova 9.1.1: start from beginning for resumed recordings
+         and replays, the guide header naming a shifted day, and
+         catch-up expiry in the guide details header. -->
+    <string name="start_from_beginning">Start from beginning</string>
+    <string name="guide_day_today">Today — %1$s</string>
+    <string name="guide_day_tomorrow">Tomorrow — %1$s</string>
+    <string name="catchup_ends_in_hours">Catch-up ends in %1$dh</string>
+    <string name="catchup_ends_in_minutes">Catch-up ends in %1$dm</string>
     <!-- Nova 8.2.1: recording overlap warning, combined remind +
          record guide action, On now ends label. The overlap texts
          are honest about the recorder: downloads are one stream

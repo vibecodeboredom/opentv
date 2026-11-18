@@ -2205,6 +2205,12 @@ class PlaybackActivity : FragmentActivity() {
             items += nightDimMenuLabel()
             actions += { showDimDialog() }
             addTrackPickerItems(items, actions)
+            // 9.1.1 (Nova): start from beginning — only when this
+            // recording has a saved point it resumed from.
+            if (hasResumePoint()) {
+                items += getString(R.string.start_from_beginning)
+                actions += { startFromBeginning() }
+            }
             AlertDialog.Builder(this)
                 .setTitle(recordingName ?: getString(R.string.recording_label))
                 .setItems(items.toTypedArray()) { _, which -> actions[which]() }
@@ -2291,6 +2297,14 @@ class PlaybackActivity : FragmentActivity() {
         if (catchupUrl == null) {
             items += getString(R.string.reload_stream)
             actions += { reloadStream() }
+        }
+        // 9.1.1 (Nova): start from beginning — the catch-up twin
+        // of the recording menu's item, offered when this replay
+        // resumed from a saved point. Live streams never resume,
+        // so they never see it.
+        if (catchupUrl != null && hasResumePoint()) {
+            items += getString(R.string.start_from_beginning)
+            actions += { startFromBeginning() }
         }
         // 7.0.0 (Nova): sleep timer — while one is running the menu
         // doubles as its status (7.1.1: counting down, see
@@ -3187,6 +3201,48 @@ class PlaybackActivity : FragmentActivity() {
         saveCatchupProgress()
         player?.release()
         player = null
+    }
+
+    /** 9.1.1 (Nova): does the current recording / catch-up replay
+     * have a saved point it resumed from? The stores are only
+     * written when playback stops or a replay is left, so while
+     * something plays, a stored in-window point is exactly the
+     * one playback resumed from — and the only one "Start from
+     * beginning" needs to retire. */
+    private fun hasResumePoint(): Boolean {
+        recordingId?.let {
+            return PlaylistRepository.recordingProgressFor(this, it)
+                ?.isResumable() == true
+        }
+        if (catchupUrl != null) {
+            val chId = channel?.id ?: return false
+            return PlaylistRepository.catchupProgressFor(
+                this, chId, catchupStartMillis
+            )?.isResumable() == true
+        }
+        return false
+    }
+
+    /** 9.1.1 (Nova): restart the current recording / catch-up
+     * replay from the beginning — retire its saved resume point
+     * (so leaving and reopening doesn't land back on it) and seek
+     * the running player to zero. No rebuild: the same stream
+     * keeps playing, just from the top. If the viewer watches on
+     * and stops mid-way, the usual stop-time save writes a fresh
+     * point for where they actually got to. */
+    private fun startFromBeginning() {
+        recordingId?.let {
+            PlaylistRepository.clearRecordingProgress(this, it)
+        }
+        if (catchupUrl != null) {
+            channel?.id?.let {
+                PlaylistRepository.clearCatchupProgress(
+                    this, it, catchupStartMillis
+                )
+            }
+        }
+        player?.seekTo(0)
+        player?.play()
     }
 
     /**

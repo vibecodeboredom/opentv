@@ -834,6 +834,14 @@ class GuideActivity : FragmentActivity() {
             }
         }
         val isNow = nowMillis in programme.startMillis until programme.stopMillis
+        // 9.1.1 (Nova): a catch-up programme close to leaving the
+        // archive says when — in the remaining-time slot, which
+        // sits empty for any programme that isn't on now.
+        val catchupEnds = if (isCatchup) {
+            catchupEndsText(channel, programme)
+        } else {
+            null
+        }
         if (isNow) {
             detailProgress.progress =
                 (GuideData.progressFraction(programme, nowMillis) * 100).toInt()
@@ -843,11 +851,42 @@ class GuideActivity : FragmentActivity() {
             )
             detailProgress.visibility = View.VISIBLE
             detailRemaining.visibility = View.VISIBLE
+        } else if (catchupEnds != null) {
+            detailProgress.visibility = View.INVISIBLE
+            detailRemaining.text = catchupEnds
+            detailRemaining.visibility = View.VISIBLE
         } else {
             detailProgress.visibility = View.INVISIBLE
             detailRemaining.visibility = View.INVISIBLE
         }
         updateDetailStar(channel)
+    }
+
+    /** 9.1.1 (Nova): "Catch-up ends in Xh" for a replay whose
+     * archive window closes within a day (whole hours, or minutes
+     * under the last hour) — the expiry is [CatchUp.archiveEndsMillis],
+     * the same window CatchUp.isAvailable checks. Null when the
+     * window has more than a day left to run. Uses the guide's
+     * build-time now, like everything else in the header. */
+    private fun catchupEndsText(
+        channel: Channel,
+        programme: EpgParser.Programme
+    ): String? {
+        val endsAt = CatchUp.archiveEndsMillis(channel, programme)
+            ?: return null
+        val remaining = endsAt - nowMillis
+        if (remaining <= 0L || remaining > 24L * 60 * 60 * 1000) {
+            return null
+        }
+        val hours = remaining / (60L * 60 * 1000)
+        return if (hours >= 1L) {
+            getString(R.string.catchup_ends_in_hours, hours)
+        } else {
+            getString(
+                R.string.catchup_ends_in_minutes,
+                maxOf(remaining / 60_000L, 1L)
+            )
+        }
     }
 
     private fun updateDetailStar(channel: Channel) {
@@ -938,13 +977,36 @@ class GuideActivity : FragmentActivity() {
         }
     }
 
+    /** 9.1.1 (Nova): the pinned date cell's text. Unshifted it
+     * keeps the long-standing build-time date + clock. On a
+     * shifted day (8.2.0 day jump, 9.1.0 Tonight) it names the
+     * day actually on screen instead — anchored where "now"
+     * would sit inside the shifted window, the same anchor the
+     * day-jump toast names, so browsing a day away never loses
+     * track of which day the grid is showing. */
+    private fun guideHeaderDateText(): String {
+        if (dayOffsetDays == 0 && anchorShiftMillis == 0L) {
+            return GuideData.formatDateTime(nowMillis)
+        }
+        val anchor = windowStart + pastHours * 60L * 60 * 1000
+        return when (dayOffsetDays) {
+            0 -> getString(
+                R.string.guide_day_today, GuideData.formatDate(anchor)
+            )
+            1 -> getString(
+                R.string.guide_day_tomorrow, GuideData.formatDate(anchor)
+            )
+            else -> GuideData.formatDate(anchor)
+        }
+    }
+
     /** The time header, split in two (4.7.2): the date cell is pinned
      * at the top of the channel column, the 30-minute labels scroll
      * horizontally with the programme grid. Both are one cell tall so
      * the columns stay aligned. */
     private fun buildGuideHeader(cellHeight: Int) {
         pinnedCol.addView(TextView(this).apply {
-            text = GuideData.formatDateTime(nowMillis)
+            text = guideHeaderDateText()
             setBackgroundColor(0xFF161616.toInt())
             setTextColor(0xFFC9C9D1.toInt())
             setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp(16f))
