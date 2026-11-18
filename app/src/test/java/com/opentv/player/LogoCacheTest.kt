@@ -11,8 +11,8 @@ class LogoCacheTest {
     fun twoPercentOfATypicalStick() {
         // 8 GB usable -> 2% is ~160 MB, clamped to the 64 MB max.
         assertEquals(LogoCache.MAX_CACHE_BYTES, LogoCache.cacheSizeBytes(8L * 1024 * 1024 * 1024))
-        // 1 GB usable -> 2% is ~20 MB, inside the clamp.
-        assertEquals(20L * 1024 * 1024, LogoCache.cacheSizeBytes(1L * 1024 * 1024 * 1024))
+        // 1 GiB usable -> 2% is 21,474,836 bytes, inside the clamp.
+        assertEquals(21_474_836L, LogoCache.cacheSizeBytes(1L * 1024 * 1024 * 1024))
     }
 
     @Test
