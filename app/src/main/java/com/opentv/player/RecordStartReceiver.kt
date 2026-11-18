@@ -44,6 +44,11 @@ class RecordStartReceiver : BroadcastReceiver() {
             )
             RecordingManager.startRecording(appContext, channel)
             RecordingManager.scheduleStopRecording(appContext, channelId, stopMillis)
+            // Combine (Juniper 8.3.0): the recording infra is awake
+            // anyway — enforce the age-based auto-delete setting
+            // while we are here.
+            val keepDays = AppSettings.autoDeleteRecordingsDays(appContext)
+            if (keepDays > 0) RecordingManager.pruneOldRecordings(appContext, keepDays)
         }
     }
 

@@ -20,6 +20,12 @@ import java.text.DateFormat
 /**
  * The recordings screen: every local recording as a card, with the total
  * storage used in the title. Selecting a recording offers Play / Delete.
+ *
+ * Combine: Nova's scheduled row + Continue watching row + storage-guard
+ * notes, Juniper's sort/filter controls + age-based auto-delete + true
+ * on-disk total. The scheduled store is Nova's (already wired into
+ * the guide); the start alarms are exact (Juniper's setAlarmClock
+ * win, see RecordingManager).
  */
 @OptIn(UnstableApi::class)
 class RecordingsFragment : BrowseSupportFragment() {
@@ -39,6 +45,8 @@ class RecordingsFragment : BrowseSupportFragment() {
                 is ContinueWatchingEntry -> showRecordingOptions(item.recording)
                 is PlaylistRepository.ScheduledRecording ->
                     showScheduledRecordingOptions(item)
+                // 8.3.0 (Juniper): sort / filter controls.
+                is MenuAction -> onMenuAction(item)
             }
         }
     }
@@ -58,16 +66,38 @@ class RecordingsFragment : BrowseSupportFragment() {
         // pass, before listing, so what this screen shows is
         // already within the cap. No-op when the cap is off.
         RecordingManager.enforceRecordingStorageCap(requireContext())
-        val recordings = RecordingManager.listRecordings(requireContext())
+        val all = RecordingManager.listRecordings(requireContext())
+        // 8.3.0 (Juniper): auto-delete — finished recordings older
+        // than the keep setting go now, from the list already
+        // fetched (no second DownloadIndex query). The deleted
+        // ones are dropped from the fetched list too, so the screen
+        // never shows a recording that is already gone.
+        val keepDays = AppSettings.autoDeleteRecordingsDays(requireContext())
+        var recordings = all
+        if (keepDays > 0) {
+            val deleted = RecordingManager.deleteOldRecordings(
+                requireContext(), all, keepDays
+            )
+            if (deleted.isNotEmpty()) {
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.recordings_old_deleted, deleted.size),
+                    Toast.LENGTH_LONG
+                ).show()
+                val deletedIds = deleted.map { it.id }.toSet()
+                recordings = all.filter { it.id !in deletedIds }
+            }
+        }
         // 8.2.0 (Nova): scheduled recordings get their own row at
         // the top — they are not downloads yet, so they don't count
         // toward the title's size line, but they belong on this
         // screen: it's where a user looks to manage them.
         val scheduled = PlaylistRepository.scheduledRecordings(requireContext())
-        // Total bytes from the list already fetched — the old code
-        // called totalBytesUsed, which re-ran the whole DownloadIndex
-        // query just to sum the same rows.
-        val used = recordings.sumOf { it.bytesDownloaded }
+        // 8.3.1 (Juniper): the total is the true on-disk figure
+        // (diskBytesUsed), not the sum of the index's claimed
+        // bytes — the cache's LRU evictor may have dropped segments
+        // of old recordings, which the index never learns.
+        val used = RecordingManager.diskBytesUsed(requireContext())
         // 9.2.0 (Nova): a storage-guard run that freed space
         // leaves a one-line note, shown once in this title and
         // then cleared — the header is where this screen already
@@ -110,6 +140,22 @@ class RecordingsFragment : BrowseSupportFragment() {
             }
         }
         rowsAdapter.clear()
+        // 8.3.0 (Juniper): sort & filter controls, always on top
+        // so the list order can change without leaving the screen.
+        // 9.1.1: the high-contrast focus setting reaches these rails too.
+        val highContrast = AppSettings.highContrastFocus(requireContext())
+        val sort = AppSettings.recordingsSort(requireContext())
+        val filter = AppSettings.recordingsFilter(requireContext())
+        val controlsAdapter = ArrayObjectAdapter(ActionPresenter(highContrast))
+        controlsAdapter.add(
+            MenuAction("sort", getString(R.string.recordings_sort), sortLabel(sort))
+        )
+        controlsAdapter.add(
+            MenuAction("filter", getString(R.string.recordings_filter), filterLabel(filter))
+        )
+        rowsAdapter.add(
+            ListRow(HeaderItem(getString(R.string.recordings_sort_filter)), controlsAdapter)
+        )
         if (scheduled.isNotEmpty()) {
             val scheduledAdapter = ArrayObjectAdapter(ScheduledRecordingPresenter())
             scheduled.forEach { scheduledAdapter.add(it) }
@@ -136,14 +182,15 @@ class RecordingsFragment : BrowseSupportFragment() {
                 ListRow(HeaderItem(getString(R.string.continue_watching)), continueAdapter)
             )
         }
-        if (recordings.isEmpty()) {
-            if (scheduled.isEmpty()) {
+        val shown = RecordingLibrary.sortAndFilter(recordings, sort, filter)
+        if (shown.isEmpty()) {
+            if (recordings.isEmpty() && scheduled.isEmpty()) {
                 Toast.makeText(requireContext(), R.string.no_recordings, Toast.LENGTH_LONG).show()
             }
             return
         }
-        val adapter = ArrayObjectAdapter(RecordingPresenter())
-        recordings.forEach { adapter.add(it) }
+        val adapter = ArrayObjectAdapter(RecordingPresenter(highContrast))
+        shown.forEach { adapter.add(it) }
         rowsAdapter.add(ListRow(HeaderItem(getString(R.string.recordings)), adapter))
     }
 
@@ -180,6 +227,51 @@ class RecordingsFragment : BrowseSupportFragment() {
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
+
+    /** 8.3.0 (Juniper): tapping a control cycles it to the next
+     * value, saves the choice, and reloads the list. */
+    private fun onMenuAction(action: MenuAction) {
+        when (action.id) {
+            "sort" -> {
+                val next = when (AppSettings.recordingsSort(requireContext())) {
+                    RecordingLibrary.Sort.NEWEST -> RecordingLibrary.Sort.OLDEST
+                    RecordingLibrary.Sort.OLDEST -> RecordingLibrary.Sort.LARGEST
+                    RecordingLibrary.Sort.LARGEST -> RecordingLibrary.Sort.SMALLEST
+                    RecordingLibrary.Sort.SMALLEST -> RecordingLibrary.Sort.NAME
+                    RecordingLibrary.Sort.NAME -> RecordingLibrary.Sort.NEWEST
+                }
+                AppSettings.setRecordingsSort(requireContext(), next)
+                loadRecordings()
+            }
+            "filter" -> {
+                val next = when (AppSettings.recordingsFilter(requireContext())) {
+                    RecordingLibrary.Filter.ALL -> RecordingLibrary.Filter.IN_PROGRESS
+                    RecordingLibrary.Filter.IN_PROGRESS -> RecordingLibrary.Filter.FINISHED
+                    RecordingLibrary.Filter.FINISHED -> RecordingLibrary.Filter.ALL
+                }
+                AppSettings.setRecordingsFilter(requireContext(), next)
+                loadRecordings()
+            }
+        }
+    }
+
+    private fun sortLabel(sort: RecordingLibrary.Sort): String = getString(
+        when (sort) {
+            RecordingLibrary.Sort.NEWEST -> R.string.sort_newest
+            RecordingLibrary.Sort.OLDEST -> R.string.sort_oldest
+            RecordingLibrary.Sort.LARGEST -> R.string.sort_largest
+            RecordingLibrary.Sort.SMALLEST -> R.string.sort_smallest
+            RecordingLibrary.Sort.NAME -> R.string.sort_name
+        }
+    )
+
+    private fun filterLabel(filter: RecordingLibrary.Filter): String = getString(
+        when (filter) {
+            RecordingLibrary.Filter.ALL -> R.string.filter_all
+            RecordingLibrary.Filter.IN_PROGRESS -> R.string.filter_in_progress
+            RecordingLibrary.Filter.FINISHED -> R.string.filter_finished
+        }
+    )
 
     private fun showRecordingOptions(recording: Recording) {
         val date = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
