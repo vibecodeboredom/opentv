@@ -101,11 +101,12 @@ Rules (from Chuni, 2026-11-17):
 - Channel-logo cache: stale logos refresh in the background (7-day TTL, max 25 per launch, forced network fetch overwriting the disk entry) instead of only on reinstall.
 - Gemini lite reviewed the diff (1 finding — wrong on verification: Coil WRITE_ONLY + network DISABLED is the correct forced-refresh combo, and its suggested constant doesn't exist); Gemini also wrote 4 extra unit tests, all verified correct and added.
 
-### 7.3.1 (planned) — Patch
+### 7.3.1 ✅ (this release) — Patch
 
-- Fixes + polish from 7.3.0 testing on the TV: track-selection
-  persistence per channel, subtitle timing, and logo refresh
-  retries.
+- Track-selection persistence per channel: the audio language and subtitle choice (or Off) are remembered per channel id, so returning to a channel restores them instead of resetting to Auto / Off; a channel with nothing stored keeps the session-carried choice.
+- Subtitle timing: the chosen languages are seeded as preferred languages at player build, so the selector picks them from the first frame — before, the choice only landed after the tracks loaded, so the wrong audio could play and captions could lag or flash the wrong language first. Re-apply on track change still pins the exact track.
+- Logo refresh retries: failed refreshes retry on the next guide open (throttled to once per 15 minutes) instead of only on the next app launch.
+- Gemini lite reviewed the diff (no findings) and wrote 3 extra unit tests — 1 was new and verified correct and added, 2 duplicated existing tests and were dropped. GLM 429'd on its test-generation call and sat this one out.
 
 ## 8.x — Library & data
 
