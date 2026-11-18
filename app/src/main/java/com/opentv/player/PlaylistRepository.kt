@@ -72,7 +72,8 @@ object PlaylistRepository {
     private const val KEY_GROUP_MOVES = "group_moves"
     /** Scheduled recordings, one per line (see
      * [scheduledRecordings]). */
-    private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"    private const val KEY_RECENT = "recent_channels"
+    private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"
+    private const val KEY_RECENT = "recent_channels"
     /** 4.9.3: guide search queries, one per line, most recent first. */
     private const val KEY_RECENT_SEARCHES = "recent_searches"
     /** Id of the last channel that actually played (4.6.0: resume it on launch). */
@@ -1775,7 +1776,8 @@ object PlaylistRepository {
      * the guide shows the programme twice and coverage counts
      * double. [force] bypasses the sources' 12 h disk cache (the
      * guide's manual refresh).
-     */    private fun loadEpgFresh(
+     */
+    private fun loadEpgFresh(
         context: Context,
         force: Boolean = false
     ): Map<String, List<EpgParser.Programme>> {
@@ -1783,7 +1785,8 @@ object PlaylistRepository {
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
         val statuses = mutableListOf<EpgQuality.SourceStatus>()
         // Airings already merged under each key, so a programme
-        // carried by two sources is stored once.        val seen = mutableMapOf<String, MutableSet<Triple<Long, Long, String>>>()
+        // carried by two sources is stored once.
+        val seen = mutableMapOf<String, MutableSet<Triple<Long, Long, String>>>()
         /** Append a source's programmes under [key], skipping airings
          * already there. Returns how many were added. */
         fun addProgrammes(key: String, incoming: List<EpgParser.Programme>): Int {
@@ -1813,7 +1816,8 @@ object PlaylistRepository {
                 statuses += if (result.fetchFailed) {
                     // The fetch failed and this is the stale disk
                     // copy: the guide still works, but the status
-                    // must say so instead of claiming a fresh load.                    EpgQuality.SourceStatus(
+                    // must say so instead of claiming a fresh load.
+                    EpgQuality.SourceStatus(
                         url, result.fetchedAtMillis, false,
                         "Fetch failed, using cached data",
                         parsed.size, programmes
@@ -1888,7 +1892,8 @@ object PlaylistRepository {
             if (file.exists()) {
                 EpgXmlResult(
                     file.bufferedReader().use { it.readText() },
-                    file.lastModified(), true                )
+                    file.lastModified(), true
+                )
             } else throw e
         }
     }

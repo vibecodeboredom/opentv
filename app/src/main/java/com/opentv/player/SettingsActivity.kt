@@ -188,6 +188,8 @@ class SettingsActivity : FragmentActivity() {
             isChecked = AppSettings.guideFavoritesOnly(this@SettingsActivity)
             setOnCheckedChangeListener { _, checked ->
                 AppSettings.setGuideFavoritesOnly(this@SettingsActivity, checked)
+            }
+        }
         // 8.3.0 (Nova): the idle-pause screensaver toggle, with
         // the other guide & playback preferences.
         findViewById<Switch>(R.id.pref_idle_saver).apply {
@@ -437,6 +439,7 @@ class SettingsActivity : FragmentActivity() {
                     }
                 )
             }
+        }
         // 10.0.0 (Nova): What's new.
         findViewById<Button>(R.id.whats_new_button).setOnClickListener {
             startActivity(Intent(this, WhatsNewActivity::class.java))

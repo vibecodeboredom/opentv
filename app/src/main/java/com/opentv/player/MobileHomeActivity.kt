@@ -250,9 +250,6 @@ class MobileHomeActivity : FragmentActivity() {
                     }
                 }
             }
-                    items += MobileChannelAdapter.Item.ChannelItem(it, it.id in favorites)
-                }
-            }
         } else {
             val matches = allChannels.filter {
                 it.name.contains(query, ignoreCase = true) ||
