@@ -1,6 +1,7 @@
 package com.opentv.player
 
 import android.app.AlertDialog
+import android.content.res.Configuration
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
@@ -61,6 +62,10 @@ import java.util.Locale
  * - RIGHT: sidebar up → activate the focused row; overlay up → move
  *   between strip tiles (same focus caveat as Left); nothing up → show
  *   the channel info overlay.
+ * - LEFT/RIGHT during a recording (combined port, juniper-v10 7.1.0):
+ *   seek ∓/± 10 s instead — overlay up with no strip tile focused, or
+ *   nothing up. There is no channel list to open mid-recording, and
+ *   INFO still opens the overlay there.
  * - UP/DOWN: move focus between rows/tiles/buttons (framework focus
  *   search; the sidebar's RecyclerView scrolls to the focused row).
  * - BACK: sidebar up → back/close; overlay up → hide it; else the
@@ -205,10 +210,17 @@ class PlaybackActivity : FragmentActivity() {
      * timeout); the first Left/Right press upgrades it to the normal
      * Left/Right timeout instead. */
     private var overlayBrief = false
-    /** Long-press OK: opens the context menu. */
+    /** Long-press OK: opens the context menu. Combined port
+     * (juniper-v10 9.3.0): the action is a setting now — MENU is
+     * the behaviour this always had; GUIDE and NOTHING are the
+     * alternatives her accessibility pass added. */
     private val longPressRunnable = Runnable {
         longPressFired = true
-        showOptions()
+        when (AppSettings.longPressOkAction(this)) {
+            AppSettings.LongPressOkAction.GUIDE -> openGuide()
+            AppSettings.LongPressOkAction.NOTHING -> Unit
+            AppSettings.LongPressOkAction.MENU -> showOptions()
+        }
     }
     private var longPressFired = false
     /** 7.0.0 (Nova): sleep timer — the minutes chosen (0 = off), the
@@ -217,6 +229,18 @@ class PlaybackActivity : FragmentActivity() {
      * the callback, onStart re-arms from the deadline. */
     private var sleepTimerMinutes: Int = 0
     private var sleepDeadlineMillis: Long = 0L
+    /** Combined port (juniper-v10 7.1.0): playback speed for live
+     * streams (1× default). Nova zaps in place, so the running
+     * player keeps the speed across a zap by itself; a rebuilt
+     * player (guide visit, Go live) gets it re-applied in
+     * initializePlayer. Session-only, like Juniper's — her intent
+     * carrying has no analogue here because nothing relaunches
+     * this activity to change channel. */
+    private var playbackSpeed: Float = 1f
+    /** Combined port (juniper-v10 10.0.0): the options dialog
+     * currently on screen, if any — entering PiP dismisses it
+     * first, so it never floats over the small window. */
+    private var optionsDialog: AlertDialog? = null
     private val sleepRunnable = Runnable { onSleepTimerFired() }
     /** 8.0.0 (Nova): the sleep fade-out — a runnable that starts
      * the dim veil's rise to black SLEEP_FADE_MS before the sleep
@@ -838,6 +862,11 @@ class PlaybackActivity : FragmentActivity() {
         }
         player.prepare()
         player.play()
+        // Combined port (juniper-v10 7.1.0): restore the chosen
+        // playback speed on a rebuilt player (returning from the
+        // guide rebuilds it; an in-place zap never does, so the
+        // speed simply stays on the running player there).
+        if (playbackSpeed != 1f) player.setPlaybackSpeed(playbackSpeed)
         sessionStartMillis = System.currentTimeMillis()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -886,6 +915,13 @@ class PlaybackActivity : FragmentActivity() {
                     channel?.let {
                         PlaylistRepository.recordRecentChannel(this@PlaybackActivity, it.id)
                         PlaylistRepository.setLastChannelId(this@PlaybackActivity, it.id)
+                        // Combined port (juniper-v10 9.3.0/9.3.1):
+                        // spoken channel names — announce on first
+                        // real playback, never for a stream that
+                        // fails to start, and never twice for one
+                        // switch (everPlayed guards this block).
+                        // No-ops unless the setting is on.
+                        ChannelAnnouncer.announce(this@PlaybackActivity, it.name)
                     }
                     // 7.1.0 (Nova): this channel is playing — warm
                     // its neighbours' streams for a faster zap.
@@ -1134,10 +1170,37 @@ class PlaybackActivity : FragmentActivity() {
                             moveStripFocus(right)
                             return true
                         }
+                        // Combined port (juniper-v10 7.1.1): during
+                        // a recording, Left/Right seeks ±10s when no
+                        // strip tile has focus — the transport
+                        // buttons do little while a recording plays
+                        // (prev/next/favorite need a channel), so
+                        // steering focus between them is pointless;
+                        // Up/Down still moves focus. Live keeps the
+                        // framework focus movement below.
+                        if (recordingUri != null) {
+                            seekRecording(
+                                if (right) PlaybackComfort.SEEK_SKIP_MS
+                                else -PlaybackComfort.SEEK_SKIP_MS
+                            )
+                            armHideTimer()
+                            return true
+                        }
                         return super.dispatchKeyEvent(event)
                     }
-                    // Nothing up: Left opens the sidebar, Right shows
-                    // the channel info overlay.
+                    // Nothing up: during a recording Left/Right
+                    // skip ±10s (combined port, juniper-v10 7.1.0) —
+                    // there is no channel list to open, and the info
+                    // overlay has its own entry point (INFO) there.
+                    // Live: Left opens the sidebar, Right shows the
+                    // channel info overlay.
+                    if (recordingUri != null) {
+                        seekRecording(
+                            if (right) PlaybackComfort.SEEK_SKIP_MS
+                            else -PlaybackComfort.SEEK_SKIP_MS
+                        )
+                        return true
+                    }
                     if (right) showChannelInfo() else showSidebar()
                     return true
                 }
@@ -2251,10 +2314,18 @@ class PlaybackActivity : FragmentActivity() {
                 items += getString(R.string.start_from_beginning)
                 actions += { startFromBeginning() }
             }
+            // Combined port (juniper-v10 10.0.0): picture-in-picture
+            // — a recording replays from disk the same way a live
+            // stream does, so it is offered here too.
+            if (PictureInPicture.isSupported(this)) {
+                items += getString(R.string.pip_menu)
+                actions += { enterPipAndOpenGuide() }
+            }
             AlertDialog.Builder(this)
                 .setTitle(recordingName ?: getString(R.string.recording_label))
                 .setItems(items.toTypedArray()) { _, which -> actions[which]() }
                 .show()
+                .also { trackOptionsDialog(it) }
             return
         }
         val isFav = ch.id in favoritesCache
@@ -2327,6 +2398,13 @@ class PlaybackActivity : FragmentActivity() {
         // simply has nothing to steer.
         items += qualityMenuLabel()
         actions += { showQualityDialog() }
+        // Combined port (juniper-v10 7.1.0): playback speed — live
+        // only: a recording has no live edge to chase, and a
+        // catch-up replay keeps its own resume/seek behaviour.
+        if (recordingUri == null && catchupUrl == null) {
+            items += speedMenuLabel()
+            actions += { showSpeedPicker() }
+        }
         // 7.3.1 (Nova): subtitle / audio track pickers — only
         // for track types the running stream actually carries.
         addTrackPickerItems(items, actions)
@@ -2351,10 +2429,143 @@ class PlaybackActivity : FragmentActivity() {
         // sleepTimerMenuLabel).
         items += sleepTimerMenuLabel()
         actions += { showSleepTimerDialog() }
+        // Combined port (juniper-v10 10.0.0): picture-in-picture —
+        // keep watching in a small window while browsing the guide.
+        // Only on devices with the PiP feature.
+        if (PictureInPicture.isSupported(this)) {
+            items += getString(R.string.pip_menu)
+            actions += { enterPipAndOpenGuide() }
+        }
         AlertDialog.Builder(this)
             .setTitle(ch.name)
             .setItems(items.toTypedArray()) { _, which -> actions[which]() }
             .show()
+            .also { trackOptionsDialog(it) }
+    }
+
+    /** Combined port (juniper-v10 7.1.0): remember the options
+     * dialog on screen (and clear the field when it goes away) so
+     * entering PiP can dismiss it first — a dialog left up would
+     * float over the small window. */
+    private fun trackOptionsDialog(dialog: AlertDialog) {
+        optionsDialog = dialog
+        dialog.setOnDismissListener {
+            if (optionsDialog === dialog) optionsDialog = null
+        }
+    }
+
+    /** Combined port (juniper-v10 7.1.0): the options-menu label
+     * for playback speed, carrying its current value. */
+    private fun speedMenuLabel(): String = getString(
+        R.string.playback_speed_menu,
+        PlaybackComfort.speedLabel(playbackSpeed)
+    )
+
+    /** Combined port (juniper-v10 7.1.0): playback-speed picker —
+     * 0.5× to 2×, live streams only (see showOptions). Applies to
+     * the running player at once; Nova's in-place zap keeps it,
+     * and initializePlayer restores it after a rebuild. */
+    private fun showSpeedPicker() {
+        val labels = PlaybackComfort.SPEEDS.map {
+            PlaybackComfort.speedLabel(it)
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.playback_speed_title)
+            .setItems(labels) { _, which ->
+                playbackSpeed = PlaybackComfort.SPEEDS[which]
+                player?.setPlaybackSpeed(playbackSpeed)
+                Toast.makeText(
+                    this,
+                    getString(
+                        R.string.playback_speed_set,
+                        PlaybackComfort.speedLabel(playbackSpeed)
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .show()
+    }
+
+    /** Combined port (juniper-v10 7.1.0): skip a recording
+     * forward/back by [deltaMs] (±10 s), clamped to the recording's
+     * length. A no-op without a player, and a no-op while the
+     * source is still preparing — the position is C.TIME_UNSET
+     * then, and seeking from it would jump to 0.
+     * 7.1.1 (hers): the toast says where the seek landed — a bare
+     * "+10s" says nothing about position, and a recording's
+     * overlay is not always up to show the progress bar. */
+    private fun seekRecording(deltaMs: Long) {
+        val p = player ?: return
+        val position = p.currentPosition
+        if (position == C.TIME_UNSET) return
+        val target = PlaybackComfort.clampSeek(position + deltaMs, p.duration)
+        p.seekTo(target)
+        val duration = p.duration
+        val text = if (duration > 0) {
+            getString(
+                R.string.recording_seek_position,
+                PlaybackComfort.formatSeekTime(target),
+                PlaybackComfort.formatSeekTime(duration)
+            )
+        } else {
+            PlaybackComfort.formatSeekTime(target)
+        }
+        Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Combined port (juniper-v10 10.0.0): enter picture-in-picture
+     * and open the guide on top, so the channel keeps playing in a
+     * small window while browsing. The options dialog is dismissed
+     * first — entering PiP with a dialog up would leave it floating
+     * over the small window. When PiP entry fails (the feature is
+     * present but the system refuses), the guide stays closed so
+     * playback doesn't silently stop for nothing.
+     * Nova-side adaptations: surf mode is stood down (its hops
+     * would flip channels inside the small window and flash
+     * overlays it cannot show), and reminder prompts pause (a
+     * Watch-now dialog cannot present over PiP; the watcher
+     * re-arms when PiP exits — see onPictureInPictureModeChanged). */
+    private fun enterPipAndOpenGuide() {
+        optionsDialog?.dismiss()
+        optionsDialog = null
+        hideOverlay()
+        hideSidebar()
+        stopSurfMode()
+        reminderWatcher.stop()
+        if (player == null) {
+            reminderWatcher.start()
+            Toast.makeText(this, R.string.pip_unavailable, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val entered = enterPictureInPictureMode(PictureInPicture.buildParams(this))
+        if (entered) {
+            openGuide()
+        } else {
+            reminderWatcher.start()
+            Toast.makeText(this, R.string.pip_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Combined port (juniper-v10 10.0.0): entering PiP shows video
+     * only in the small window — the overlay and sidebar would sit
+     * cramped over the picture. Leaving PiP needs nothing for the
+     * picture: the overlay stays hidden until the next key press,
+     * like any other return to playback. The reminder watcher,
+     * stood down on entry, re-arms here because a plain PiP exit
+     * never passes through onStart. */
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            optionsDialog?.dismiss()
+            optionsDialog = null
+            hideOverlay()
+            hideSidebar()
+        } else {
+            reminderWatcher.start()
+        }
     }
 
     /** 7.2.0 (Nova): the options-menu label for favorites
@@ -3210,6 +3421,19 @@ class PlaybackActivity : FragmentActivity() {
             }
         }
         hideSidebar()
+        // Combined port (juniper-v10 10.0.0): in PiP the activity
+        // is paused, not stopped — but if the system does stop it
+        // while the window is up (screen off), everything below
+        // must NOT run: releasing the player would black out the
+        // PiP window, and the session isn't over — it keeps
+        // accruing and is logged when playback really ends. The
+        // cleanups above are safe in PiP (their owners re-arm in
+        // onStart), so the guard sits exactly here: nothing above
+        // ends the session, everything below does. Nova's in-place
+        // zap composes with this by construction — switchToChannel
+        // re-points the running player with setMediaItem and never
+        // releases it, so no zap path can kill the window either.
+        if (isInPictureInPictureMode) return
         // Log the watch session (local only, never shared).
         logWatchSession()
         // 9.0.0 (Nova): remember where a recording's playback

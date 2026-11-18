@@ -24,6 +24,8 @@ object AppSettings {
     private const val KEY_GUIDE_SHOW_PAST = "guide_show_past"
     private const val KEY_CHANNEL_LIST_SIZE = "channel_list_size"
     private const val KEY_FAVORITES_ZAP = "favorites_zap"
+    private const val KEY_SPEAK_CHANNEL_NAMES = "speak_channel_names"
+    private const val KEY_LONG_PRESS_OK_ACTION = "long_press_ok_action"
     private const val KEY_NIGHT_DIM = "night_dim_percent"
     private const val KEY_QUALITY_MODE = "quality_mode"
     private const val KEY_GUIDE_GROUP_FILTER = "guide_group_filter"
@@ -105,6 +107,47 @@ object AppSettings {
 
     fun setFavoritesZap(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_FAVORITES_ZAP, value).apply()
+    }
+
+    /** Combined port (juniper-v10 9.3.0): spoken channel names —
+     * the channel name is announced (TTS) whenever playback
+     * switches to a channel. Default OFF — a TV that talks
+     * uninvited is a surprise nobody asked for. Same pref key as
+     * Juniper's line, so her settings screen drives it unchanged. */
+    fun speakChannelNames(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SPEAK_CHANNEL_NAMES, false)
+
+    fun setSpeakChannelNames(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SPEAK_CHANNEL_NAMES, value).apply()
+    }
+
+    /** Combined port (juniper-v10 9.3.0): what a long-press of OK
+     * (with nothing on screen) does. MENU is the behaviour Nova's
+     * line always had — the choice only adds the alternatives. */
+    enum class LongPressOkAction { MENU, GUIDE, NOTHING }
+
+    fun longPressOkAction(context: Context): LongPressOkAction =
+        parseLongPressOkAction(prefs(context).getString(KEY_LONG_PRESS_OK_ACTION, "menu"))
+
+    fun setLongPressOkAction(context: Context, action: LongPressOkAction) {
+        prefs(context).edit().putString(KEY_LONG_PRESS_OK_ACTION, longPressOkActionKey(action)).apply()
+    }
+
+    /** Parse a stored long-press-OK key; anything unknown (or null,
+     * from an older install) is MENU — today's behaviour. Pure, so
+     * it is unit-testable. */
+    fun parseLongPressOkAction(raw: String?): LongPressOkAction = when (raw) {
+        "guide" -> LongPressOkAction.GUIDE
+        "nothing" -> LongPressOkAction.NOTHING
+        else -> LongPressOkAction.MENU
+    }
+
+    /** The stored key for a long-press-OK action (round-trips
+     * through [parseLongPressOkAction]). */
+    fun longPressOkActionKey(action: LongPressOkAction): String = when (action) {
+        LongPressOkAction.MENU -> "menu"
+        LongPressOkAction.GUIDE -> "guide"
+        LongPressOkAction.NOTHING -> "nothing"
     }
 
     /** 7.2.1 (Nova): night dim level in percent (0 = off, else

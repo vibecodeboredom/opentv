@@ -394,4 +394,13 @@
     <string name="backup_import_action">Import</string>
     <string name="backup_import_done">Backup imported</string>
     <string name="backup_import_invalid">No readable Nova backup found — nothing was changed</string>
+
+    <!-- Combined (from juniper-v10): picture-in-picture, playback speed, recording seek -->
+    <string name="pip_menu">Watch in small window</string>
+    <string name="pip_fullscreen">Full screen</string>
+    <string name="pip_unavailable">Picture-in-picture isn\'t available on this device</string>
+    <string name="playback_speed_menu">Playback speed: %1$s</string>
+    <string name="playback_speed_title">Playback speed</string>
+    <string name="playback_speed_set">Playback speed: %1$s</string>
+    <string name="recording_seek_position">%1$s / %2$s</string>
 </resources>
