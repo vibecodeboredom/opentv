@@ -149,6 +149,19 @@ class PlaybackActivity : FragmentActivity() {
         private const val LONG_PRESS_MS = 600L
         /** 7.2.0 (Nova): stream info overlay refresh cadence. */
         private const val STREAM_INFO_UPDATE_MS = 1_000L
+        /** 8.3.0 (Nova): live playback paused this long earns the
+         * idle screensaver — long enough that a viewer who paused
+         * to make tea never sees it, short enough that a forgotten
+         * pause doesn't hold a frozen frame all evening. */
+        private const val IDLE_SAVER_MS = 300_000L
+        /** 8.3.0 (Nova): the screensaver clock re-reads the time
+         * this often while up, so the minute it shows is never
+         * stale by more than a few seconds. */
+        private const val SCREENSAVER_CLOCK_MS = 20_000L
+        /** 8.3.0 (Nova): surf mode's hop cadence — long enough to
+         * actually see what a channel is showing, short enough to
+         * keep moving through the list. */
+        private const val SURF_INTERVAL_MS = 12_000L
     }
 
     private var player: ExoPlayer? = null
@@ -292,6 +305,40 @@ class PlaybackActivity : FragmentActivity() {
      * select and simply plays as before. */
     private var trackSelector: DefaultTrackSelector? = null
     private var qualityMode: Int = AppSettings.QUALITY_AUTO
+    /** 8.3.0 (Nova): idle-pause screensaver — the black cover,
+     * its clock / programme / channel lines, and whether it is
+     * currently up. Armed only by a deliberate pause on a live
+     * channel (see onIsPlayingChanged); any key press takes it
+     * down and is swallowed whole, like the audio-only wake. */
+    private lateinit var idleSaverView: View
+    private lateinit var idleSaverClock: TextView
+    private lateinit var idleSaverTitle: TextView
+    private lateinit var idleSaverChannel: TextView
+    private var idleSaverShowing: Boolean = false
+    private var saverRestoreSwallowUp: Boolean = false
+    private val idleSaverRunnable = Runnable { showIdleSaver() }
+    private val saverClockRunnable = object : Runnable {
+        override fun run() {
+            if (!idleSaverShowing) return
+            updateSaverClock()
+            infoHandler.postDelayed(this, SCREENSAVER_CLOCK_MS)
+        }
+    }
+    /** 8.3.0 (Nova): surf mode — while on, a hop to the next
+     * zap-eligible channel lands every SURF_INTERVAL_MS through
+     * the ordinary zap path. Any key press ends it (the press is
+     * swallowed, like the other wakes); the sleep timer, a
+     * reminder zap, a pause and onStop end it too. */
+    private lateinit var surfHint: TextView
+    private var surfMode: Boolean = false
+    private var surfStopSwallowUp: Boolean = false
+    private val surfRunnable = object : Runnable {
+        override fun run() {
+            if (!surfMode) return
+            switchToAdjacentChannel(1)
+            infoHandler.postDelayed(this, SURF_INTERVAL_MS)
+        }
+    }
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
@@ -381,6 +428,12 @@ class PlaybackActivity : FragmentActivity() {
         audioOnlyView = findViewById(R.id.audio_only_view)
         audioOnlyHint = findViewById(R.id.audio_only_hint)
         reconnectView = findViewById(R.id.reconnect_view)
+        // 8.3.0 (Nova): surf hint pill + idle screensaver views.
+        surfHint = findViewById(R.id.surf_hint)
+        idleSaverView = findViewById(R.id.idle_saver_view)
+        idleSaverClock = findViewById(R.id.idle_saver_clock)
+        idleSaverTitle = findViewById(R.id.idle_saver_title)
+        idleSaverChannel = findViewById(R.id.idle_saver_channel)
         // 7.2.0 (Nova): on mobile the top-end corner belongs to the
         // Guide button — drop the stream info panel below it.
         if (DeviceType.isMobile(this)) {
@@ -409,7 +462,13 @@ class PlaybackActivity : FragmentActivity() {
             list = findViewById(R.id.sidebar_scroll),
             footer = findViewById(R.id.sidebar_footer),
             currentChannelId = { channel?.id },
-            onChannelSelected = { switchToChannel(it) },
+            onChannelSelected = {
+                // 8.3.0 (Nova): a channel picked by hand ends
+                // surf mode — surfing on from a deliberate choice
+                // would zap away from it at the next hop.
+                stopSurfMode()
+                switchToChannel(it)
+            },
             sizing = AppSettings.sidebarSizing(this)
         )
         // No media controller at all — the video just plays. The overlay
@@ -770,6 +829,17 @@ class PlaybackActivity : FragmentActivity() {
                 // level — the fade belonged to the timer that
                 // paused, not to the show now playing.
                 if (isPlaying && sleepFaded) setDim(dimPercent)
+                // 8.3.0 (Nova): idle-pause screensaver bookkeeping.
+                // Playing again cancels a pending saver and takes
+                // a shown one down; a deliberate pause (playWhenReady
+                // off — buffering keeps it on, so a struggling
+                // stream never arms the saver) starts the countdown.
+                if (isPlaying) {
+                    infoHandler.removeCallbacks(idleSaverRunnable)
+                    if (idleSaverShowing) hideIdleSaver()
+                } else if (!player.playWhenReady) {
+                    armIdleSaver()
+                }
                 // Paused: show the centred play cluster; playing: hide it.
                 // The transport play/pause icon follows the same state.
                 pausedCluster.visibility = if (isPlaying) View.GONE else View.VISIBLE
@@ -893,6 +963,23 @@ class PlaybackActivity : FragmentActivity() {
      * opens the context menu without also firing the short-press action.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // 8.3.0 (Nova): the idle screensaver is up — ANY key
+        // press takes it down and is consumed whole (down and
+        // its matching up), exactly like the audio-only wake
+        // below: the press that dismisses the saver must not
+        // also resume playback, zap or open the guide. Checked
+        // first because the saver is the topmost layer.
+        if (idleSaverShowing) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                hideIdleSaver()
+                saverRestoreSwallowUp = true
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP && saverRestoreSwallowUp) {
+                saverRestoreSwallowUp = false
+                return true
+            }
+        }
         // 7.3.0 (Nova): audio-only mode — ANY key press brings the
         // picture back and ends the mode. The press is consumed
         // whole (down and its matching up), so waking the screen
@@ -905,6 +992,22 @@ class PlaybackActivity : FragmentActivity() {
             }
             if (event.action == KeyEvent.ACTION_UP && audioRestoreSwallowUp) {
                 audioRestoreSwallowUp = false
+                return true
+            }
+        }
+        // 8.3.0 (Nova): surf mode — ANY key press ends surfing
+        // and stays on the current channel. The press is consumed
+        // whole like the wakes above: the key that stops the surf
+        // doesn't also zap, pause or open the menu (a long-press
+        // OK included — its timer never arms).
+        if (surfMode) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                stopSurfMode()
+                surfStopSwallowUp = true
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP && surfStopSwallowUp) {
+                surfStopSwallowUp = false
                 return true
             }
         }
@@ -1010,6 +1113,14 @@ class PlaybackActivity : FragmentActivity() {
      * callbacks), so the timer can't fire while either is open.
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // 8.3.0 (Nova): a tap dismisses the idle screensaver on
+        // mobile, the same any-key wake the remote gets — and is
+        // consumed, so the tap doesn't land on the transport bar
+        // underneath and resume playback in the same gesture.
+        if (idleSaverShowing && ev.action == MotionEvent.ACTION_DOWN) {
+            hideIdleSaver()
+            return true
+        }
         if (DeviceType.isMobile(this) && ev.action == MotionEvent.ACTION_DOWN &&
             overlay.visibility == View.VISIBLE
         ) {
@@ -1021,6 +1132,12 @@ class PlaybackActivity : FragmentActivity() {
     /** Pause / resume, and keep the cluster + transport icon in sync. */
     private fun togglePlayPause() {
         val p = player ?: return
+        // 8.3.0 (Nova): pausing by hand ends surf mode — keys
+        // already end it in dispatchKeyEvent, but on mobile this
+        // is reachable by touch with surf running, and a hop
+        // landing after the pause would restart playback the
+        // viewer just stopped.
+        stopSurfMode()
         // 7.3.0 (Nova): pausing on purpose ends any reconnect in
         // progress — retries only run while the viewer wants
         // playback.
@@ -1364,6 +1481,10 @@ class PlaybackActivity : FragmentActivity() {
         updateTransportIcons()
         buildStrip()
         overlay.visibility = View.VISIBLE
+        // 8.3.0 (Nova): while surfing, every flash carries the
+        // how-to-stop hint; a normal flash never shows it. The
+        // hint hides with the overlay (see hideOverlay).
+        surfHint.visibility = if (surfMode) View.VISIBLE else View.GONE
         // 5.0.0 — neat animations: the overlay fades in quickly
         // (150ms) instead of popping in, so channel switches feel
         // smoother. Fast enough to never delay the info itself.
@@ -1389,6 +1510,10 @@ class PlaybackActivity : FragmentActivity() {
         overlayBrief = false
         infoHandler.removeCallbacks(hideInfoRunnable)
         infoHandler.removeCallbacks(longPressRunnable)
+        // 8.3.0 (Nova): the surf hint belongs to the flash — it
+        // comes down with it, instantly (the pill is a caption,
+        // not part of the overlay's fade).
+        surfHint.visibility = View.GONE
         if (DeviceType.isMobile(this)) {
             // 6.0.0-rc3: the overlay fades out (200ms) instead of
             // popping off, and the top Guide button + centred info
@@ -1766,6 +1891,11 @@ class PlaybackActivity : FragmentActivity() {
      * somehow isn't, load it rather than failing the tap. A channel
      * that has left the playlist gets the plain toast. */
     private fun watchReminderChannel(reminder: PlaylistRepository.Reminder) {
+        // 8.3.0 (Nova): a reminder zap is a deliberate switch —
+        // it ends surf mode, or the next hop would carry the
+        // viewer away from the programme they asked to be
+        // reminded about.
+        stopSurfMode()
         val cached = PlaylistRepository.cachedPlaylist()
         if (cached != null) {
             val ch = cached.firstOrNull { it.id == reminder.channelId }
@@ -1901,6 +2031,11 @@ class PlaybackActivity : FragmentActivity() {
     }
 
     private fun showOptions() {
+        // 8.3.0 (Nova): defensive — opening the menu ends surf
+        // mode. In practice the long-press that opens it is
+        // already consumed as surf's any-key stop, so this only
+        // matters if a future entry point reaches here directly.
+        stopSurfMode()
         val ch = channel
         if (ch == null) {
             // 7.1.0 (Nova): a recording has no channel options, but
@@ -1984,6 +2119,11 @@ class PlaybackActivity : FragmentActivity() {
         // timer's below.
         items += favoritesZapMenuLabel()
         actions += { toggleFavoritesZap() }
+        // 8.3.0 (Nova): surf mode — hands-free zapping through
+        // the zap-eligible list (favorites only while favorites
+        // zapping is on), a hop every 12s until any key press.
+        items += getString(R.string.surf_mode)
+        actions += { startSurfMode() }
         items += streamInfoMenuLabel()
         actions += { setStreamInfo(!streamInfoOn) }
         items += nightDimMenuLabel()
@@ -2277,6 +2417,10 @@ class PlaybackActivity : FragmentActivity() {
     private fun onSleepTimerFired() {
         sleepTimerMinutes = 0
         sleepDeadlineMillis = 0L
+        // 8.3.0 (Nova): the sleep pause ends surf mode too — a
+        // surf hop after the deadline would switch channel and
+        // start playing again, undoing the timer outright.
+        stopSurfMode()
         infoHandler.removeCallbacks(sleepFadeRunnable)
         if (sleepFaded) {
             dimView.animate().cancel()
@@ -2439,6 +2583,84 @@ class PlaybackActivity : FragmentActivity() {
                 }
             }
             .start()
+    }
+
+    /**
+     * 8.3.0 (Nova): start the idle-saver countdown for a pause
+     * that just began. Live channels only — a recording's pause
+     * keeps its frozen frame (the viewer parked a file, not a
+     * broadcast), and catch-up keeps its place marker. The
+     * Settings toggle is read here and again when the saver
+     * would show, so turning it off mid-pause still wins.
+     */
+    private fun armIdleSaver() {
+        infoHandler.removeCallbacks(idleSaverRunnable)
+        if (recordingUri != null || catchupUrl != null) return
+        if (!AppSettings.idleSaverEnabled(this)) return
+        infoHandler.postDelayed(idleSaverRunnable, IDLE_SAVER_MS)
+    }
+
+    /** 8.3.0 (Nova): the idle countdown elapsed — cover the
+     * frozen frame with the clock screen. Re-checks everything
+     * that could have changed while the timer ran: playback
+     * resumed, the pause turned into a channel switch, the
+     * toggle was switched off in Settings. */
+    private fun showIdleSaver() {
+        val p = player ?: return
+        if (p.isPlaying || p.playWhenReady) return
+        if (recordingUri != null || catchupUrl != null) return
+        if (!AppSettings.idleSaverEnabled(this)) return
+        hideOverlay()
+        hideSidebar()
+        idleSaverTitle.text = nowProgramme?.title ?: ""
+        idleSaverTitle.visibility =
+            if (nowProgramme != null) View.VISIBLE else View.GONE
+        idleSaverChannel.text = channel?.name ?: ""
+        updateSaverClock()
+        idleSaverShowing = true
+        idleSaverView.visibility = View.VISIBLE
+        infoHandler.removeCallbacks(saverClockRunnable)
+        infoHandler.postDelayed(saverClockRunnable, SCREENSAVER_CLOCK_MS)
+    }
+
+    /** 8.3.0 (Nova): take the screensaver down and stop its
+     * clock. Playback stays exactly as paused as it was — only
+     * a real resume (OK / play key) starts it again. */
+    private fun hideIdleSaver() {
+        infoHandler.removeCallbacks(saverClockRunnable)
+        idleSaverShowing = false
+        if (::idleSaverView.isInitialized) idleSaverView.visibility = View.GONE
+    }
+
+    /** 8.3.0 (Nova): the screensaver's big clock line, in the
+     * same "8:00 PM" shape the rest of the app uses. */
+    private fun updateSaverClock() {
+        idleSaverClock.text = GuideData.formatClock(System.currentTimeMillis())
+    }
+
+    /** 8.3.0 (Nova): begin surfing — the first hop lands at
+     * once (picking the menu item and staying put for twelve
+     * seconds would read as nothing happening), then a hop
+     * every SURF_INTERVAL_MS through switchToAdjacentChannel,
+     * so the eligible list, the favorites-zap mode and the zap
+     * flash are exactly the manual ones. Live only in effect:
+     * the menu that offers it never appears for recordings. */
+    private fun startSurfMode() {
+        if (surfMode) return
+        surfMode = true
+        surfRunnable.run()
+    }
+
+    /** 8.3.0 (Nova): end surfing — no more hops, the hint comes
+     * down, playback stays on the current channel. Safe to call
+     * when not surfing. Deliberately does NOT touch the
+     * reconnect state: a stream that stumbles mid-surf keeps
+     * its own retry rules, and the next hop (or the viewer's
+     * key press) moves on as usual. */
+    private fun stopSurfMode() {
+        surfMode = false
+        infoHandler.removeCallbacks(surfRunnable)
+        if (::surfHint.isInitialized) surfHint.visibility = View.GONE
     }
 
     /** 7.3.0 (Nova): the options-menu label for stream quality,
@@ -2693,6 +2915,17 @@ class PlaybackActivity : FragmentActivity() {
         // READY or error sorts it out.
         infoHandler.removeCallbacks(reconnectRunnable)
         infoHandler.removeCallbacks(stallWatchdogRunnable)
+        // 8.3.0 (Nova): surf mode and the idle screensaver stop
+        // with the activity too — a hop must never land in a
+        // stopped activity, and a return visit never finds the
+        // saver (or a stale clock) still up. The saver's pending
+        // countdown goes as well; a pause that survives the stop
+        // re-arms from the rebuilt player's own state callbacks.
+        stopSurfMode()
+        infoHandler.removeCallbacks(idleSaverRunnable)
+        saverRestoreSwallowUp = false
+        surfStopSwallowUp = false
+        hideIdleSaver()
         // 7.3.1 (Nova): the audio-only hint's fade stops too —
         // and the hint itself comes down, so a return visit
         // never finds a stale caption floating over the video.

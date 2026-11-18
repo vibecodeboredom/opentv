@@ -24,6 +24,7 @@ object AppSettings {
     private const val KEY_QUALITY_MODE = "quality_mode"
     private const val KEY_GUIDE_GROUP_FILTER = "guide_group_filter"
     private const val KEY_GUIDE_ZOOM_HOURS = "guide_zoom_hours"
+    private const val KEY_IDLE_SAVER = "idle_saver"
 
     /** 7.3.0 (Nova): stream quality modes for the playback
      * track selector. AUTO is the player's default adaptive
@@ -173,6 +174,20 @@ object AppSettings {
         prefs(context).edit()
             .putInt(KEY_GUIDE_ZOOM_HOURS, hours.coerceIn(2, 4))
             .apply()
+    }
+
+    /** 8.3.0 (Nova): the idle-pause screensaver — after five
+     * minutes paused on a live channel, playback covers the
+     * frozen frame with a calm clock screen (see PlaybackActivity).
+     * Default ON; turning it off leaves a paused frame up
+     * indefinitely, exactly as before. Read when a pause begins
+     * and again when the saver would show, so a change made in
+     * Settings applies to the very next pause. */
+    fun idleSaverEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_IDLE_SAVER, true)
+
+    fun setIdleSaverEnabled(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_IDLE_SAVER, value).apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */

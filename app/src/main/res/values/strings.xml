@@ -246,6 +246,14 @@
          as the scheduled stop: the start alarm fires the recorder,
          so the string says plainly that OpenTV must be running. -->
     <string name="on_now">On now</string>
+    <!-- Nova 8.3.0: idle-pause screensaver, surf mode, watchlist
+         home row. -->
+    <string name="watchlist">Watchlist</string>
+    <string name="watchlist_today">Today</string>
+    <string name="watchlist_tomorrow">Tomorrow</string>
+    <string name="prefs_idle_saver">Clock screensaver when paused</string>
+    <string name="surf_mode">Surf mode</string>
+    <string name="surf_hint">Surfing — press any key to stop</string>
     <string name="on_now_remaining">%1$s left</string>
     <string name="menu_record_programme">Record this programme</string>
     <string name="menu_cancel_scheduled_recording">Cancel scheduled recording</string>

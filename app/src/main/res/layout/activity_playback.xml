@@ -71,6 +71,26 @@
         android:textSize="15sp"
         android:visibility="gone" />
 
+    <!-- 8.3.0 (Nova): surf mode hint — a small pill in the same
+         spot as the reconnect pill, shown with each surf hop's
+         channel flash (see PlaybackActivity.showChannelInfo) so
+         the viewer always knows how surfing stops. -->
+    <TextView
+        android:id="@+id/surf_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="110dp"
+        android:background="@drawable/loading_status_bg"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="@string/surf_hint"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
     <!-- Paused cluster (4.6.0, TiviMate-style): a large centred play icon
          shown while playback is paused; tapping it (or the transport
          play/pause button, or the remote's play/pause key) resumes. -->
@@ -490,6 +510,46 @@
             android:progress="0"
             android:progressDrawable="@drawable/guide_progress_drawable" />
 
+    </LinearLayout>
+
+    <!-- 8.3.0 (Nova): idle-pause screensaver — a full black cover
+         shown after five minutes paused on a live channel: a big
+         clock, the paused programme and its channel, nothing else.
+         Last in the layout so it covers every other layer (frozen
+         frame, paused cluster, info overlay, sidebar). Any key
+         press takes it down (see PlaybackActivity.dispatchKeyEvent).
+         Not clickable. -->
+    <LinearLayout
+        android:id="@+id/idle_saver_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/idle_saver_clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/white"
+            android:textSize="72sp" />
+
+        <TextView
+            android:id="@+id/idle_saver_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="#CCCCCC"
+            android:textSize="22sp" />
+
+        <TextView
+            android:id="@+id/idle_saver_channel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#999999"
+            android:textSize="17sp" />
     </LinearLayout>
 
 </FrameLayout>

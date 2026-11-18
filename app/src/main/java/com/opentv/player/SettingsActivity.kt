@@ -104,6 +104,14 @@ class SettingsActivity : FragmentActivity() {
                 AppSettings.setGuideShowsPast(this@SettingsActivity, checked)
             }
         }
+        // 8.3.0 (Nova): the idle-pause screensaver toggle, with
+        // the other guide & playback preferences.
+        findViewById<Switch>(R.id.pref_idle_saver).apply {
+            isChecked = AppSettings.idleSaverEnabled(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setIdleSaverEnabled(this@SettingsActivity, checked)
+            }
+        }
         findViewById<RadioGroup>(R.id.pref_channel_list_size).apply {
             check(
                 when (AppSettings.channelListSize(this@SettingsActivity)) {

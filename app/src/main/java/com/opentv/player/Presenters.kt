@@ -212,6 +212,78 @@ class OnNowPresenter : Presenter() {
 }
 
 /**
+ * 8.3.0 (Nova): when a watchlist programme starts, in the home
+ * row's words — "Today 8:00 PM", "Tomorrow 8:00 PM", or the
+ * guide's own date + clock for anything further out. Shared by
+ * the watchlist card and the toast a tap on a future card shows,
+ * so the two never disagree.
+ */
+internal fun watchlistStartLabel(context: android.content.Context, startMillis: Long): String {
+    val clock = GuideData.formatClock(startMillis)
+    val start = java.util.Calendar.getInstance().apply { timeInMillis = startMillis }
+    val today = java.util.Calendar.getInstance()
+    val tomorrow = java.util.Calendar.getInstance().apply {
+        add(java.util.Calendar.DAY_OF_YEAR, 1)
+    }
+    fun sameDay(cal: java.util.Calendar): Boolean =
+        start.get(java.util.Calendar.YEAR) == cal.get(java.util.Calendar.YEAR) &&
+            start.get(java.util.Calendar.DAY_OF_YEAR) == cal.get(java.util.Calendar.DAY_OF_YEAR)
+    return when {
+        sameDay(today) -> context.getString(R.string.watchlist_today) + " " + clock
+        sameDay(tomorrow) -> context.getString(R.string.watchlist_tomorrow) + " " + clock
+        else -> GuideData.formatDate(startMillis) + ", " + clock
+    }
+}
+
+/**
+ * 8.3.0 (Nova): card for the home screen's "Watchlist" row — a
+ * programme the user set a reminder for. Programme title on top,
+ * channel + start underneath ("Today 8:00 PM" style); once the
+ * programme is on, the line leads with "On now" instead and the
+ * tap plays the channel. Channel logo up top, like the On now
+ * cards.
+ */
+class WatchlistPresenter : Presenter() {
+
+    override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
+        val cardView = ImageCardView(parent.context)
+        cardView.isFocusable = true
+        cardView.isFocusableInTouchMode = true
+        cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
+        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        return ViewHolder(cardView)
+    }
+
+    override fun onBindViewHolder(viewHolder: ViewHolder, item: Any) {
+        val entry = item as WatchlistEntry
+        val cardView = viewHolder.view as ImageCardView
+        cardView.titleText = entry.reminder.title
+        cardView.contentText = if (entry.onNow) {
+            cardView.context.getString(R.string.on_now) + " • " + entry.channel.name
+        } else {
+            entry.channel.name + " • " +
+                watchlistStartLabel(cardView.context, entry.reminder.startMillis)
+        }
+        cardView.mainImageView.load(entry.channel.logo) {
+            size(CARD_WIDTH, CARD_HEIGHT)
+            crossfade(true)
+            placeholder(android.R.drawable.ic_media_play)
+            error(android.R.drawable.ic_media_play)
+        }
+    }
+
+    override fun onUnbindViewHolder(viewHolder: ViewHolder) {
+        val cardView = viewHolder.view as ImageCardView
+        cardView.mainImage = null
+    }
+
+    companion object {
+        private const val CARD_WIDTH = 320
+        private const val CARD_HEIGHT = 180
+    }
+}
+
+/**
  * 8.2.0 (Nova): card for a scheduled recording on the recordings
  * screen — programme title on top, channel + day/time underneath.
  */

@@ -37,3 +37,15 @@ data class OnNowEntry(
     val channel: Channel,
     val programme: EpgParser.Programme
 )
+
+/** 8.3.0 (Nova): one card of the home screen's "Watchlist" row —
+ * a programme the user set a reminder for (8.0.0), resolved to
+ * its channel so the card can show the logo and, once the
+ * programme is on, play the channel. [onNow] is computed when
+ * the row is built; a future programme's card only shows its
+ * info. */
+data class WatchlistEntry(
+    val reminder: PlaylistRepository.Reminder,
+    val channel: Channel,
+    val onNow: Boolean
+)

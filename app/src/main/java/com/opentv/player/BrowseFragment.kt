@@ -36,9 +36,18 @@ class BrowseFragment : BrowseSupportFragment() {
     private val onNowTicker = object : Runnable {
         override fun run() {
             refreshOnNowRow()
+            // 8.3.0 (Nova): the watchlist rides the same ticker —
+            // a reminded programme flipping to "On now" while the
+            // home screen sits open updates its card unprompted.
+            refreshWatchlistRow()
             onNowHandler.postDelayed(this, ON_NOW_TICK_MS)
         }
     }
+    // 8.3.0 (Nova): state for the "Watchlist" row, mirroring the
+    // "On now" row's — the row currently in the adapter (null
+    // while hidden) and the signature of the entries it shows.
+    private var watchlistRow: ListRow? = null
+    private var watchlistSignature: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +57,25 @@ class BrowseFragment : BrowseSupportFragment() {
             when (item) {
                 is Channel -> openChannel(item)
                 is OnNowEntry -> openChannel(item.channel)
+                // 8.3.0 (Nova): a watchlist card whose programme
+                // is on plays its channel; a future one just
+                // shows its info as a toast — there is nothing
+                // to play yet, and pretending otherwise would
+                // zap the viewer to a different programme.
+                is WatchlistEntry -> {
+                    if (item.onNow) {
+                        openChannel(item.channel)
+                    } else {
+                        Toast.makeText(
+                            requireContext(),
+                            item.reminder.title + " • " + item.channel.name + " • " +
+                                watchlistStartLabel(
+                                    requireContext(), item.reminder.startMillis
+                                ),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
                 is MenuAction -> onMenuAction(item)
             }
         }
@@ -59,6 +87,10 @@ class BrowseFragment : BrowseSupportFragment() {
         // playback, settings, anywhere) refreshes what's on now,
         // and the ticker keeps it honest while the screen sits open.
         refreshOnNowRow()
+        // 8.3.0 (Nova): the watchlist refreshes on resume too —
+        // a reminder set in the guide a moment ago shows up here
+        // without waiting for the ticker.
+        refreshWatchlistRow()
         onNowHandler.removeCallbacks(onNowTicker)
         onNowHandler.postDelayed(onNowTicker, ON_NOW_TICK_MS)
     }
@@ -127,6 +159,11 @@ class BrowseFragment : BrowseSupportFragment() {
         // (loadPlaylist calls it once the EPG is in).
         onNowRow = null
         onNowSignature = ""
+        // 8.3.0 (Nova): the watchlist row went the same way;
+        // refreshWatchlistRow (called at the end of buildRows)
+        // re-adds it.
+        watchlistRow = null
+        watchlistSignature = ""
 
         val hidden = PlaylistRepository.hiddenChannels(requireContext())
         val favorites = PlaylistRepository.favorites(requireContext())
@@ -211,6 +248,11 @@ class BrowseFragment : BrowseSupportFragment() {
         if (channels.isEmpty()) {
             Toast.makeText(requireContext(), R.string.no_channels, Toast.LENGTH_LONG).show()
         }
+
+        // 8.3.0 (Nova): the watchlist row goes in last here —
+        // refreshWatchlistRow positions it under "On now" (or at
+        // the top until that row lands with the EPG).
+        refreshWatchlistRow()
     }
 
     /**
@@ -290,6 +332,82 @@ class BrowseFragment : BrowseSupportFragment() {
         }
         onNowRow = row
         onNowSignature = signature
+    }
+
+    /**
+     * 8.3.0 (Nova): the watchlist entries — the pending programme
+     * reminders (the 8.0.0 store reads soonest-first and prunes
+     * programmes that already ended), each resolved to its
+     * channel. A reminder whose channel has left the playlist, or
+     * is hidden like in every other home row, drops out — its
+     * card could neither show the channel nor play it.
+     */
+    private fun buildWatchlistEntries(): List<WatchlistEntry> {
+        if (homeChannels.isEmpty() || !isAdded) return emptyList()
+        val context = requireContext()
+        val hidden = PlaylistRepository.hiddenChannels(context)
+        val byId = homeChannels.associateBy { it.id }
+        val now = System.currentTimeMillis()
+        return PlaylistRepository.reminders(context).mapNotNull { reminder ->
+            val channel = byId[reminder.channelId] ?: return@mapNotNull null
+            if (channel.id in hidden) return@mapNotNull null
+            WatchlistEntry(
+                reminder = reminder,
+                channel = channel,
+                onNow = now in reminder.startMillis until reminder.stopMillis
+            )
+        }
+    }
+
+    /**
+     * 8.3.0 (Nova): insert, update or hide the "Watchlist" row,
+     * directly under "On now" (or at the top while that row is
+     * away). Called when the rows are built, on resume, and on
+     * the "On now" ticker. Unlike that row there is no in-place
+     * rebind: a watchlist card's text only changes when a
+     * programme starts (which flips its signature) or a reminder
+     * is added or ends, so an unchanged signature leaves the row
+     * — and its focus — alone.
+     */
+    private fun refreshWatchlistRow() {
+        if (!isAdded || homeChannels.isEmpty()) return
+        val entries = buildWatchlistEntries()
+        val signature = entries.joinToString("|") {
+            it.reminder.channelId + "@" + it.reminder.startMillis +
+                if (it.onNow) ":now" else ""
+        }
+        if (entries.isEmpty()) {
+            watchlistRow?.let { rowsAdapter.remove(it) }
+            watchlistRow = null
+            watchlistSignature = ""
+            return
+        }
+        if (signature == watchlistSignature && watchlistRow != null) return
+        val adapter = ArrayObjectAdapter(WatchlistPresenter())
+        entries.forEach { adapter.add(it) }
+        val row = ListRow(HeaderItem(getString(R.string.watchlist)), adapter)
+        val existing = watchlistRow
+        if (existing != null) {
+            val index = rowsAdapter.indexOf(existing)
+            if (index >= 0) {
+                rowsAdapter.remove(existing)
+                rowsAdapter.add(index, row)
+            } else {
+                rowsAdapter.add(watchlistInsertIndex(), row)
+            }
+        } else {
+            rowsAdapter.add(watchlistInsertIndex(), row)
+        }
+        watchlistRow = row
+        watchlistSignature = signature
+    }
+
+    /** 8.3.0 (Nova): where a fresh watchlist row belongs —
+     * right under the "On now" row when it is showing, else at
+     * the very top of the home screen. */
+    private fun watchlistInsertIndex(): Int {
+        val onNowIndex = onNowRow?.let { rowsAdapter.indexOf(it) } ?: -1
+        return if (onNowIndex >= 0) onNowIndex + 1 else 0
     }
 
     private companion object {
