@@ -475,3 +475,14 @@ Rules (from Chuni, 2026-11-17):
   selection + channel-number wiring into playback/guide, EPG
   quality coverage indicator wiring in the guide, PlaybackComfort
   sleep helpers (sleep timer stays Nova's).
+
+- CI status (2026-11-18 ~04:21 UTC): GREEN — run 44236338908 (301 tests
+  pass). Two post-rebase fixes landed after the first failure
+  (run 44234559206): rebase merge damage in SettingsActivity /
+  PlaylistRepository / MobileHomeActivity (dropped closers, jammed
+  lines), plus a List-vs-Set assertion bug in BackupManagerTest.
+  APK sha256: 6253f38a380d512d45cf25c3e18b925ca2b24b22766e64466b323299258568a4.
+  TV install BLOCKED 2026-11-18 ~04:25 UTC — bedroom TV adb offline
+  (relay up, TV adbd not responding; likely off/asleep or wireless
+  debugging dropped). Install + hash-verify still owed once the TV
+  is back on. versionCode stays 74.
