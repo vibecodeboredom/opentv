@@ -79,6 +79,13 @@ class MobileHomeActivity : FragmentActivity() {
         retryButton = findViewById(R.id.mobile_retry_button)
         continueCard = findViewById(R.id.mobile_continue_card)
         continueName = findViewById(R.id.mobile_continue_name)
+        // 9.0.0 (Nova): the Continue watching card's outline and
+        // title take the chosen accent (AccentDrawables mirrors
+        // the card_accent_bg XML it replaces).
+        continueCard.background = AccentDrawables.cardOutlineBackground(this)
+        (continueCard.getChildAt(0) as? TextView)?.setTextColor(
+            AppSettings.accentColor(this)
+        )
 
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter

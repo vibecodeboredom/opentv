@@ -189,6 +189,17 @@ class GuideActivity : FragmentActivity() {
      * its number + name are highlighted in the accent colour. */
     private var currentChannelId: String? = null
 
+    /** 9.0.0 (Nova): the chosen accent colour and the guide
+     * text scale, read once when the guide opens (see
+     * AppSettings) — every accent / text-size decision in this
+     * activity uses these two, so a Settings change applies
+     * from the next guide open. */
+    private var accentColor: Int = 0xFF86C739.toInt()
+    private var guideTextScale: Float = 1.0f
+
+    /** A guide text size with the comfort-text scale applied. */
+    private fun scaledSp(base: Float): Float = base * guideTextScale
+
     /** Left sidebar (4.6.2, shared ChannelSidebar helper) — the same
      * groups/channels panel as playback, over the guide grid. */
     private lateinit var channelSidebar: ChannelSidebar
@@ -231,6 +242,10 @@ class GuideActivity : FragmentActivity() {
         // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
         DeviceType.applyOrientation(this)
         setContentView(R.layout.activity_guide)
+        // 9.0.0 (Nova): accent + comfort text scale for this
+        // guide session (see the field comment).
+        accentColor = AppSettings.accentColor(this)
+        guideTextScale = AppSettings.guideTextScale(this)
         currentChannelId = intent.getStringExtra(EXTRA_CURRENT_CHANNEL_ID)
         container = findViewById(R.id.guide_container)
         pinnedCol = findViewById(R.id.guide_pinned_col)
@@ -257,6 +272,19 @@ class GuideActivity : FragmentActivity() {
         detailRemaining = findViewById(R.id.guide_detail_remaining)
         detailCategory = findViewById(R.id.guide_detail_category)
 
+        // 9.0.0 (Nova): the details header's progress bar takes
+        // the chosen accent, and the header's texts scale with
+        // the comfort text size — their base sizes live in the
+        // layout, so the inflated px sizes are scaled in place.
+        detailProgress.progressDrawable = AccentDrawables.progressDrawable(this)
+        if (guideTextScale != 1.0f) {
+            for (v in listOf(
+                detailTitle, detailTime, detailChannel, detailCategory, detailRemaining
+            )) {
+                v.setTextSize(TypedValue.COMPLEX_UNIT_PX, v.textSize * guideTextScale)
+            }
+        }
+
         // 8.0.0 (Nova): now-playing bar. Tapping it returns to
         // playback — the same trip BACK makes — so it reads as
         // "go back to what you were watching".
@@ -266,6 +294,10 @@ class GuideActivity : FragmentActivity() {
         npTitle = findViewById(R.id.guide_np_title)
         npTime = findViewById(R.id.guide_np_time)
         npProgress = findViewById(R.id.guide_np_progress)
+        // 9.0.0 (Nova): the now-playing bar's play glyph and
+        // progress bar take the chosen accent too.
+        findViewById<TextView>(R.id.guide_np_play).setTextColor(accentColor)
+        npProgress.progressDrawable = AccentDrawables.progressDrawable(this)
         nowPlayingBar.setOnClickListener { finish() }
 
         // Left sidebar (shared ChannelSidebar helper, 4.6.2). Picking a
@@ -904,7 +936,7 @@ class GuideActivity : FragmentActivity() {
             text = GuideData.formatDateTime(nowMillis)
             setBackgroundColor(0xFF161616.toInt())
             setTextColor(0xFFC9C9D1.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp(16f))
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
             setPadding(px12, 0, px12, 0)
@@ -922,7 +954,7 @@ class GuideActivity : FragmentActivity() {
             val label = TextView(this).apply {
                 text = GuideData.formatHourLabel(windowStart + m * 60L * 1000)
                 setTextColor(0xFF9A9AA3.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp(16f))
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -970,9 +1002,9 @@ class GuideActivity : FragmentActivity() {
             channelCell.addView(TextView(this).apply {
                 text = row.channel.number.toString()
                 setTextColor(
-                    if (isCurrentChannel) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt()
+                    if (isCurrentChannel) accentColor else 0xB3FFFFFF.toInt()
                 )
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp(18f))
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -994,8 +1026,8 @@ class GuideActivity : FragmentActivity() {
         channelCell.addView(logo)
         val nameView = TextView(this).apply {
             text = row.channel.name
-            setTextColor(if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setTextColor(if (isCurrentChannel) accentColor else 0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp(16f))
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -1011,7 +1043,7 @@ class GuideActivity : FragmentActivity() {
                 // Focused name turns accent, with a subtle panel
                 // highlight, and the details header shows this row's
                 // programme that's on now.
-                nameView.setTextColor(0xFF86C739.toInt())
+                nameView.setTextColor(accentColor)
                 channelCell.setBackgroundColor(0xFF232629.toInt())
                 val current = displayRows.getOrNull(index)
                 val nowProg = current?.programmes?.firstOrNull {
@@ -1020,7 +1052,7 @@ class GuideActivity : FragmentActivity() {
                 if (current != null && nowProg != null) showDetails(current.channel, nowProg)
             } else {
                 nameView.setTextColor(
-                    if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                    if (isCurrentChannel) accentColor else 0xFFFFFFFF.toInt()
                 )
                 channelCell.setBackgroundColor(0xFF161616.toInt())
             }
@@ -1094,13 +1126,18 @@ class GuideActivity : FragmentActivity() {
                 // Tagged with its programme so the sidebar's left-edge
                 // check (isFirstCardInRow) can find the first card.
                 tag = programme
-                setBackgroundResource(
-                    when {
-                        isNow -> R.drawable.guide_cell_now_bg
-                        isPast -> R.drawable.guide_cell_past_bg
-                        else -> R.drawable.guide_cell_bg
-                    }
-                )
+                // 9.0.0 (Nova): the "now" cell's background is
+                // built in code so its fill follows the chosen
+                // accent (AccentDrawables mirrors the old XML);
+                // past/plain cells keep their XML selectors.
+                if (isNow) {
+                    background = AccentDrawables.guideCellNowBackground(this@GuideActivity)
+                } else {
+                    setBackgroundResource(
+                        if (isPast) R.drawable.guide_cell_past_bg
+                        else R.drawable.guide_cell_bg
+                    )
+                }
                 layoutParams = LinearLayout.LayoutParams(
                     (pxPerMinute * layout.widthMinutes).toInt() - cellMargin * 2,
                     cellHeight
@@ -1115,7 +1152,7 @@ class GuideActivity : FragmentActivity() {
                 // is dark for contrast; past cells are muted grey, except
                 // catch-up ones, which are brighter — they can be played.
                 setTextColor(programmeTitleColor(isNow, isPast, isCatchup))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledSp(15f))
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -1131,7 +1168,7 @@ class GuideActivity : FragmentActivity() {
                     // Focused cell turns white with dark text; its
                     // channel name turns accent (4.6.0 palette).
                     titleView.setTextColor(0xFF121218.toInt())
-                    nameView.setTextColor(0xFF86C739.toInt())
+                    nameView.setTextColor(accentColor)
                     showDetails(row.channel, programme)
                     // 7.0.0 (Nova): guide memory — remember where the
                     // user is browsing, so reopening the guide (from
@@ -1148,7 +1185,7 @@ class GuideActivity : FragmentActivity() {
                     titleView.setTextColor(programmeTitleColor(isNow, isPast, isCatchup))
                     // The current channel stays accent; the rest go white.
                     nameView.setTextColor(
-                        if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                        if (isCurrentChannel) accentColor else 0xFFFFFFFF.toInt()
                     )
                 }
                 // 5.0.0 — neat animations: the focused cell pops
@@ -1482,6 +1519,32 @@ class GuideActivity : FragmentActivity() {
      * The context menu (long-press OK on a programme), TiviMate style:
      * a rounded panel with search, settings, and programme/channel actions.
      */
+    /** 9.0.0 (Nova): repaint the guide menu's accent pieces
+     * with the chosen accent. The headings and the Clear-recent
+     * label are found by id; the rows' focused backgrounds are
+     * recognised by their shared drawable state (every row in
+     * the layout uses guide_menu_item_bg) and swapped for the
+     * AccentDrawables version. Anything else — the search
+     * field, the panel — keeps its layout look. */
+    private fun applyAccentToMenu(root: View) {
+        for (id in intArrayOf(
+            R.id.menu_clear_recent, R.id.menu_programme_title, R.id.menu_channel_name
+        )) {
+            root.findViewById<TextView>(id)?.setTextColor(accentColor)
+        }
+        val reference = getDrawable(R.drawable.guide_menu_item_bg)?.constantState
+            ?: return
+        fun walk(view: View) {
+            if (view.background?.constantState == reference) {
+                view.background = AccentDrawables.menuItemBackground(this)
+            }
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) walk(view.getChildAt(i))
+            }
+        }
+        walk(root)
+    }
+
     private fun showContextMenu(channel: Channel, programme: EpgParser.Programme) {
         val dialog = Dialog(this)
         dialog.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -1498,6 +1561,10 @@ class GuideActivity : FragmentActivity() {
         dialog.window?.setWindowAnimations(R.style.GuideMenuAnimation)
         val view = layoutInflater.inflate(R.layout.dialog_guide_menu, null)
         dialog.setContentView(view)
+        // 9.0.0 (Nova): the menu's accent pieces (the programme /
+        // channel headings, Clear recent, and every row's focused
+        // background) follow the chosen accent.
+        applyAccentToMenu(view)
         // 6.0.0-rc1: the menu content is 480dp wide — wider than a
         // phone screen. On mobile it spans the full width instead.
         dialog.window?.setLayout(
@@ -1963,7 +2030,9 @@ class GuideActivity : FragmentActivity() {
                 setTextColor(0xFFFFFFFF.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
                 setPadding(px16, px12, px16, px12)
-                setBackgroundResource(R.drawable.guide_menu_item_bg)
+                // 9.0.0 (Nova): built in code, so the focused
+                // accent comes straight from AccentDrawables.
+                background = AccentDrawables.menuItemBackground(this@GuideActivity)
                 isFocusable = true
                 isFocusableInTouchMode = true
                 maxLines = 1

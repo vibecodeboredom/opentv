@@ -26,6 +26,8 @@ object AppSettings {
     private const val KEY_GUIDE_ZOOM_HOURS = "guide_zoom_hours"
     private const val KEY_IDLE_SAVER = "idle_saver"
     private const val KEY_SURF_INTERVAL = "surf_interval_seconds"
+    private const val KEY_ACCENT_COLOR = "accent_color"
+    private const val KEY_GUIDE_TEXT_SIZE = "guide_text_size"
 
     /** 7.3.0 (Nova): stream quality modes for the playback
      * track selector. AUTO is the player's default adaptive
@@ -212,6 +214,84 @@ object AppSettings {
             )
             .apply()
     }
+
+    /** 9.0.0 (Nova): the accent colour choice. The app's accent
+     * used to be a single hard-coded green (#86C739) repeated
+     * across layouts, drawables and code; it now lives here, in
+     * one place, and every accent-driven surface reads it through
+     * [accentColor] / [accentColorDark]. GREEN is that original
+     * colour and stays the default, so an untouched install looks
+     * exactly as it always did; AMBER matches the Nova banner's
+     * star, VIOLET and TEAL are the alternates. (The banner and
+     * app icon are artwork, not accent surfaces — they never
+     * change.) */
+    const val ACCENT_GREEN = 0
+    const val ACCENT_AMBER = 1
+    const val ACCENT_VIOLET = 2
+    const val ACCENT_TEAL = 3
+
+    fun accentChoice(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_ACCENT_COLOR, ACCENT_GREEN)
+        return if (stored in ACCENT_GREEN..ACCENT_TEAL) stored else ACCENT_GREEN
+    }
+
+    fun setAccentChoice(context: Context, choice: Int) {
+        prefs(context).edit()
+            .putInt(
+                KEY_ACCENT_COLOR,
+                if (choice in ACCENT_GREEN..ACCENT_TEAL) choice else ACCENT_GREEN
+            )
+            .apply()
+    }
+
+    /** The accent colour itself (ARGB), for text, fills and
+     * progress bars. Read at view-build time: a new choice
+     * applies the next time a screen is built (the guide and
+     * playback rebuild on open; Settings repaints its own accent
+     * label immediately). */
+    fun accentColor(context: Context): Int = when (accentChoice(context)) {
+        ACCENT_AMBER -> 0xFFFFB020.toInt()
+        ACCENT_VIOLET -> 0xFF9B6BFF.toInt()
+        ACCENT_TEAL -> 0xFF2EC4B6.toInt()
+        else -> 0xFF86C739.toInt()
+    }
+
+    /** The accent's darker pressed-state shade (the guide's
+     * "now" cell uses it for touch feedback). */
+    fun accentColorDark(context: Context): Int = when (accentChoice(context)) {
+        ACCENT_AMBER -> 0xFFE09A10.toInt()
+        ACCENT_VIOLET -> 0xFF8457E8.toInt()
+        ACCENT_TEAL -> 0xFF25A99B.toInt()
+        else -> 0xFF79B636.toInt()
+    }
+
+    /** 9.0.0 (Nova): guide text size — Standard (the sizes the
+     * guide has always used) or Large, which scales the guide's
+     * programme text, details header and channel column up by
+     * 20% for couch readability. Independent of the guide zoom
+     * (8.1.1), which scales the grid's time axis, not its text.
+     * GuideActivity reads the scale once when it opens, so the
+     * choice applies the next time the guide opens. */
+    const val GUIDE_TEXT_STANDARD = 0
+    const val GUIDE_TEXT_LARGE = 1
+
+    fun guideTextSize(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_GUIDE_TEXT_SIZE, GUIDE_TEXT_STANDARD)
+        return if (stored == GUIDE_TEXT_LARGE) GUIDE_TEXT_LARGE else GUIDE_TEXT_STANDARD
+    }
+
+    fun setGuideTextSize(context: Context, size: Int) {
+        prefs(context).edit()
+            .putInt(
+                KEY_GUIDE_TEXT_SIZE,
+                if (size == GUIDE_TEXT_LARGE) GUIDE_TEXT_LARGE else GUIDE_TEXT_STANDARD
+            )
+            .apply()
+    }
+
+    /** Multiplier for guide text sizes (1.0 Standard, 1.2 Large). */
+    fun guideTextScale(context: Context): Float =
+        if (guideTextSize(context) == GUIDE_TEXT_LARGE) 1.2f else 1.0f
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */
     fun channelListSize(context: Context): ChannelListSize {

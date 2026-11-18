@@ -33,6 +33,10 @@ class RecordingsFragment : BrowseSupportFragment() {
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
             when (item) {
                 is Recording -> showRecordingOptions(item)
+                // 9.0.0 (Nova): a Continue watching card is its
+                // recording, for options purposes — Play resumes
+                // it (PlaybackActivity owns the resume itself).
+                is ContinueWatchingEntry -> showRecordingOptions(item.recording)
                 is PlaylistRepository.ScheduledRecording ->
                     showScheduledRecordingOptions(item)
             }
@@ -75,6 +79,25 @@ class RecordingsFragment : BrowseSupportFragment() {
             scheduled.forEach { scheduledAdapter.add(it) }
             rowsAdapter.add(
                 ListRow(HeaderItem(getString(R.string.scheduled_recordings)), scheduledAdapter)
+            )
+        }
+        // 9.0.0 (Nova): Continue watching — recordings whose
+        // last viewing stopped inside the resume window, most
+        // recently watched first (the store's own order).
+        // Joining from the progress side means a deleted
+        // recording's leftover entry simply finds no recording
+        // and drops out of the row on its own.
+        val byId = recordings.associateBy { it.id }
+        val continueEntries = PlaylistRepository.recordingProgress(requireContext())
+            .filter { it.isResumable() }
+            .mapNotNull { progress ->
+                byId[progress.recordingId]?.let { ContinueWatchingEntry(it, progress) }
+            }
+        if (continueEntries.isNotEmpty()) {
+            val continueAdapter = ArrayObjectAdapter(ContinueWatchingPresenter())
+            continueEntries.forEach { continueAdapter.add(it) }
+            rowsAdapter.add(
+                ListRow(HeaderItem(getString(R.string.continue_watching)), continueAdapter)
             )
         }
         if (recordings.isEmpty()) {
@@ -189,6 +212,10 @@ class RecordingsFragment : BrowseSupportFragment() {
 
     private fun deleteRecording(recording: Recording) {
         RecordingManager.deleteRecording(requireContext(), recording.id)
+        // 9.0.0 (Nova): a deleted recording's resume point goes
+        // with it — the Continue watching row must never point
+        // at a recording that no longer exists.
+        PlaylistRepository.clearRecordingProgress(requireContext(), recording.id)
         Toast.makeText(requireContext(), R.string.recording_deleted, Toast.LENGTH_SHORT).show()
         loadRecordings()
     }

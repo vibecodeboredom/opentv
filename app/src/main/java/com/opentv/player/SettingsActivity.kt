@@ -131,6 +131,55 @@ class SettingsActivity : FragmentActivity() {
                 )
             }
         }
+        // 9.0.0 (Nova): the accent colour choice, same pattern
+        // as the list size above. Changing it repaints the one
+        // accent surface on this screen (the active playlist
+        // label, via buildPlaylistsUi); every other screen
+        // reads the choice when it next builds.
+        findViewById<RadioGroup>(R.id.pref_accent_color).apply {
+            check(
+                when (AppSettings.accentChoice(this@SettingsActivity)) {
+                    AppSettings.ACCENT_AMBER -> R.id.pref_accent_amber
+                    AppSettings.ACCENT_VIOLET -> R.id.pref_accent_violet
+                    AppSettings.ACCENT_TEAL -> R.id.pref_accent_teal
+                    else -> R.id.pref_accent_green
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setAccentChoice(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_accent_amber -> AppSettings.ACCENT_AMBER
+                        R.id.pref_accent_violet -> AppSettings.ACCENT_VIOLET
+                        R.id.pref_accent_teal -> AppSettings.ACCENT_TEAL
+                        else -> AppSettings.ACCENT_GREEN
+                    }
+                )
+                buildPlaylistsUi()
+            }
+        }
+        // 9.0.0 (Nova): guide text size (Standard / Large).
+        findViewById<RadioGroup>(R.id.pref_guide_text).apply {
+            check(
+                if (AppSettings.guideTextSize(this@SettingsActivity) ==
+                    AppSettings.GUIDE_TEXT_LARGE
+                ) {
+                    R.id.pref_text_large
+                } else {
+                    R.id.pref_text_standard
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setGuideTextSize(
+                    this@SettingsActivity,
+                    if (checkedId == R.id.pref_text_large) {
+                        AppSettings.GUIDE_TEXT_LARGE
+                    } else {
+                        AppSettings.GUIDE_TEXT_STANDARD
+                    }
+                )
+            }
+        }
 
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)
@@ -239,7 +288,9 @@ class SettingsActivity : FragmentActivity() {
             if (isActive) {
                 val activeView = TextView(this).apply {
                     text = getString(R.string.playlist_active)
-                    setTextColor(0xFF86C739.toInt())
+                    // 9.0.0 (Nova): the chosen accent (this was the
+                    // old hard-coded green).
+                    setTextColor(AppSettings.accentColor(this@SettingsActivity))
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                     typeface = Typeface.DEFAULT_BOLD
                     setPadding(dp(8), 0, 0, 0)

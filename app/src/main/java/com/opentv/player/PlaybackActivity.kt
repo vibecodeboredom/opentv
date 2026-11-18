@@ -421,6 +421,9 @@ class PlaybackActivity : FragmentActivity() {
         infoNowMeta = findViewById(R.id.info_now_meta)
         infoNext = findViewById(R.id.info_next)
         infoProgress = findViewById(R.id.info_progress)
+        // 9.0.0 (Nova): the info overlay's programme progress
+        // bar takes the chosen accent (see AccentDrawables).
+        infoProgress.progressDrawable = AccentDrawables.progressDrawable(this)
         infoStrip = findViewById(R.id.info_strip)
         transportBar = findViewById(R.id.transport_bar)
         transportTitle = findViewById(R.id.transport_title)
@@ -775,11 +778,43 @@ class PlaybackActivity : FragmentActivity() {
             .setSubtitle(subtitle)
             .build()
         player.setMediaItem(MediaItem.Builder().setUri(uri).setMediaMetadata(metadata).build())
+        // 9.0.0 (Nova): recording resume — if the last viewing
+        // of this recording stopped inside the resume window
+        // (see PlaylistRepository.RecordingProgress), start
+        // there instead of at the beginning. The seek lands
+        // before prepare, so playback opens on the resumed
+        // frame directly; the toast names the position.
+        val resumeId = recordingId
+        if (resumeId != null) {
+            val saved = PlaylistRepository.recordingProgressFor(this, resumeId)
+            if (saved != null && saved.isResumable()) {
+                player.seekTo(saved.positionMs)
+                Toast.makeText(
+                    this,
+                    getString(
+                        R.string.recording_resumed_from,
+                        GuideData.formatElapsedClock(saved.positionMs)
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
         player.prepare()
         player.play()
         sessionStartMillis = System.currentTimeMillis()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                // 9.0.0 (Nova): a recording played to the end is
+                // finished — retire its resume point, so the
+                // Continue watching row drops it and a later play
+                // starts from the beginning.
+                if (playbackState == Player.STATE_ENDED) {
+                    recordingId?.let {
+                        PlaylistRepository.clearRecordingProgress(
+                            this@PlaybackActivity, it
+                        )
+                    }
+                }
                 // 7.3.0 (Nova): auto-reconnect bookkeeping. READY
                 // means the stream is healthy again — clear the
                 // attempts and the indicator. BUFFERING on a live
@@ -3023,6 +3058,29 @@ class PlaybackActivity : FragmentActivity() {
         hideSidebar()
         // Log the watch session (local only, never shared).
         logWatchSession()
+        // 9.0.0 (Nova): remember where a recording's playback
+        // stopped, so the next play resumes there and the
+        // recordings screen lists it under Continue watching.
+        // Only an in-window position is kept (see
+        // RecordingProgress.isResumable) — barely started or
+        // effectively finished clears any older entry instead,
+        // so the saved state always matches what a resume
+        // would do. Read before release: a released player
+        // reports no position.
+        val endingRecId = recordingId
+        val endingPlayer = player
+        if (endingRecId != null && endingPlayer != null) {
+            val pos = endingPlayer.currentPosition
+            val dur = endingPlayer.duration
+            if (dur > 0 &&
+                pos > PlaylistRepository.RecordingProgress.RESUME_MIN_POSITION_MS &&
+                pos * 100 < dur * PlaylistRepository.RecordingProgress.RESUME_MAX_PERCENT
+            ) {
+                PlaylistRepository.setRecordingProgress(this, endingRecId, pos, dur)
+            } else {
+                PlaylistRepository.clearRecordingProgress(this, endingRecId)
+            }
+        }
         player?.release()
         player = null
     }

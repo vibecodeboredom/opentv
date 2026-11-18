@@ -78,6 +78,13 @@ object PlaylistRepository {
     /** 8.2.0 (Nova): scheduled recordings, same one-per-line
      * storage as the reminders above. */
     private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"
+
+    /** 9.0.0 (Nova): recording playback progress, same
+     * one-per-line storage as the reminders: recording id,
+     * position millis, duration millis, last-watched millis.
+     * Keyed by the recording's DownloadManager id — the stable
+     * identity a recording keeps for its whole life. */
+    private const val KEY_RECORDING_PROGRESS = "recording_progress"
     /** How many recent channels are remembered. The overlay strip
      * shows the first 3; 7.0.0 (Nova) keeps 12 so the home screen's
      * Recently watched row and the sidebar History group have a
@@ -687,6 +694,100 @@ object PlaylistRepository {
             it.channelId == channelId && it.startMillis == startMillis
         }
         if (kept.size != current.size) saveReminders(context, kept)
+    }
+
+    /** 9.0.0 (Nova): where a recording's playback got to.
+     * Written by PlaybackActivity when recording playback stops;
+     * read back on the next play (resume) and by the recordings
+     * screen's Continue watching row. */
+    data class RecordingProgress(
+        val recordingId: String,
+        val positionMs: Long,
+        val durationMs: Long,
+        val updatedAtMillis: Long
+    ) {
+        /** Inside the resume window: far enough in to be worth
+         * resuming (> 30s), not so far that it's effectively
+         * finished (< 95% through). Integer maths only — a
+         * position/duration pair never needs floats. */
+        fun isResumable(): Boolean =
+            durationMs > 0L && positionMs > RESUME_MIN_POSITION_MS &&
+                positionMs * 100 < durationMs * RESUME_MAX_PERCENT
+
+        companion object {
+            const val RESUME_MIN_POSITION_MS = 30_000L
+            const val RESUME_MAX_PERCENT = 95L
+        }
+    }
+
+    private fun saveRecordingProgress(
+        context: Context,
+        entries: List<RecordingProgress>
+    ) {
+        val raw = entries.joinToString("\n") { e ->
+            listOf(
+                reminderField(e.recordingId),
+                e.positionMs.toString(),
+                e.durationMs.toString(),
+                e.updatedAtMillis.toString()
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_RECORDING_PROGRESS, raw).apply()
+    }
+
+    /** 9.0.0 (Nova): all stored recording progress, most
+     * recently watched first. Malformed lines are dropped, as
+     * with the reminders — one corrupt entry costs one resume
+     * point, never the whole store. Entries are NOT pruned
+     * against the recordings list here (this store doesn't know
+     * it); PlaybackActivity clears an entry when its recording
+     * finishes, and the recordings screen clears one when its
+     * recording is deleted. */
+    fun recordingProgress(context: Context): List<RecordingProgress> {
+        val raw = prefs(context).getString(KEY_RECORDING_PROGRESS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 4) return@mapNotNull null
+            val position = fields[1].toLongOrNull() ?: return@mapNotNull null
+            val duration = fields[2].toLongOrNull() ?: return@mapNotNull null
+            val updated = fields[3].toLongOrNull() ?: return@mapNotNull null
+            RecordingProgress(fields[0], position, duration, updated)
+        }.sortedByDescending { it.updatedAtMillis }
+    }
+
+    /** 9.0.0 (Nova): the stored progress for one recording, if
+     * any (resumable or not — callers decide via [isResumable]). */
+    fun recordingProgressFor(
+        context: Context,
+        recordingId: String
+    ): RecordingProgress? =
+        recordingProgress(context).firstOrNull { it.recordingId == recordingId }
+
+    /** 9.0.0 (Nova): remember where a recording's playback
+     * stopped. Replaces any older entry for the same recording. */
+    fun setRecordingProgress(
+        context: Context,
+        recordingId: String,
+        positionMs: Long,
+        durationMs: Long
+    ) {
+        val kept = recordingProgress(context)
+            .filterNot { it.recordingId == recordingId }
+        saveRecordingProgress(
+            context,
+            kept + RecordingProgress(
+                recordingId, positionMs, durationMs, System.currentTimeMillis()
+            )
+        )
+    }
+
+    /** 9.0.0 (Nova): forget a recording's progress (it finished,
+     * or it was deleted). */
+    fun clearRecordingProgress(context: Context, recordingId: String) {
+        val current = recordingProgress(context)
+        val kept = current.filterNot { it.recordingId == recordingId }
+        if (kept.size != current.size) saveRecordingProgress(context, kept)
     }
 
     /** 8.2.0 (Nova): one scheduled recording. Like [Reminder], the

@@ -149,7 +149,9 @@ class OnNowPresenter : Presenter() {
             parent.context, null, android.R.attr.progressBarStyleHorizontal
         ).apply {
             max = PROGRESS_MAX
-            progressTintList = ColorStateList.valueOf(PROGRESS_COLOR)
+            progressTintList = ColorStateList.valueOf(
+                AppSettings.accentColor(cardView.context)
+            )
             progressBackgroundTintList = ColorStateList.valueOf(TRACK_COLOR)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -203,10 +205,86 @@ class OnNowPresenter : Presenter() {
         private const val CARD_WIDTH = 320
         private const val CARD_HEIGHT = 180
 
-        /** 8.2.1 (Nova): progress bar resolution + palette — the
-         * guide green on a faint white track. */
+        /** 8.2.1 (Nova): progress bar resolution + track. The
+         * fill colour is the chosen accent (9.0.0, AppSettings),
+         * read when the card is created. */
         private const val PROGRESS_MAX = 1000
-        private const val PROGRESS_COLOR = 0xFF86C739.toInt()
+        private const val TRACK_COLOR = 0x33FFFFFF
+    }
+}
+
+/**
+ * 9.0.0 (Nova): card for the recordings screen's "Continue
+ * watching" row — the recording's channel on top, and underneath
+ * where the last viewing stopped ("12:34 of 45:10"), with the
+ * same slim accent progress bar the On Now cards use. The card
+ * image is the generic play drawable: recordings have no artwork
+ * of their own (same as RecordingPresenter).
+ */
+class ContinueWatchingPresenter : Presenter() {
+
+    override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
+        val cardView = ImageCardView(parent.context)
+        cardView.isFocusable = true
+        cardView.isFocusableInTouchMode = true
+        cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
+        cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        val density = parent.context.resources.displayMetrics.density
+        val bar = ProgressBar(
+            parent.context, null, android.R.attr.progressBarStyleHorizontal
+        ).apply {
+            max = PROGRESS_MAX
+            progressTintList = ColorStateList.valueOf(
+                AppSettings.accentColor(cardView.context)
+            )
+            progressBackgroundTintList = ColorStateList.valueOf(TRACK_COLOR)
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (3 * density).toInt().coerceAtLeast(2)
+            ).apply {
+                gravity = Gravity.BOTTOM
+                leftMargin = (12 * density).toInt()
+                rightMargin = (12 * density).toInt()
+                bottomMargin = (6 * density).toInt()
+            }
+        }
+        cardView.addView(bar)
+        cardView.tag = bar
+        return ViewHolder(cardView)
+    }
+
+    override fun onBindViewHolder(viewHolder: ViewHolder, item: Any) {
+        val entry = item as ContinueWatchingEntry
+        val cardView = viewHolder.view as ImageCardView
+        cardView.titleText = entry.recording.channelName
+        cardView.contentText = cardView.context.getString(
+            R.string.continue_watching_position,
+            GuideData.formatElapsedClock(entry.progress.positionMs),
+            GuideData.formatElapsedClock(entry.progress.durationMs)
+        )
+        val bar = cardView.tag as? ProgressBar
+        bar?.progress = if (entry.progress.durationMs > 0) {
+            (entry.progress.positionMs.coerceIn(0, entry.progress.durationMs) *
+                PROGRESS_MAX / entry.progress.durationMs).toInt()
+        } else {
+            0
+        }
+        cardView.mainImage = ContextCompat.getDrawable(
+            cardView.context,
+            android.R.drawable.ic_media_play
+        )
+    }
+
+    override fun onUnbindViewHolder(viewHolder: ViewHolder) {
+        val cardView = viewHolder.view as ImageCardView
+        cardView.mainImage = null
+        (cardView.tag as? ProgressBar)?.progress = 0
+    }
+
+    companion object {
+        private const val CARD_WIDTH = 320
+        private const val CARD_HEIGHT = 180
+        private const val PROGRESS_MAX = 1000
         private const val TRACK_COLOR = 0x33FFFFFF
     }
 }

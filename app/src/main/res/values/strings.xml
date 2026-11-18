@@ -261,6 +261,19 @@
     <string name="surf_interval_option">%1$ds</string>
     <string name="saver_up_next">Up next: %1$s at %2$s</string>
     <string name="on_now_remaining">%1$s left</string>
+    <!-- Nova 9.0.0: recording resume + Continue watching, accent
+         colour choice, guide comfort text size. -->
+    <string name="recording_resumed_from">Resumed from %1$s</string>
+    <string name="continue_watching">Continue watching</string>
+    <string name="continue_watching_position">%1$s of %2$s</string>
+    <string name="prefs_accent_title">Accent colour</string>
+    <string name="prefs_accent_green">Green</string>
+    <string name="prefs_accent_amber">Amber</string>
+    <string name="prefs_accent_violet">Violet</string>
+    <string name="prefs_accent_teal">Teal</string>
+    <string name="prefs_guide_text_size">Guide text size</string>
+    <string name="prefs_text_standard">Standard</string>
+    <string name="prefs_text_large">Large</string>
     <string name="menu_record_programme">Record this programme</string>
     <string name="menu_cancel_scheduled_recording">Cancel scheduled recording</string>
     <string name="scheduled_recording_set_toast">Recording scheduled — %1$s at %2$s. It starts automatically while OpenTV is running.</string>

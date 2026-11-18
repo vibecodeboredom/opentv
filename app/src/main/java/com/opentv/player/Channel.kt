@@ -49,3 +49,12 @@ data class WatchlistEntry(
     val channel: Channel,
     val onNow: Boolean
 )
+
+/** 9.0.0 (Nova): one card of the recordings screen's "Continue
+ * watching" row — a recording whose last viewing stopped inside
+ * the resume window, paired with its stored progress so the
+ * card can show how far through it got. */
+data class ContinueWatchingEntry(
+    val recording: Recording,
+    val progress: PlaylistRepository.RecordingProgress
+)

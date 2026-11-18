@@ -340,6 +340,22 @@ object GuideData {
     fun formatTimeRange(startMillis: Long, stopMillis: Long): String =
         "${formatClock(startMillis)} – ${formatClock(stopMillis)}"
 
+    /** 9.0.0 (Nova): format a playback position / duration as an
+     * elapsed clock — "12:34", or "1:02:34" once past an hour.
+     * Used by recording resume (the "Resumed from" toast and the
+     * Continue watching cards). */
+    fun formatElapsedClock(millis: Long): String {
+        val totalSeconds = (millis / 1000).coerceAtLeast(0)
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) {
+            "$hours:${twoDigits(minutes.toInt())}:${twoDigits(seconds.toInt())}"
+        } else {
+            "${minutes}:${twoDigits(seconds.toInt())}"
+        }
+    }
+
     /** Fraction of a programme already aired (0.0–1.0) for the progress bar. */
     fun progressFraction(
         programme: EpgParser.Programme,
