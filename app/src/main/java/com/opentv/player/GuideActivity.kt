@@ -459,6 +459,14 @@ class GuideActivity : FragmentActivity() {
                 updateEpgFreshness()
             }
         }
+        // 7.3.1: a failed logo refresh retries on the next guide
+        // open instead of waiting for the next app launch — the
+        // guide is where the logos are seen. Throttled inside
+        // LogoRefresh to once per 15 minutes, so the frequent
+        // resumes (every return from playback) stay cheap.
+        lifecycleScope.launch(Dispatchers.IO) {
+            LogoRefresh.retryStaleLogosIfDue(this@GuideActivity)
+        }
     }
 
     /**

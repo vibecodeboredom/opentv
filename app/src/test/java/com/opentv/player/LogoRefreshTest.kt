@@ -65,4 +65,39 @@ class LogoRefreshTest {
         val lastRefresh = mapOf("url1" to now)
         assertEquals(listOf("url2"), LogoRefresh.staleUrls(urls, lastRefresh, now))
     }
+
+    // 7.3.1: guide-open retry throttle.
+
+    @Test
+    fun retryDueWhenNeverAttempted() {
+        assertTrue(LogoRefresh.isRetryDue(null, now))
+    }
+
+    @Test
+    fun retryNotDueWhenAttemptWasRecent() {
+        assertFalse(LogoRefresh.isRetryDue(now, now))
+        assertFalse(LogoRefresh.isRetryDue(now - 60_000L, now))
+        assertFalse(LogoRefresh.isRetryDue(now - LogoRefresh.RETRY_INTERVAL_MILLIS + 1, now))
+    }
+
+    @Test
+    fun retryDueOnceIntervalHasPassed() {
+        assertTrue(LogoRefresh.isRetryDue(now - LogoRefresh.RETRY_INTERVAL_MILLIS, now))
+        assertTrue(LogoRefresh.isRetryDue(now - 60L * 60 * 1000, now))
+    }
+
+    @Test
+    fun retryNotDueWhenAttemptIsInTheFuture() {
+        assertFalse(LogoRefresh.isRetryDue(now + 60_000L, now))
+    }
+
+    @Test
+    fun retryDueForVeryOldTimestamp() {
+        assertTrue(LogoRefresh.isRetryDue(0L, Long.MAX_VALUE))
+    }
+
+    @Test
+    fun retryIntervalIsFifteenMinutes() {
+        assertEquals(15L * 60 * 1000, LogoRefresh.RETRY_INTERVAL_MILLIS)
+    }
 }

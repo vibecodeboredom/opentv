@@ -27,6 +27,34 @@ object LogoRefresh {
      * next launches. */
     const val MAX_REFRESH_PER_RUN = 25
 
+    /** 7.3.1: a failed refresh retries on the next guide open, but
+     * at most this often — the guide opens constantly (every return
+     * from playback), and an unthrottled retry would re-fire the
+     * whole batch on every open. */
+    const val RETRY_INTERVAL_MILLIS = 15L * 60 * 1000
+
+    private const val LAST_ATTEMPT_KEY = "last_attempt"
+
+    /** 7.3.1: true when a retry is due — never attempted, or the
+     * last attempt was at least the retry interval ago. A future
+     * timestamp (the clock moved) is not due. */
+    fun isRetryDue(lastAttemptMillis: Long?, nowMillis: Long): Boolean {
+        if (lastAttemptMillis == null) return true
+        if (lastAttemptMillis > nowMillis) return false
+        return nowMillis - lastAttemptMillis >= RETRY_INTERVAL_MILLIS
+    }
+
+    /** 7.3.1: retry the stale-logo refresh when one is due. Failed
+     * fetches from the app-start run are still unstamped, so they
+     * are picked up again here, along with any backlog past the
+     * per-run cap. A no-op when the last attempt was recent. */
+    suspend fun retryStaleLogosIfDue(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val lastAttempt = prefs.getLong(LAST_ATTEMPT_KEY, -1L).takeIf { it >= 0 }
+        if (!isRetryDue(lastAttempt, System.currentTimeMillis())) return
+        refreshStaleLogos(context)
+    }
+
     private const val PREFS_NAME = "logo_refresh"
 
     /** True when a logo last refreshed at [lastRefreshMillis] is due
@@ -63,6 +91,10 @@ object LogoRefresh {
                 prefs.getLong(url, -1L).takeIf { it >= 0 }?.let { url to it }
             }.toMap()
             val now = System.currentTimeMillis()
+            // 7.3.1: stamp the attempt, so a guide-open retry knows
+            // how long ago this run happened — a failed fetch is
+            // still unstamped above, and retries when due.
+            prefs.edit().putLong(LAST_ATTEMPT_KEY, now).apply()
             val stale = staleUrls(urls, lastRefresh, now).take(MAX_REFRESH_PER_RUN)
             for (url in stale) {
                 try {

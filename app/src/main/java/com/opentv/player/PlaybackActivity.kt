@@ -387,6 +387,18 @@ class PlaybackActivity : FragmentActivity() {
             return
         }
         channel = ch
+        // 7.3.1: per-channel persistence — a stored choice for this
+        // channel wins over the carried session choice; a channel
+        // with nothing stored keeps the carried choice (or Auto /
+        // Off when there is none).
+        ch?.id?.let { id ->
+            val stored = TrackPrefs.load(this, id)
+            if (stored.audioSet) selectedAudioLanguage = stored.audioLanguage
+            if (stored.subtitleSet) {
+                subtitlesOff = stored.subtitleLanguage == null
+                selectedSubtitleLanguage = stored.subtitleLanguage
+            }
+        }
 
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
 
@@ -596,6 +608,21 @@ class PlaybackActivity : FragmentActivity() {
         }
         this.player = player
         playerView.player = player
+        // 7.3.1: seed the chosen languages at player build, so the
+        // selector picks them from the first frame. Before, the
+        // choice only landed after the tracks loaded and
+        // onTracksChanged fired — the wrong audio could play and
+        // captions could lag or flash the wrong language first.
+        // reapplyTrackSelections still pins the exact track once
+        // the groups are known; this is the early preference.
+        val seedParams = player.trackSelectionParameters.buildUpon()
+        selectedAudioLanguage?.let { seedParams.setPreferredAudioLanguage(it) }
+        if (subtitlesOff) {
+            seedParams.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        } else {
+            selectedSubtitleLanguage?.let { seedParams.setPreferredTextLanguage(it) }
+        }
+        player.trackSelectionParameters = seedParams.build()
         everPlayed = false
         autoRetrying = false
         val metadata = MediaMetadata.Builder()
@@ -1884,6 +1911,9 @@ class PlaybackActivity : FragmentActivity() {
             .setItems(labels.toTypedArray()) { _, which ->
                 val choice = if (which == 0) null else choices[which - 1]
                 applyAudioChoice(choice)
+                // 7.3.1: remember the pick for this channel, so
+                // returning to it restores the language.
+                channel?.id?.let { TrackPrefs.saveAudio(this, it, choice?.language) }
                 Toast.makeText(
                     this,
                     getString(
@@ -1908,6 +1938,11 @@ class PlaybackActivity : FragmentActivity() {
             .setItems(labels.toTypedArray()) { _, which ->
                 val choice = if (which == 0) null else choices[which - 1]
                 applySubtitleChoice(choice)
+                // 7.3.1: remember the pick for this channel, so
+                // returning to it restores the captions (or Off).
+                channel?.id?.let {
+                    TrackPrefs.saveSubtitle(this, it, choice?.language, choice == null)
+                }
                 Toast.makeText(
                     this,
                     getString(
