@@ -900,6 +900,17 @@ class GuideActivity : FragmentActivity() {
             detailProgress.visibility = View.INVISIBLE
             detailRemaining.text = catchupEnds
             detailRemaining.visibility = View.VISIBLE
+        } else if (programme.startMillis > nowMillis) {
+            // 9.3.1 (Nova): a future programme says when it
+            // starts, in the same slot — the watchlist cards'
+            // countdown wording (9.3.0), with the "Starts"
+            // spelled out for the header.
+            detailProgress.visibility = View.INVISIBLE
+            detailRemaining.text = getString(
+                R.string.guide_starts_in,
+                GuideData.formatCountdown(programme.startMillis - nowMillis)
+            )
+            detailRemaining.visibility = View.VISIBLE
         } else {
             detailProgress.visibility = View.INVISIBLE
             detailRemaining.visibility = View.INVISIBLE
@@ -2385,6 +2396,11 @@ class GuideActivity : FragmentActivity() {
      * thread. Tapping a hit jumps the grid to it
      * (jumpToProgramme). The dialog mirrors the reminders
      * list's shape — same label format, same empty state.
+     * 9.3.1 (Nova): descriptions match too (9.3.0 data) — a
+     * hit found only in the description carries a snippet of
+     * it as a third label line, so it reads differently from
+     * a title hit. The hit's third element is that snippet,
+     * null for a title hit.
      */
     private fun showKeywordHits() {
         val keywords = AppSettings.guideKeywordSetLower(this)
@@ -2405,7 +2421,8 @@ class GuideActivity : FragmentActivity() {
                 set(Calendar.MILLISECOND, 0)
             }.timeInMillis
             val hits = withContext(Dispatchers.Default) {
-                val found = mutableListOf<Pair<Channel, EpgParser.Programme>>()
+                val found =
+                    mutableListOf<Triple<Channel, EpgParser.Programme, String?>>()
                 for (channel in channels) {
                     if (channel.id in hidden) continue
                     val programmes = GuideData.programmesForChannel(
@@ -2417,7 +2434,21 @@ class GuideActivity : FragmentActivity() {
                         if (programme.title == GuideData.NO_INFORMATION) continue
                         val lower = programme.title.lowercase()
                         if (keywords.any { lower.contains(it) }) {
-                            found += channel to programme
+                            found += Triple(channel, programme, null)
+                        } else if (programme.desc.isNotEmpty()) {
+                            // 9.3.1 (Nova): description-only hit —
+                            // remember the keyword that matched so
+                            // the label can quote the snippet.
+                            val descLower = programme.desc.lowercase()
+                            val hit = keywords.firstOrNull {
+                                descLower.contains(it)
+                            }
+                            if (hit != null) {
+                                found += Triple(
+                                    channel, programme,
+                                    GuideData.descSnippet(programme.desc, hit)
+                                )
+                            }
                         }
                     }
                 }
@@ -2432,10 +2463,13 @@ class GuideActivity : FragmentActivity() {
                     .show()
                 return@launch
             }
-            val labels = hits.map { (channel, programme) ->
-                "${programme.title}\n${channel.name} • " +
+            val labels = hits.map { (channel, programme, snippet) ->
+                val base = "${programme.title}\n${channel.name} • " +
                     "${GuideData.formatDate(programme.startMillis)}, " +
                     GuideData.formatClock(programme.startMillis)
+                // 9.3.1 (Nova): a description-only hit quotes the
+                // snippet it matched, as a third line.
+                if (snippet != null) base + "\n\"$snippet\"" else base
             }.toTypedArray()
             AlertDialog.Builder(this@GuideActivity)
                 .setTitle(R.string.keyword_hits_title)

@@ -380,6 +380,20 @@
                 android:textSize="11sp"
                 android:textColor="#B3FFFFFF" />
 
+            <!-- 9.3.1 (Nova): the current programme's description
+                 (9.3.0 EPG data), in the overlay's secondary style.
+                 Gone unless the guide carries one. -->
+            <TextView
+                android:id="@+id/info_now_desc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:textSize="11sp"
+                android:textColor="#B3FFFFFF"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/info_next"
                 android:layout_width="wrap_content"

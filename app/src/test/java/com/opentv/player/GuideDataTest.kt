@@ -325,4 +325,41 @@ class GuideDataTest {
         assertEquals("1d", GuideData.formatCountdown(24 * 60 * minute))
         assertEquals("3d 4h", GuideData.formatCountdown((3 * 24 + 4) * 60 * minute))
     }
+
+    @Test
+    fun descSnippetWindowsAroundKeyword() {
+        // 9.3.1: the snippet keeps a little lead-in before the
+        // keyword and more of what follows it; "…" marks cuts.
+        val desc = "A look back at the 1969 moon landing, restored " +
+            "with footage from the original mission reels."
+        val snippet = GuideData.descSnippet(desc, "moon landing")
+        assertTrue(snippet.startsWith("…"))
+        assertTrue(snippet.contains("moon landing"))
+        assertTrue(snippet.endsWith("…"))
+    }
+
+    @Test
+    fun descSnippetAtStartHasNoLeadEllipsis() {
+        val snippet = GuideData.descSnippet(
+            "Moon landing special: the full story of Apollo 11.",
+            "moon landing"
+        )
+        assertEquals(
+            "Moon landing special: the full story of Apollo 11.",
+            snippet
+        )
+    }
+
+    @Test
+    fun descSnippetCollapsesWhitespaceAndFallsBackToHead() {
+        assertEquals(
+            "Line one. Line two.",
+            GuideData.descSnippet("Line one.\n  Line two.", "line two")
+        )
+        // Keyword absent (callers check first): the head comes back.
+        assertEquals(
+            "Nothing relevant here.",
+            GuideData.descSnippet("Nothing relevant here.", "zzz")
+        )
+    }
 }

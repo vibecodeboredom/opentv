@@ -169,6 +169,7 @@ class PlaybackActivity : FragmentActivity() {
     private lateinit var infoChannelName: TextView
     private lateinit var infoNowTitle: TextView
     private lateinit var infoNowMeta: TextView
+    private lateinit var infoNowDesc: TextView
     private lateinit var infoNext: TextView
     private lateinit var infoProgress: ProgressBar
     private lateinit var infoStrip: LinearLayout
@@ -419,6 +420,7 @@ class PlaybackActivity : FragmentActivity() {
         infoChannelName = findViewById(R.id.info_channel_name)
         infoNowTitle = findViewById(R.id.info_now_title)
         infoNowMeta = findViewById(R.id.info_now_meta)
+        infoNowDesc = findViewById(R.id.info_now_desc)
         infoNext = findViewById(R.id.info_next)
         infoProgress = findViewById(R.id.info_progress)
         // 9.0.0 (Nova): the info overlay's programme progress
@@ -1600,6 +1602,17 @@ class PlaybackActivity : FragmentActivity() {
                 "${timeFormat.format(nowP.stopMillis)}  •  $mins min  •  $num$name" +
                 if (catchupUrl != null) "  •  ⏪ ${getString(R.string.catchup_label)}" else ""
             infoNowMeta.visibility = View.VISIBLE
+            // 9.3.1 (Nova): the current programme's description,
+            // when the guide carries one (9.3.0 data) — same
+            // treatment as the guide's details header: shown
+            // verbatim, hidden when empty so the overlay keeps
+            // its old shape.
+            if (nowP.desc.isNotEmpty()) {
+                infoNowDesc.text = nowP.desc
+                infoNowDesc.visibility = View.VISIBLE
+            } else {
+                infoNowDesc.visibility = View.GONE
+            }
             val span = (nowP.stopMillis - nowP.startMillis).coerceAtLeast(1L)
             infoProgress.progress = ((now - nowP.startMillis) * 100 / span).toInt().coerceIn(0, 100)
             infoProgress.visibility = if (catchupUrl != null) View.GONE else View.VISIBLE
@@ -1607,6 +1620,7 @@ class PlaybackActivity : FragmentActivity() {
             infoNowTitle.text = getString(R.string.overlay_no_info)
             infoNowMeta.text = ""
             infoNowMeta.visibility = View.GONE
+            infoNowDesc.visibility = View.GONE
             infoProgress.progress = 0
         }
         val nextP = nextProgramme

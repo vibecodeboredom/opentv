@@ -376,4 +376,6 @@
     <string name="pin_mismatch">The PINs don\'t match — nothing was set</string>
     <string name="pin_set_toast">Settings PIN set</string>
     <string name="pin_removed">Settings PIN removed</string>
+    <!-- 9.3.1 (Nova): starts-in countdown in the guide details header. -->
+    <string name="guide_starts_in">Starts in %1$s</string>
 </resources>

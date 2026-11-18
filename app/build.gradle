@@ -16,8 +16,8 @@ android {
         applicationId 'com.opentv.player.nova'
         minSdk 26
         targetSdk 35
-        versionCode 69
-        versionName '9.3.0'
+        versionCode 70
+        versionName '9.3.1'
     }
 
     // Fixed debug keystore (committed) so every CI build shares one

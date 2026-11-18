@@ -400,6 +400,38 @@ object GuideData {
         return if (remHours > 0L) "${days}d ${remHours}h" else "${days}d"
     }
 
+    /** 9.3.1 (Nova): a short window of a programme description
+     * around the first occurrence of [keywordLower] (already
+     * lowercase), so the keyword hits list can show why a
+     * description-only hit matched. Whitespace is collapsed to
+     * single spaces; "…" marks a cut at either end. When the
+     * keyword isn't found (callers check containment first, so
+     * this is only a fallback) the head of the description is
+     * returned. */
+    fun descSnippet(desc: String, keywordLower: String): String {
+        val flat = desc.replace(Regex("\\s+"), " ").trim()
+        val idx = flat.lowercase().indexOf(keywordLower)
+        if (idx < 0) {
+            return if (flat.length > SNIPPET_WINDOW) {
+                flat.substring(0, SNIPPET_WINDOW) + "…"
+            } else {
+                flat
+            }
+        }
+        val start = maxOf(0, idx - SNIPPET_LEAD)
+        val end = minOf(flat.length, idx + keywordLower.length + SNIPPET_TAIL)
+        val window = flat.substring(start, end)
+        return (if (start > 0) "…" else "") + window +
+            (if (end < flat.length) "…" else "")
+    }
+
+    /** 9.3.1 (Nova): descSnippet window sizes — a little context
+     * before the keyword, more after it (that's where the
+     * sentence usually goes). */
+    private const val SNIPPET_LEAD = 20
+    private const val SNIPPET_TAIL = 40
+    private const val SNIPPET_WINDOW = 60
+
     /** Format date + clock as "Sat, Nov 7, 10:12 PM" for the guide header. */
     fun formatDateTime(millis: Long): String =
         "${formatDate(millis)}, ${formatClock(millis)}"
