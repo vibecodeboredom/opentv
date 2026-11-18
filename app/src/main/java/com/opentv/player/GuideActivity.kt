@@ -17,11 +17,13 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
@@ -35,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.Calendar
 
 /**
  * The TV guide, rebuilt from scratch (v4.0.1) to match the TiviMate
@@ -103,6 +106,13 @@ class GuideActivity : FragmentActivity() {
      * future (0 = today). Only ever moves forward — the window's
      * own past hours already cover earlier today. */
     private var dayOffsetDays: Int = 0
+    /** 9.1.0 (Nova): an in-day shift (whole hours) applied on top
+     * of the day offset — set by the Tonight jump, which anchors
+     * the window at 19:00 rather than at the open-time hour. The
+     * window start is always baseWindowStart + dayOffsetDays
+     * days + this shift, so day jumps from a Tonight landing
+     * keep the 19:00 anchor and jump-to-now clears both. */
+    private var anchorShiftMillis: Long = 0L
     /** 6.1.2: the window's total span in hours — WINDOW_HOURS forward
      * plus the past hours when past programming is on (10 by default).
      * Set in onCreate from the setting; every span computation uses
@@ -430,6 +440,7 @@ class GuideActivity : FragmentActivity() {
                 pastHours * 60L * 60 * 1000
             baseWindowStart = windowStart
             dayOffsetDays = 0
+            anchorShiftMillis = 0L
             allChannels = channels
             rebuildRows()
             if (allRows.isEmpty()) {
@@ -1639,6 +1650,14 @@ class GuideActivity : FragmentActivity() {
             jumpToNow()
         }
 
+        // 9.1.0 (Nova): jump to prime time — 19:00 today, or
+        // tomorrow's once tonight is effectively over (see
+        // jumpToTonight for the rule).
+        view.findViewById<TextView>(R.id.menu_tonight).setOnClickListener {
+            dialog.dismiss()
+            jumpToTonight()
+        }
+
         // 8.2.0 (Nova): day jump — shift the whole grid a day
         // forward or back. The next-day row hides at the offset
         // cap (a week out, the EPG has nothing real left to show);
@@ -1716,6 +1735,28 @@ class GuideActivity : FragmentActivity() {
                     rebuildRows()
                     buildGuide(allRows)
                 }
+            }
+        }
+
+        // 9.1.0 (Nova): reorder favorites — arranges the visible
+        // favorites (same set the home rows and sidebar show:
+        // favorites that are not hidden) into the user's own
+        // order. Hidden with fewer than two, like the group
+        // filter hides when there is nothing to choose between.
+        val reorderRow = view.findViewById<TextView>(R.id.menu_reorder_favorites)
+        val reorderable = PlaylistRepository.applyFavoriteOrder(
+            this,
+            allChannels.filter {
+                it.id in favoritesCache &&
+                    it.id !in PlaylistRepository.hiddenChannels(this)
+            }
+        )
+        if (reorderable.size < 2) {
+            reorderRow.visibility = View.GONE
+        } else {
+            reorderRow.setOnClickListener {
+                dialog.dismiss()
+                showReorderFavoritesDialog(reorderable)
             }
         }
 
@@ -2102,6 +2143,80 @@ class GuideActivity : FragmentActivity() {
     }
 
     /**
+     * 9.1.0 (Nova): arrange the favorites into the user's own
+     * order. Remote-friendly pick-up / put-down interaction:
+     * select a channel to pick it up (its row gains a ⇅ marker),
+     * select another row to move it there; selecting the picked
+     * channel again puts it back. Every move persists at once —
+     * there is no unsaved state to lose by backing out.
+     *
+     * The dialog lists the visible favorites (the set the home
+     * rows show). Favorites it cannot list — hidden ones —
+     * keep their stored places: a save writes the shown order
+     * first, then any still-favorite ids from the previous
+     * stored order in their old relative order.
+     */
+    private fun showReorderFavoritesDialog(initial: List<Channel>) {
+        val working = initial.toMutableList()
+        var picked = -1
+        val labels = working.map { it.name }.toMutableList()
+        val adapter = ArrayAdapter(
+            this, android.R.layout.simple_list_item_1, labels
+        )
+        val listView = ListView(this)
+        listView.adapter = adapter
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        listView.setPadding(pad, pad / 2, pad, pad / 2)
+
+        fun persist() {
+            val shownIds = working.map { it.id }
+            val shown = shownIds.toSet()
+            val favorites = PlaylistRepository.favorites(this)
+            val rest = PlaylistRepository.favoriteOrder(this)
+                .filter { it in favorites && it !in shown }
+            PlaylistRepository.setFavoriteOrder(this, shownIds + rest)
+        }
+        fun render() {
+            labels.clear()
+            working.forEachIndexed { index, ch ->
+                labels += if (index == picked) "⇅ ${ch.name}" else ch.name
+            }
+            adapter.notifyDataSetChanged()
+        }
+        // Opening the dialog establishes the stored order (the
+        // list on screen, which is the reconciled order) — from
+        // here on the order is explicit, and later favorites
+        // append at the end via toggleFavorite.
+        if (PlaylistRepository.favoriteOrder(this).isEmpty()) persist()
+
+        listView.setOnItemClickListener { _, _, position, _ ->
+            when {
+                picked < 0 -> {
+                    picked = position
+                    render()
+                }
+                picked == position -> {
+                    picked = -1
+                    render()
+                }
+                else -> {
+                    val item = working.removeAt(picked)
+                    working.add(position, item)
+                    picked = -1
+                    persist()
+                    render()
+                }
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.reorder_favorites_title)
+            .setMessage(R.string.reorder_favorites_hint)
+            .setView(listView)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    /**
      * 8.0.0 (Nova): the pending reminders, soonest first, from the
      * guide menu. Tapping one cancels it (and says so); when more
      * remain the list re-opens on what's left, so several can be
@@ -2210,8 +2325,11 @@ class GuideActivity : FragmentActivity() {
         // 8.2.0 (Nova): from a day-shifted grid, "now" first means
         // getting back to today's window — rebuild there, and the
         // fresh build lands on now like a normal open.
-        if (dayOffsetDays != 0) {
+        // 9.1.0 (Nova): a Tonight anchor counts as shifted too —
+        // both pieces of the day state reset together.
+        if (dayOffsetDays != 0 || anchorShiftMillis != 0L) {
             dayOffsetDays = 0
+            anchorShiftMillis = 0L
             windowStart = baseWindowStart
             lifecycleScope.launch {
                 rebuildRows()
@@ -2264,7 +2382,11 @@ class GuideActivity : FragmentActivity() {
         val newOffset = (dayOffsetDays + deltaDays).coerceIn(0, MAX_DAY_OFFSET_DAYS)
         if (newOffset == dayOffsetDays) return
         dayOffsetDays = newOffset
-        windowStart = baseWindowStart + dayOffsetDays * DAY_MILLIS
+        // 9.1.0 (Nova): the Tonight anchor shift rides along, so
+        // a day hop from a Tonight landing shows the same 19:00
+        // window a day later/earlier instead of snapping back to
+        // the open-time hour.
+        windowStart = baseWindowStart + dayOffsetDays * DAY_MILLIS + anchorShiftMillis
         lifecycleScope.launch {
             rebuildRows()
             buildGuide(allRows)
@@ -2276,6 +2398,74 @@ class GuideActivity : FragmentActivity() {
                 getString(
                     R.string.guide_showing_day,
                     GuideData.formatDate(windowStart + pastHours * 60L * 60 * 1000)
+                ),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    /**
+     * 9.1.0 (Nova): jump the grid to prime time — 19:00 local.
+     * Before 23:00 that means today (between 19:00 and 23:00 the
+     * evening is already running, and the window's past hours
+     * still show its start); once it is past 23:00, tonight is
+     * effectively over, so the jump aims at tomorrow's 19:00
+     * instead. The window is anchored so 19:00 sits where "now"
+     * sits in a normal open (the past-hours lookback before it),
+     * expressed in the day-jump state as a whole-day offset plus
+     * an in-day anchor shift — day hops from here keep the 19:00
+     * anchor, and jump-to-now clears both. Focus lands on the
+     * playing channel's 19:00 programme when it has a row, like
+     * jump-to-now lands on its current one.
+     */
+    private fun jumpToTonight() {
+        val cal = Calendar.getInstance()
+        if (cal.get(Calendar.HOUR_OF_DAY) >= TONIGHT_CUTOFF_HOUR) {
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        cal.set(Calendar.HOUR_OF_DAY, TONIGHT_HOUR)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        val targetMillis = cal.timeInMillis
+        val targetStart = targetMillis - pastHours * 60L * 60 * 1000
+        // Decompose the distance from the base window into whole
+        // days + the in-day remainder. Both starts are whole
+        // hours and the distance is always greater than -24h
+        // (the base is today's window; the target is today's or
+        // tomorrow's 19:00), so the truncating division lands
+        // the offset on 0 or 1 and the shift — which may be
+        // negative, when the evening has already begun — carries
+        // the rest exactly.
+        val deltaMillis = targetStart - baseWindowStart
+        dayOffsetDays = (deltaMillis / DAY_MILLIS).toInt()
+            .coerceIn(0, MAX_DAY_OFFSET_DAYS)
+        anchorShiftMillis = deltaMillis - dayOffsetDays * DAY_MILLIS
+        windowStart = baseWindowStart + dayOffsetDays * DAY_MILLIS + anchorShiftMillis
+        lifecycleScope.launch {
+            rebuildRows()
+            buildGuide(allRows)
+            scroll.scrollTo(0, 0)
+            val targetX = ((targetMillis - windowStart) / 60_000L * pxPerMinute).toInt()
+            val scrollX = maxOf(0, targetX - PAST_VISIBLE_MINUTES * pxPerMinute)
+            hscroll.post { hscroll.scrollTo(scrollX, 0) }
+            val channelId = currentChannelId
+            val idx = if (channelId != null) rowIndexOf(channelId) else -1
+            if (channelId != null && idx >= 0) {
+                if (idx >= builtRowCount) appendRows(idx + 1 - builtRowCount)
+                container.post {
+                    if (!focusProgrammeAt(channelId, targetMillis)) {
+                        firstCardOfRow(idx)?.requestFocus()
+                    }
+                }
+            } else {
+                container.post { firstCardOfRow(0)?.requestFocus() }
+            }
+            Toast.makeText(
+                this@GuideActivity,
+                getString(
+                    R.string.guide_showing_day,
+                    GuideData.formatDate(targetMillis)
                 ),
                 Toast.LENGTH_SHORT
             ).show()
@@ -2386,6 +2576,11 @@ class GuideActivity : FragmentActivity() {
          * EPG horizon and any reminder/recording worth setting. */
         private const val DAY_MILLIS = 24L * 60 * 60 * 1000
         private const val MAX_DAY_OFFSET_DAYS = 7
+        /** 9.1.0 (Nova): the Tonight jump's target — prime time
+         * starts at 19:00 local; from 23:00 on, tonight counts as
+         * over and the jump aims at tomorrow's 19:00. */
+        private const val TONIGHT_HOUR = 19
+        private const val TONIGHT_CUTOFF_HOUR = 23
         /** 8.0.0 (Nova): how often the now-playing bar refreshes
          * its programme + progress while the guide sits open. */
         private const val NOW_PLAYING_TICK_MS = 20_000L

@@ -799,6 +799,41 @@ class PlaybackActivity : FragmentActivity() {
                 ).show()
             }
         }
+        // 9.1.0 (Nova): catch-up resume — the recording idea
+        // carried to replays. The saved point is keyed by the
+        // channel + the programme's start, so it only ever
+        // applies to this exact replay. The archive window is
+        // checked against the real channel (CatchUp knows its
+        // catch-up days): a programme whose window has passed
+        // loses its point here, pruned on the way out.
+        if (catchupUrl != null) {
+            val resumeChannel = ch
+            val saved = resumeChannel?.let {
+                PlaylistRepository.catchupProgressFor(
+                    this, it.id, catchupStartMillis
+                )
+            }
+            if (saved != null && resumeChannel != null) {
+                val prog = catchupProgramme()
+                if (prog != null && CatchUp.isAvailable(resumeChannel, prog)) {
+                    if (saved.isResumable()) {
+                        player.seekTo(saved.positionMs)
+                        Toast.makeText(
+                            this,
+                            getString(
+                                R.string.recording_resumed_from,
+                                GuideData.formatElapsedClock(saved.positionMs)
+                            ),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } else {
+                    PlaylistRepository.clearCatchupProgress(
+                        this, resumeChannel.id, catchupStartMillis
+                    )
+                }
+            }
+        }
         player.prepare()
         player.play()
         sessionStartMillis = System.currentTimeMillis()
@@ -813,6 +848,15 @@ class PlaybackActivity : FragmentActivity() {
                         PlaylistRepository.clearRecordingProgress(
                             this@PlaybackActivity, it
                         )
+                    }
+                    // 9.1.0 (Nova): a replay watched to the end
+                    // is finished too — retire its resume point.
+                    if (catchupUrl != null) {
+                        channel?.id?.let {
+                            PlaylistRepository.clearCatchupProgress(
+                                this@PlaybackActivity, it, catchupStartMillis
+                            )
+                        }
                     }
                 }
                 // 7.3.0 (Nova): auto-reconnect bookkeeping. READY
@@ -1241,6 +1285,25 @@ class PlaybackActivity : FragmentActivity() {
     private fun zapEligible(ch: Channel, hidden: Set<String>, favorites: Set<String>): Boolean =
         ch.id !in hidden && (!favoritesZapMode || ch.id in favorites)
 
+    /**
+     * 9.1.0 (Nova): the favorites zap cycle — the zap-eligible
+     * favorites in the user's custom order (playlist order until
+     * one is set). Shared by the zap itself and the neighbour
+     * prefetch, so the warm-up always matches where a zap can
+     * land. Only meaningful with favorites zapping on; the list
+     * is materialised because the cycle order is no longer the
+     * playlist's — the favorites are few, unlike the playlist
+     * the allocation-free walk below exists for.
+     */
+    private fun favoritesZapCycle(
+        channels: List<Channel>,
+        hidden: Set<String>,
+        favorites: Set<String>
+    ): List<Channel> = PlaylistRepository.applyFavoriteOrder(
+        this,
+        channels.filter { zapEligible(it, hidden, favorites) }
+    )
+
     /** Switch to the channel before / after the current one in the playlist. */
     private fun switchToAdjacentChannel(delta: Int) {
         val currentId = channel?.id ?: return
@@ -1249,60 +1312,73 @@ class PlaybackActivity : FragmentActivity() {
             val channels = result.getOrNull() ?: return@launch
             val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
             val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
-            // 4.9.5: find the adjacent channel without building a
-            // filtered copy of the whole playlist (was a ~1500-element
-            // list per CH+/CH- press). Two allocation-free passes:
-            // count the visible channels and the current channel's
-            // visible position, then pick the channel at the target
-            // visible position. Falls back to the full list when every
-            // channel is hidden, exactly like the old ifEmpty.
-            // 7.2.0 (Nova): "visible" now goes through zapEligible —
-            // with favorites zapping on, the cycle is the favorites.
-            var visibleIndex = -1
-            var visibleCount = 0
-            for (ch in channels) {
-                if (!zapEligible(ch, hidden, favorites)) continue
-                if (ch.id == currentId) visibleIndex = visibleCount
-                visibleCount++
-            }
-            val next: Channel? = if (visibleCount > 0) {
-                // 7.2.0 (Nova): with favorites zapping on and the
-                // current channel outside the favorites (the mode
-                // was just switched on, or the favorite was removed
-                // from the guide), a zap jumps into the set — first
-                // favorite going up, last going down — instead of
-                // silently doing nothing.
-                val target = when {
-                    visibleIndex >= 0 -> (visibleIndex + delta).mod(visibleCount)
-                    favoritesZapMode && delta < 0 -> visibleCount - 1
-                    favoritesZapMode -> 0
-                    else -> return@launch
+            // 9.1.0 (Nova): with favorites zapping on, the cycle
+            // is the favorites in the user's custom order — a
+            // small materialised list, indexed directly (see
+            // favoritesZapCycle). The allocation-free walk below
+            // only still runs for the full-playlist cycle, where
+            // the ~1500-element list makes it matter.
+            val next: Channel? = if (favoritesZapMode) {
+                val cycle = favoritesZapCycle(channels, hidden, favorites)
+                if (cycle.isEmpty()) {
+                    // 7.2.0 (Nova): zapping with no favorites at
+                    // all — say so instead of falling back to the
+                    // full list, which would zap straight out of
+                    // the mode.
+                    Toast.makeText(
+                        this@PlaybackActivity,
+                        R.string.favorites_zap_empty,
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@launch
                 }
-                var seen = 0
-                var found: Channel? = null
+                // 7.2.0 (Nova): the current channel may sit
+                // outside the cycle (the mode was just switched
+                // on, or the favorite was removed from the
+                // guide) — a zap jumps into the set, first
+                // favorite going up, last going down.
+                val idx = cycle.indexOfFirst { it.id == currentId }
+                val target = when {
+                    idx >= 0 -> (idx + delta).mod(cycle.size)
+                    delta < 0 -> cycle.size - 1
+                    else -> 0
+                }
+                cycle[target]
+            } else {
+                // 4.9.5: find the adjacent channel without building a
+                // filtered copy of the whole playlist (was a ~1500-element
+                // list per CH+/CH- press). Two allocation-free passes:
+                // count the visible channels and the current channel's
+                // visible position, then pick the channel at the target
+                // visible position. Falls back to the full list when every
+                // channel is hidden, exactly like the old ifEmpty.
+                // 7.2.0 (Nova): "visible" now goes through zapEligible.
+                var visibleIndex = -1
+                var visibleCount = 0
                 for (ch in channels) {
                     if (!zapEligible(ch, hidden, favorites)) continue
-                    if (seen == target) {
-                        found = ch
-                        break
-                    }
-                    seen++
+                    if (ch.id == currentId) visibleIndex = visibleCount
+                    visibleCount++
                 }
-                found
-            } else if (favoritesZapMode) {
-                // 7.2.0 (Nova): zapping with no favorites at all —
-                // say so instead of falling back to the full list,
-                // which would zap straight out of the mode.
-                Toast.makeText(
-                    this@PlaybackActivity,
-                    R.string.favorites_zap_empty,
-                    Toast.LENGTH_SHORT
-                ).show()
-                return@launch
-            } else {
-                val idx = channels.indexOfFirst { it.id == currentId }
-                    .takeIf { it >= 0 } ?: return@launch
-                channels[(idx + delta).mod(channels.size)]
+                if (visibleCount > 0) {
+                    if (visibleIndex < 0) return@launch
+                    val target = (visibleIndex + delta).mod(visibleCount)
+                    var seen = 0
+                    var found: Channel? = null
+                    for (ch in channels) {
+                        if (!zapEligible(ch, hidden, favorites)) continue
+                        if (seen == target) {
+                            found = ch
+                            break
+                        }
+                        seen++
+                    }
+                    found
+                } else {
+                    val idx = channels.indexOfFirst { it.id == currentId }
+                        .takeIf { it >= 0 } ?: return@launch
+                    channels[(idx + delta).mod(channels.size)]
+                }
             }
             val pick = next ?: return@launch
             if (favoritesZapMode && pick.id == currentId) {
@@ -1362,50 +1438,67 @@ class PlaybackActivity : FragmentActivity() {
             val channels = result.getOrNull() ?: return@launch
             val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
             val favorites = PlaylistRepository.favorites(this@PlaybackActivity)
-            // Same two-pass visible-order math as
-            // switchToAdjacentChannel, extended to both neighbours:
-            // count the visible channels and the current channel's
-            // visible position, then pick the channels at the
-            // neighbouring visible positions. 7.2.0 (Nova): the
-            // order is zapEligible's, so with favorites zapping on
-            // the favourites' neighbours are warmed instead.
-            var visibleIndex = -1
-            var visibleCount = 0
-            for (ch in channels) {
-                if (!zapEligible(ch, hidden, favorites)) continue
-                if (ch.id == currentId) visibleIndex = visibleCount
-                visibleCount++
-            }
-            val neighbours: List<Channel> = if (visibleCount > 1 && visibleIndex >= 0) {
-                val prevTarget = (visibleIndex - 1).mod(visibleCount)
-                val nextTarget = (visibleIndex + 1).mod(visibleCount)
-                var prev: Channel? = null
-                var next: Channel? = null
-                var seen = 0
-                for (ch in channels) {
-                    if (!zapEligible(ch, hidden, favorites)) continue
-                    if (seen == prevTarget) prev = ch
-                    if (seen == nextTarget) next = ch
-                    seen++
-                }
-                listOfNotNull(next, prev).distinctBy { it.id }
-            } else if (visibleCount == 0 && channels.size > 1 && !favoritesZapMode) {
-                // Every channel hidden: the full-list fallback,
-                // exactly like switchToAdjacentChannel. Never in
-                // favorites zapping mode (7.2.0): no favorites
-                // means nothing to warm.
-                val idx = channels.indexOfFirst { it.id == currentId }
-                if (idx < 0) {
-                    emptyList()
-                } else {
+            val neighbours: List<Channel> = if (favoritesZapMode) {
+                // 9.1.0 (Nova): with favorites zapping on, the
+                // cycle is the favorites in the user's custom
+                // order — the neighbours come from the same
+                // materialised list the zap indexes (see
+                // favoritesZapCycle). A current channel outside
+                // the cycle has no favourites neighbours to warm,
+                // and a cycle of one has none either.
+                val cycle = favoritesZapCycle(channels, hidden, favorites)
+                val idx = cycle.indexOfFirst { it.id == currentId }
+                if (cycle.size > 1 && idx >= 0) {
                     listOf(
-                        channels[(idx + 1).mod(channels.size)],
-                        channels[(idx - 1).mod(channels.size)]
+                        cycle[(idx + 1).mod(cycle.size)],
+                        cycle[(idx - 1).mod(cycle.size)]
                     ).distinctBy { it.id }
+                } else {
+                    emptyList()
                 }
             } else {
-                // Zero or one visible channel: no neighbours to warm.
-                emptyList()
+                // Same two-pass visible-order math as
+                // switchToAdjacentChannel, extended to both neighbours:
+                // count the visible channels and the current channel's
+                // visible position, then pick the channels at the
+                // neighbouring visible positions. 7.2.0 (Nova): the
+                // order is zapEligible's.
+                var visibleIndex = -1
+                var visibleCount = 0
+                for (ch in channels) {
+                    if (!zapEligible(ch, hidden, favorites)) continue
+                    if (ch.id == currentId) visibleIndex = visibleCount
+                    visibleCount++
+                }
+                if (visibleCount > 1 && visibleIndex >= 0) {
+                    val prevTarget = (visibleIndex - 1).mod(visibleCount)
+                    val nextTarget = (visibleIndex + 1).mod(visibleCount)
+                    var prev: Channel? = null
+                    var next: Channel? = null
+                    var seen = 0
+                    for (ch in channels) {
+                        if (!zapEligible(ch, hidden, favorites)) continue
+                        if (seen == prevTarget) prev = ch
+                        if (seen == nextTarget) next = ch
+                        seen++
+                    }
+                    listOfNotNull(next, prev).distinctBy { it.id }
+                } else if (visibleCount == 0 && channels.size > 1) {
+                    // Every channel hidden: the full-list fallback,
+                    // exactly like switchToAdjacentChannel.
+                    val idx = channels.indexOfFirst { it.id == currentId }
+                    if (idx < 0) {
+                        emptyList()
+                    } else {
+                        listOf(
+                            channels[(idx + 1).mod(channels.size)],
+                            channels[(idx - 1).mod(channels.size)]
+                        ).distinctBy { it.id }
+                    }
+                } else {
+                    // Zero or one visible channel: no neighbours to warm.
+                    emptyList()
+                }
             }
             // A slow playlist load must not warm the neighbours of
             // a channel the viewer has already zapped away from.
@@ -1875,6 +1968,10 @@ class PlaybackActivity : FragmentActivity() {
             }
         }
         channel = pick
+        // 9.1.0 (Nova): leaving a replay mid-watch — remember
+        // where it got to before the catch-up state is cleared,
+        // while the player still reports the replay's position.
+        saveCatchupProgress()
         // A zap always goes live: catch-up state belongs to the old
         // channel's replay, never to the new channel.
         catchupUrl = null
@@ -1970,6 +2067,9 @@ class PlaybackActivity : FragmentActivity() {
      * player on the live URL and shows the live info panel. */
     private fun goLive() {
         if (channel == null) return
+        // 9.1.0 (Nova): going live leaves the replay — remember
+        // where it got to before the player is released.
+        saveCatchupProgress()
         catchupUrl = null
         catchupTitle = null
         nowProgramme = liveNow
@@ -3081,8 +3181,40 @@ class PlaybackActivity : FragmentActivity() {
                 PlaylistRepository.clearRecordingProgress(this, endingRecId)
             }
         }
+        // 9.1.0 (Nova): the same for a catch-up replay — its
+        // save lives in a helper because a replay can also be
+        // left without stopping (zap, Go live).
+        saveCatchupProgress()
         player?.release()
         player = null
+    }
+
+    /**
+     * 9.1.0 (Nova): remember where the current catch-up replay
+     * stopped, so reopening the same programme resumes there.
+     * Mirrors the recording save in onStop: only an in-window
+     * position is kept — barely started or effectively finished
+     * clears any older entry instead, so the saved state always
+     * matches what a resume would do. A no-op outside catch-up
+     * playback. Must be called while the player still reports
+     * the replay's position (before release / re-prepare).
+     */
+    private fun saveCatchupProgress() {
+        if (catchupUrl == null) return
+        val chId = channel?.id ?: return
+        val p = player ?: return
+        val pos = p.currentPosition
+        val dur = p.duration
+        if (dur > 0 &&
+            pos > PlaylistRepository.RecordingProgress.RESUME_MIN_POSITION_MS &&
+            pos * 100 < dur * PlaylistRepository.RecordingProgress.RESUME_MAX_PERCENT
+        ) {
+            PlaylistRepository.setCatchupProgress(
+                this, chId, catchupStartMillis, catchupStopMillis, pos, dur
+            )
+        } else {
+            PlaylistRepository.clearCatchupProgress(this, chId, catchupStartMillis)
+        }
     }
 
     override fun onDestroy() {

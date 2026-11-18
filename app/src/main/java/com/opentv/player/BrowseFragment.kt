@@ -185,7 +185,10 @@ class BrowseFragment : BrowseSupportFragment() {
         }
         if (favoriteChannels.isNotEmpty()) {
             val favAdapter = ArrayObjectAdapter(ChannelPresenter())
-            favoriteChannels.forEach { favAdapter.add(it) }
+            // 9.1.0 (Nova): the user's custom favorites order,
+            // once one is set (playlist order until then).
+            PlaylistRepository.applyFavoriteOrder(requireContext(), favoriteChannels)
+                .forEach { favAdapter.add(it) }
             rowsAdapter.add(ListRow(HeaderItem(getString(R.string.favorites)), favAdapter))
         }
 
@@ -259,8 +262,9 @@ class BrowseFragment : BrowseSupportFragment() {
 
     /**
      * 8.2.0 (Nova): the "On now" entries — every favorite channel
-     * (playlist order, hidden ones skipped, exactly like the
-     * Favorites row) paired with the programme on it right now.
+     * (hidden ones skipped, exactly like the Favorites row; in the
+     * user's custom favorites order since 9.1.0) paired with the
+     * programme on it right now.
      * Channels whose EPG has nothing real on at the moment drop
      * out; if none survive, the row hides.
      */
@@ -274,8 +278,14 @@ class BrowseFragment : BrowseSupportFragment() {
         val overrides = PlaylistRepository.epgOverrides(context)
         val now = System.currentTimeMillis()
         val entries = mutableListOf<OnNowEntry>()
-        for (channel in homeChannels) {
-            if (hidden.contains(channel.id) || !favorites.contains(channel.id)) continue
+        // 9.1.0 (Nova): iterate the favorites in the user's
+        // custom order (playlist order until one is set) — the
+        // per-channel EPG lookup is unchanged, only the walk
+        // order follows the reordered favorites list.
+        val favoriteChannels = homeChannels.filter {
+            it.id !in hidden && favorites.contains(it.id)
+        }
+        for (channel in PlaylistRepository.applyFavoriteOrder(context, favoriteChannels)) {
             val current = GuideData.programmesForChannel(channel, epgMap, overrides)
                 .firstOrNull { now in it.startMillis until it.stopMillis }
             if (current != null && current.title != GuideData.NO_INFORMATION) {

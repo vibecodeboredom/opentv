@@ -52,6 +52,13 @@ object PlaylistRepository {
     private const val KEY_ACTIVE_PLAYLIST = "active_playlist"
     private const val KEY_UPLOAD_URL = "upload_url"
     private const val KEY_FAVORITES = "favorites"
+    /** 9.1.0 (Nova): the user's custom favorites order, one
+     * channel id per line. Empty until the user reorders —
+     * playlist order rules while it is unset. Once set it is a
+     * permutation of the favorites: toggleFavorite appends new
+     * favorites at the end and drops removed ones, so the stored
+     * order never names a channel that is not a favorite. */
+    private const val KEY_FAVORITE_ORDER = "favorite_order"
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
     private const val KEY_RECENT = "recent_channels"
@@ -85,6 +92,17 @@ object PlaylistRepository {
      * Keyed by the recording's DownloadManager id — the stable
      * identity a recording keeps for its whole life. */
     private const val KEY_RECORDING_PROGRESS = "recording_progress"
+    /** 9.1.0 (Nova): catch-up playback progress, same one-per-line
+     * storage: channel id, programme start millis, programme stop
+     * millis, position millis, duration millis, last-watched
+     * millis. Keyed by channel + programme start — the identity a
+     * replay keeps; the same programme on the same channel is the
+     * same replay. */
+    private const val KEY_CATCHUP_PROGRESS = "catchup_progress"
+    /** 9.1.0 (Nova): how many catch-up resume points are kept.
+     * A replay is only resumable inside its archive window, so a
+     * small most-recent cap loses nothing real. */
+    private const val MAX_CATCHUP_PROGRESS = 25
     /** How many recent channels are remembered. The overlay strip
      * shows the first 3; 7.0.0 (Nova) keeps 12 so the home screen's
      * Recently watched row and the sidebar History group have a
@@ -501,8 +519,64 @@ object PlaylistRepository {
 
     fun toggleFavorite(context: Context, channelId: String) {
         val current = favorites(context).toMutableSet()
-        if (current.contains(channelId)) current.remove(channelId) else current.add(channelId)
+        val added = channelId !in current
+        if (added) current.add(channelId) else current.remove(channelId)
         prefs(context).edit().putStringSet(KEY_FAVORITES, current).apply()
+        // 9.1.0 (Nova): keep an established custom order in step —
+        // a new favorite joins at the end, a removed one drops
+        // out. While no order is stored the user has never
+        // reordered, so leave it unset and playlist order rules.
+        val order = favoriteOrder(context)
+        if (order.isNotEmpty()) {
+            val updated = when {
+                added && channelId !in order -> order + channelId
+                !added -> order - channelId
+                else -> order
+            }
+            if (updated != order) setFavoriteOrder(context, updated)
+        }
+    }
+
+    /** 9.1.0 (Nova): the stored custom favorites order (channel
+     * ids, most wanted first). May name channels that are no
+     * longer favorites if the store was written before 9.1.0's
+     * toggle maintenance — consumers reconcile, see
+     * [sortByFavoriteOrder]. */
+    fun favoriteOrder(context: Context): List<String> {
+        val raw = prefs(context).getString(KEY_FAVORITE_ORDER, "") ?: ""
+        return raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    /** 9.1.0 (Nova): persist the custom favorites order. */
+    fun setFavoriteOrder(context: Context, ids: List<String>) {
+        prefs(context).edit()
+            .putString(KEY_FAVORITE_ORDER, ids.joinToString("\n"))
+            .apply()
+    }
+
+    /** 9.1.0 (Nova): [favoriteChannels] (in playlist order) with
+     * the user's custom order applied. Until an order is set this
+     * is the list unchanged. */
+    fun applyFavoriteOrder(
+        context: Context,
+        favoriteChannels: List<Channel>
+    ): List<Channel> = sortByFavoriteOrder(favoriteOrder(context), favoriteChannels)
+
+    /** 9.1.0 (Nova): the pure core of [applyFavoriteOrder] —
+     * channels named in [order] come first, in that order; the
+     * rest keep their incoming (playlist) order after them, so
+     * favorites added since the order was set land at the end
+     * and ids that are no longer favorites simply never match.
+     * The sort is stable, which is what keeps the unranked tail
+     * in playlist order. */
+    fun sortByFavoriteOrder(
+        order: List<String>,
+        favoriteChannels: List<Channel>
+    ): List<Channel> {
+        if (order.isEmpty() || favoriteChannels.size < 2) return favoriteChannels
+        val rank = HashMap<String, Int>(order.size)
+        order.forEachIndexed { index, id -> if (id !in rank) rank[id] = index }
+        return favoriteChannels.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
     }
 
     /** Channels the user hid or blocked (by channel id). Hidden from guide + browser. */
@@ -788,6 +862,125 @@ object PlaylistRepository {
         val current = recordingProgress(context)
         val kept = current.filterNot { it.recordingId == recordingId }
         if (kept.size != current.size) saveRecordingProgress(context, kept)
+    }
+
+    /** 9.1.0 (Nova): where a catch-up replay got to — the
+     * recording progress idea (9.0.0) carried to replays. Written
+     * by PlaybackActivity when a replay is left mid-watch; read
+     * back when the same programme is replayed again. */
+    data class CatchupProgress(
+        val channelId: String,
+        val programmeStartMillis: Long,
+        val programmeStopMillis: Long,
+        val positionMs: Long,
+        val durationMs: Long,
+        val updatedAtMillis: Long
+    ) {
+        /** The same resume window as recordings (9.0.0): far
+         * enough in to be worth resuming, not so far that the
+         * programme is effectively finished. */
+        fun isResumable(): Boolean =
+            durationMs > 0L &&
+                positionMs > RecordingProgress.RESUME_MIN_POSITION_MS &&
+                positionMs * 100 < durationMs * RecordingProgress.RESUME_MAX_PERCENT
+    }
+
+    private fun saveCatchupProgress(
+        context: Context,
+        entries: List<CatchupProgress>
+    ) {
+        val raw = entries.joinToString("\n") { e ->
+            listOf(
+                reminderField(e.channelId),
+                e.programmeStartMillis.toString(),
+                e.programmeStopMillis.toString(),
+                e.positionMs.toString(),
+                e.durationMs.toString(),
+                e.updatedAtMillis.toString()
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_CATCHUP_PROGRESS, raw).apply()
+    }
+
+    /** 9.1.0 (Nova): all stored catch-up progress, most recently
+     * watched first. Malformed lines are dropped, as with the
+     * other stores. Entries are NOT pruned against the archive
+     * window here (this store doesn't know each channel's
+     * catch-up days); PlaybackActivity checks the real window
+     * via CatchUp.isAvailable before resuming and prunes the
+     * entry when it has passed, and [setCatchupProgress] sweeps
+     * entries dead under the default window on every write. */
+    fun catchupProgress(context: Context): List<CatchupProgress> {
+        val raw = prefs(context).getString(KEY_CATCHUP_PROGRESS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 6) return@mapNotNull null
+            val start = fields[1].toLongOrNull() ?: return@mapNotNull null
+            val stop = fields[2].toLongOrNull() ?: return@mapNotNull null
+            val position = fields[3].toLongOrNull() ?: return@mapNotNull null
+            val duration = fields[4].toLongOrNull() ?: return@mapNotNull null
+            val updated = fields[5].toLongOrNull() ?: return@mapNotNull null
+            CatchupProgress(fields[0], start, stop, position, duration, updated)
+        }.sortedByDescending { it.updatedAtMillis }
+    }
+
+    /** 9.1.0 (Nova): the stored progress for one replay — the
+     * same channel and the same programme start — if any
+     * (resumable or not; callers decide via [isResumable]). */
+    fun catchupProgressFor(
+        context: Context,
+        channelId: String,
+        programmeStartMillis: Long
+    ): CatchupProgress? = catchupProgress(context).firstOrNull {
+        it.channelId == channelId && it.programmeStartMillis == programmeStartMillis
+    }
+
+    /** 9.1.0 (Nova): remember where a catch-up replay stopped.
+     * Replaces any older entry for the same replay. The write
+     * also sweeps entries whose programme ended more than the
+     * default archive window ago (dead under CatchUp's default
+     * 7 days, so no replay could ever resume them) and caps the
+     * store at the most recent [MAX_CATCHUP_PROGRESS]. */
+    fun setCatchupProgress(
+        context: Context,
+        channelId: String,
+        programmeStartMillis: Long,
+        programmeStopMillis: Long,
+        positionMs: Long,
+        durationMs: Long
+    ) {
+        val deadBefore = System.currentTimeMillis() -
+            CatchUp.DEFAULT_CATCHUP_DAYS * 24L * 60 * 60 * 1000
+        val kept = catchupProgress(context).filterNot {
+            (it.channelId == channelId &&
+                it.programmeStartMillis == programmeStartMillis) ||
+                it.programmeStopMillis < deadBefore
+        }
+        val updated = kept + CatchupProgress(
+            channelId, programmeStartMillis, programmeStopMillis,
+            positionMs, durationMs, System.currentTimeMillis()
+        )
+        saveCatchupProgress(
+            context,
+            updated.sortedByDescending { it.updatedAtMillis }
+                .take(MAX_CATCHUP_PROGRESS)
+        )
+    }
+
+    /** 9.1.0 (Nova): forget a replay's progress (it finished, or
+     * its archive window passed). */
+    fun clearCatchupProgress(
+        context: Context,
+        channelId: String,
+        programmeStartMillis: Long
+    ) {
+        val current = catchupProgress(context)
+        val kept = current.filterNot {
+            it.channelId == channelId &&
+                it.programmeStartMillis == programmeStartMillis
+        }
+        if (kept.size != current.size) saveCatchupProgress(context, kept)
     }
 
     /** 8.2.0 (Nova): one scheduled recording. Like [Reminder], the

@@ -274,6 +274,14 @@
     <string name="prefs_guide_text_size">Guide text size</string>
     <string name="prefs_text_standard">Standard</string>
     <string name="prefs_text_large">Large</string>
+    <!-- Nova 9.1.0: custom favorites order, catch-up resume,
+         Tonight guide jump. The Tonight rule: 19:00 today, or
+         tomorrow's 19:00 once it is past 23:00 and tonight is
+         effectively over. -->
+    <string name="menu_tonight">Tonight</string>
+    <string name="menu_reorder_favorites">Reorder favorites</string>
+    <string name="reorder_favorites_title">Reorder favorites</string>
+    <string name="reorder_favorites_hint">Select a channel to pick it up, then select where it should go. The order applies wherever favorites are listed — the home rows, the sidebar and favorites zapping.</string>
     <string name="menu_record_programme">Record this programme</string>
     <string name="menu_cancel_scheduled_recording">Cancel scheduled recording</string>
     <string name="scheduled_recording_set_toast">Recording scheduled — %1$s at %2$s. It starts automatically while OpenTV is running.</string>

@@ -190,7 +190,11 @@ class MobileHomeActivity : FragmentActivity() {
         val query = currentQuery.trim()
         val items = mutableListOf<MobileChannelAdapter.Item>()
         if (query.isEmpty()) {
-            val favoriteChannels = allChannels.filter { it.id in favorites }
+            // 9.1.0 (Nova): the user's custom favorites order,
+            // once one is set (playlist order until then).
+            val favoriteChannels = PlaylistRepository.applyFavoriteOrder(
+                this, allChannels.filter { it.id in favorites }
+            )
             if (favoriteChannels.isNotEmpty()) {
                 items += MobileChannelAdapter.Item.Header(getString(R.string.favorites))
                 favoriteChannels.forEach {

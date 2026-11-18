@@ -128,6 +128,21 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 9.1.0 (Nova): jump the grid to prime time (19:00 today,
+         or tomorrow's once tonight is effectively over). -->
+    <TextView
+        android:id="@+id/menu_tonight"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_tonight"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <!-- 8.2.0 (Nova): browse a day forward/back — the grid's
          window shifts by 24h. Previous day hides in code while
          the grid is on today; jump to now returns from any day. -->
@@ -197,6 +212,22 @@
         android:layout_height="wrap_content"
         android:background="@drawable/guide_menu_item_bg"
         android:text="@string/menu_unhide_all"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 9.1.0 (Nova): arrange the favorites into the user's own
+         order. Hides in code when fewer than two favorites are
+         visible — there would be nothing to arrange. -->
+    <TextView
+        android:id="@+id/menu_reorder_favorites"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_reorder_favorites"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:textStyle="bold"
