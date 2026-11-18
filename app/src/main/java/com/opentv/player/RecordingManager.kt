@@ -124,6 +124,13 @@ object RecordingManager {
             context, RecordingService::class.java, id,
             STOP_REASON_USER_STOPPED, false
         )
+        // 9.2.0 (Nova): a recording just finished — give the
+        // storage guard its pass. The stop lands asynchronously,
+        // so this recording may still read as in-progress in this
+        // pass and only become deletable on the next one (app
+        // start / recordings visit); older recordings over the
+        // cap are still collected here.
+        enforceRecordingStorageCap(context)
     }
 
     /**
@@ -143,6 +150,61 @@ object RecordingManager {
         )
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, stopAtMillis, pending)
+    }
+
+    /** The PendingIntent that fires [RecordStartReceiver] for one
+     * scheduled recording. One request code per programme (channel
+     * + start), so scheduling, cancelling and firing all address
+     * the same alarm. */
+    private fun recordStartPendingIntent(
+        context: Context,
+        scheduled: PlaylistRepository.ScheduledRecording
+    ): PendingIntent {
+        val intent = Intent(context, RecordStartReceiver::class.java).apply {
+            putExtra(RecordStartReceiver.EXTRA_CHANNEL_ID, scheduled.channelId)
+            putExtra(RecordStartReceiver.EXTRA_CHANNEL_NAME, scheduled.channelName)
+            putExtra(RecordStartReceiver.EXTRA_CHANNEL_URL, scheduled.channelUrl)
+            putExtra(RecordStartReceiver.EXTRA_START_MILLIS, scheduled.startMillis)
+            putExtra(RecordStartReceiver.EXTRA_STOP_MILLIS, scheduled.stopMillis)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            (scheduled.channelId + "@" + scheduled.startMillis).hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    /**
+     * 8.2.0 (Nova): schedule a recording to START at a programme's
+     * start time. Same inexact-alarm pattern as [scheduleStopRecording]:
+     * fires [RecordStartReceiver], which starts the recording and
+     * arms the matching stop. The receiver can only run while the
+     * app process can be started by the system, so — like the
+     * reminders — this is an OpenTV-is-running feature, and the UI
+     * string says so.
+     */
+    fun scheduleRecordingStart(
+        context: Context,
+        scheduled: PlaylistRepository.ScheduledRecording
+    ) {
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            scheduled.startMillis,
+            recordStartPendingIntent(context, scheduled)
+        )
+    }
+
+    /** 8.2.0 (Nova): cancel a scheduled recording's start alarm. */
+    fun cancelRecordingStart(
+        context: Context,
+        scheduled: PlaylistRepository.ScheduledRecording
+    ) {
+        val pending = recordStartPendingIntent(context, scheduled)
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.cancel(pending)
+        pending.cancel()
     }
 
     /** True while a channel's recording is actively downloading.
@@ -209,6 +271,79 @@ object RecordingManager {
     /** Total bytes used by recordings on disk. */
     fun totalBytesUsed(context: Context): Long =
         listRecordings(context).sumOf { it.bytesDownloaded }
+
+    /**
+     * 9.2.0 (Nova): the recordings storage guard. When the user
+     * has set a cap (AppSettings, default off) and recordings on
+     * disk exceed it, delete the OLDEST completed recordings
+     * until back under the cap. Two recordings are untouchable:
+     * anything still recording, and the single most recent
+     * recording — the guard never leaves the user with nothing,
+     * and never pulls a download out from under the recorder.
+     * Runs at app start (MainActivity), when a recording stops,
+     * and when the Recordings screen loads. Returns the bytes
+     * freed; a run that freed anything leaves a note the
+     * Recordings screen shows once ("Freed X by auto-delete").
+     * With the cap off this is one pref read and nothing else —
+     * in particular it never builds the DownloadManager.
+     *
+     * 9.2.1 (Nova): a third untouchable — recordings of channels
+     * that are CURRENT favorites. A recording's download id is
+     * derived from its channel id (Recording.idForChannel), so
+     * the protected set is the favorites mapped through the same
+     * derivation. If a pass ends still over the cap because the
+     * remaining candidates were favorites, it records that in
+     * AppSettings and the Recordings screen's note says so.
+     */
+    @Synchronized
+    fun enforceRecordingStorageCap(context: Context): Long {
+        val cap = AppSettings.recordingAutoDeleteCapBytes(context)
+        if (cap <= 0L) {
+            AppSettings.setLastAutoDeleteBlocked(context, false)
+            return 0L
+        }
+        val recordings = listRecordings(context)
+        var total = recordings.sumOf { it.bytesDownloaded }
+        if (total <= cap) {
+            AppSettings.setLastAutoDeleteBlocked(context, false)
+            return 0L
+        }
+        // listRecordings is newest-first: index 0 is the most
+        // recent recording and is never deleted.
+        val newestId = recordings.firstOrNull()?.id
+        // 9.2.1 (Nova): favorite channels' recordings are
+        // protected — compare download ids, which are derived
+        // from channel ids by the same function the recorder
+        // uses, so the mapping is exact.
+        val protectedIds = PlaylistRepository.favorites(context)
+            .map { Recording.idForChannel(it) }
+            .toSet()
+        var freed = 0L
+        var skippedProtected = false
+        for (recording in recordings.asReversed()) {
+            if (total <= cap) break
+            if (recording.inProgress || recording.id == newestId) continue
+            if (recording.id in protectedIds) {
+                skippedProtected = true
+                continue
+            }
+            deleteRecording(context, recording.id)
+            // A deleted recording's resume point goes with it,
+            // exactly as on the manual delete path.
+            PlaylistRepository.clearRecordingProgress(context, recording.id)
+            total -= recording.bytesDownloaded
+            freed += recording.bytesDownloaded
+        }
+        if (freed > 0L) {
+            AppSettings.setLastAutoFreedBytes(context, freed)
+        }
+        // Still over the cap with favorites in the way: the
+        // Recordings note reports the hold-back once.
+        AppSettings.setLastAutoDeleteBlocked(
+            context, blocked = total > cap && skippedProtected
+        )
+        return freed
+    }
 
     fun formatBytes(bytes: Long): String = when {
         bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)

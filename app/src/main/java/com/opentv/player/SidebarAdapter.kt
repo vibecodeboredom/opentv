@@ -239,7 +239,10 @@ class SidebarAdapter(
         init {
             view.setOnClickListener { group?.let(onGroupClick) }
             view.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
-                nameView.setTextColor(if (hasFocus) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
+                nameView.setTextColor(
+                    if (hasFocus) AppSettings.accentColor(view.context)
+                    else 0xFFFFFFFF.toInt()
+                )
             }
         }
 
@@ -249,7 +252,8 @@ class SidebarAdapter(
             countView.text = group.count.toString()
             // A rebound row keeps its focus state; re-apply the colour.
             nameView.setTextColor(
-                if (itemView.isFocused) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                if (itemView.isFocused) AppSettings.accentColor(itemView.context)
+                else 0xFFFFFFFF.toInt()
             )
         }
     }
@@ -291,11 +295,13 @@ class SidebarAdapter(
         private fun applyFocusColors(hasFocus: Boolean) {
             // Focused row: name (and number, unless it is the current
             // channel, which is already accent) turns accent.
+            // 9.0.0 (Nova): the accent itself is the Settings choice.
+            val accent = AppSettings.accentColor(itemView.context)
             nameView.setTextColor(
-                if (hasFocus || isCurrent) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                if (hasFocus || isCurrent) accent else 0xFFFFFFFF.toInt()
             )
             numberView.setTextColor(
-                if (isCurrent || hasFocus) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt()
+                if (isCurrent || hasFocus) accent else 0xB3FFFFFF.toInt()
             )
         }
     }

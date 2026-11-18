@@ -7,8 +7,10 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -61,6 +63,17 @@ class MainActivity : FragmentActivity() {
         error = findViewById(R.id.loading_error)
 
         lifecycleScope.launch {
+            // 9.2.0 (Nova): the recordings storage guard's
+            // app-start pass. With the cap off (the default) this
+            // is a single pref read; with it on, the index scan
+            // runs on IO so startup never waits on it. A failure
+            // here must never break startup, so it is
+            // runCatching-wrapped.
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    RecordingManager.enforceRecordingStorageCap(this@MainActivity)
+                }
+            }
             // Playlist and guide load in parallel; the playlist is the
             // critical path, the guide is a warm-up.
             val playlistDeferred = async { PlaylistRepository.loadPlaylist(this@MainActivity) }

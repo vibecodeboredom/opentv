@@ -31,7 +31,15 @@ class RecordingsFragment : BrowseSupportFragment() {
         title = getString(R.string.recordings)
         adapter = rowsAdapter
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
-            if (item is Recording) showRecordingOptions(item)
+            when (item) {
+                is Recording -> showRecordingOptions(item)
+                // 9.0.0 (Nova): a Continue watching card is its
+                // recording, for options purposes — Play resumes
+                // it (PlaybackActivity owns the resume itself).
+                is ContinueWatchingEntry -> showRecordingOptions(item.recording)
+                is PlaylistRepository.ScheduledRecording ->
+                    showScheduledRecordingOptions(item)
+            }
         }
     }
 
@@ -46,12 +54,37 @@ class RecordingsFragment : BrowseSupportFragment() {
     }
 
     private fun loadRecordings() {
+        // 9.2.0 (Nova): the storage guard's recordings-screen
+        // pass, before listing, so what this screen shows is
+        // already within the cap. No-op when the cap is off.
+        RecordingManager.enforceRecordingStorageCap(requireContext())
         val recordings = RecordingManager.listRecordings(requireContext())
+        // 8.2.0 (Nova): scheduled recordings get their own row at
+        // the top — they are not downloads yet, so they don't count
+        // toward the title's size line, but they belong on this
+        // screen: it's where a user looks to manage them.
+        val scheduled = PlaylistRepository.scheduledRecordings(requireContext())
         // Total bytes from the list already fetched — the old code
         // called totalBytesUsed, which re-ran the whole DownloadIndex
         // query just to sum the same rows.
         val used = recordings.sumOf { it.bytesDownloaded }
-        title = if (recordings.isEmpty()) {
+        // 9.2.0 (Nova): a storage-guard run that freed space
+        // leaves a one-line note, shown once in this title and
+        // then cleared — the header is where this screen already
+        // reports its total size.
+        val freedNote = AppSettings.lastAutoFreedBytes(requireContext())
+        if (freedNote > 0L) {
+            AppSettings.setLastAutoFreedBytes(requireContext(), 0L)
+        }
+        // 9.2.1 (Nova): the same one-shot pattern for a guard
+        // pass that stayed over the cap because the remaining
+        // recordings belong to favorite channels — read here,
+        // cleared here, so it is reported exactly once.
+        val deleteBlocked = AppSettings.lastAutoDeleteBlocked(requireContext())
+        if (deleteBlocked) {
+            AppSettings.setLastAutoDeleteBlocked(requireContext(), false)
+        }
+        val baseTitle = if (recordings.isEmpty()) {
             getString(R.string.recordings)
         } else {
             getString(
@@ -60,14 +93,92 @@ class RecordingsFragment : BrowseSupportFragment() {
                 RecordingManager.formatBytes(used)
             )
         }
+        title = buildString {
+            append(baseTitle)
+            if (freedNote > 0L) {
+                append(" • ")
+                append(
+                    getString(
+                        R.string.recordings_auto_freed,
+                        RecordingManager.formatBytes(freedNote)
+                    )
+                )
+            }
+            if (deleteBlocked) {
+                append(" • ")
+                append(getString(R.string.recordings_auto_delete_blocked))
+            }
+        }
         rowsAdapter.clear()
+        if (scheduled.isNotEmpty()) {
+            val scheduledAdapter = ArrayObjectAdapter(ScheduledRecordingPresenter())
+            scheduled.forEach { scheduledAdapter.add(it) }
+            rowsAdapter.add(
+                ListRow(HeaderItem(getString(R.string.scheduled_recordings)), scheduledAdapter)
+            )
+        }
+        // 9.0.0 (Nova): Continue watching — recordings whose
+        // last viewing stopped inside the resume window, most
+        // recently watched first (the store's own order).
+        // Joining from the progress side means a deleted
+        // recording's leftover entry simply finds no recording
+        // and drops out of the row on its own.
+        val byId = recordings.associateBy { it.id }
+        val continueEntries = PlaylistRepository.recordingProgress(requireContext())
+            .filter { it.isResumable() }
+            .mapNotNull { progress ->
+                byId[progress.recordingId]?.let { ContinueWatchingEntry(it, progress) }
+            }
+        if (continueEntries.isNotEmpty()) {
+            val continueAdapter = ArrayObjectAdapter(ContinueWatchingPresenter())
+            continueEntries.forEach { continueAdapter.add(it) }
+            rowsAdapter.add(
+                ListRow(HeaderItem(getString(R.string.continue_watching)), continueAdapter)
+            )
+        }
         if (recordings.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.no_recordings, Toast.LENGTH_LONG).show()
+            if (scheduled.isEmpty()) {
+                Toast.makeText(requireContext(), R.string.no_recordings, Toast.LENGTH_LONG).show()
+            }
             return
         }
         val adapter = ArrayObjectAdapter(RecordingPresenter())
         recordings.forEach { adapter.add(it) }
         rowsAdapter.add(ListRow(HeaderItem(getString(R.string.recordings)), adapter))
+    }
+
+    /** 8.2.0 (Nova): a scheduled recording's options — its details
+     * and the one action that makes sense before it starts: cancel
+     * it (store entry + start alarm both go). */
+    private fun showScheduledRecordingOptions(
+        scheduled: PlaylistRepository.ScheduledRecording
+    ) {
+        val whenText = GuideData.formatDate(scheduled.startMillis) + ", " +
+            GuideData.formatTimeRange(scheduled.startMillis, scheduled.stopMillis)
+        AlertDialog.Builder(requireContext())
+            .setTitle(scheduled.title)
+            .setMessage(
+                getString(
+                    R.string.scheduled_recording_info,
+                    scheduled.title,
+                    scheduled.channelName,
+                    whenText
+                )
+            )
+            .setPositiveButton(R.string.scheduled_recording_cancel_action) { _, _ ->
+                PlaylistRepository.removeScheduledRecording(
+                    requireContext(), scheduled.channelId, scheduled.startMillis
+                )
+                RecordingManager.cancelRecordingStart(requireContext(), scheduled)
+                Toast.makeText(
+                    requireContext(),
+                    R.string.scheduled_recording_cancelled_toast,
+                    Toast.LENGTH_SHORT
+                ).show()
+                loadRecordings()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showRecordingOptions(recording: Recording) {
@@ -137,6 +248,10 @@ class RecordingsFragment : BrowseSupportFragment() {
 
     private fun deleteRecording(recording: Recording) {
         RecordingManager.deleteRecording(requireContext(), recording.id)
+        // 9.0.0 (Nova): a deleted recording's resume point goes
+        // with it — the Continue watching row must never point
+        // at a recording that no longer exists.
+        PlaylistRepository.clearRecordingProgress(requireContext(), recording.id)
         Toast.makeText(requireContext(), R.string.recording_deleted, Toast.LENGTH_SHORT).show()
         loadRecordings()
     }

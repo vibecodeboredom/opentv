@@ -379,7 +379,10 @@ class ChannelSidebar(
                 for (ch in channels) {
                     if (ch.id !in hidden && ch.id in favorites) list += ch
                 }
-                list
+                // 9.1.0 (Nova): the user's custom favorites
+                // order, once one is set (playlist order until
+                // then) — same as the home screen's rows.
+                PlaylistRepository.applyFavoriteOrder(activity, list)
             }
             GROUP_ALL -> {
                 val list = mutableListOf<Channel>()
