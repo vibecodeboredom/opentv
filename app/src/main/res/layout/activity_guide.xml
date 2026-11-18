@@ -247,6 +247,16 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
+        <!-- 8.1.0 (Nova): the channel logo, loaded in code through
+             the sized logo helper; a channel without one shows the
+             placeholder, never a broken image. -->
+        <ImageView
+            android:id="@+id/guide_np_logo"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="12dp"
+            android:contentDescription="@null" />
+
         <TextView
             android:id="@+id/guide_np_channel"
             android:layout_width="wrap_content"

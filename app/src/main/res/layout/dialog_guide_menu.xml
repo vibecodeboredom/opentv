@@ -112,6 +112,38 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.1.0 (Nova): jump back to the programme on now — the grid
+         opens there, but after browsing hours away there was no
+         way back short of reopening the guide. -->
+    <TextView
+        android:id="@+id/menu_jump_now"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_jump_now"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.1.0 (Nova): restrict the grid to one channel group; the
+         label carries the active filter (set in code) and the row
+         hides in code when the playlist has fewer than two groups. -->
+    <TextView
+        android:id="@+id/menu_group_filter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_group_filter"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <TextView
         android:id="@+id/menu_programme_title"
         android:layout_width="match_parent"

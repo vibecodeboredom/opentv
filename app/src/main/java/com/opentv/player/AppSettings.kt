@@ -22,6 +22,7 @@ object AppSettings {
     private const val KEY_FAVORITES_ZAP = "favorites_zap"
     private const val KEY_NIGHT_DIM = "night_dim_percent"
     private const val KEY_QUALITY_MODE = "quality_mode"
+    private const val KEY_GUIDE_GROUP_FILTER = "guide_group_filter"
 
     /** 7.3.0 (Nova): stream quality modes for the playback
      * track selector. AUTO is the player's default adaptive
@@ -116,6 +117,23 @@ object AppSettings {
 
     fun setQualityMode(context: Context, mode: Int) {
         prefs(context).edit().putInt(KEY_QUALITY_MODE, mode).apply()
+    }
+
+    /** 8.1.0 (Nova): the guide group filter — the M3U group-title
+     * the guide grid is restricted to, or null for all groups.
+     * Stored raw; GuideData.effectiveGroupFilter validates it
+     * against the loaded playlist on every guide build, so a
+     * group that disappears from the playlist simply stops
+     * filtering instead of emptying the guide. */
+    fun guideGroupFilter(context: Context): String? =
+        prefs(context).getString(KEY_GUIDE_GROUP_FILTER, null)
+            ?.takeIf { it.isNotEmpty() }
+
+    fun setGuideGroupFilter(context: Context, group: String?) {
+        val edit = prefs(context).edit()
+        if (group == null) edit.remove(KEY_GUIDE_GROUP_FILTER)
+        else edit.putString(KEY_GUIDE_GROUP_FILTER, group)
+        edit.apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */

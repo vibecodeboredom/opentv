@@ -230,6 +230,11 @@
     <string name="reminders_empty">No reminders set.\nLong-press a future programme in the guide to set one.</string>
     <string name="reminder_channel_gone">That channel is no longer in the playlist</string>
     <string name="now_playing_cd">Return to playback</string>
+    <!-- Nova 8.1.0: guide group filter + jump to now. -->
+    <string name="menu_jump_now">Jump to now</string>
+    <string name="menu_group_filter">Group filter</string>
+    <string name="guide_group_all">All groups</string>
+    <string name="guide_group_picker_title">Show channels from</string>
     <string name="track_label_sdh">%1$s (SDH)</string>
     <string name="track_label_dub">%1$s (Dub)</string>
     <string name="track_label_descriptive">%1$s (Descriptive)</string>

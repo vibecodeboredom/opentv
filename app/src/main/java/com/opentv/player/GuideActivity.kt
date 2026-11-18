@@ -190,11 +190,16 @@ class GuideActivity : FragmentActivity() {
      * on now, and a live progress bar. Bound in onCreate, filled by
      * refreshNowPlayingBar, ticked while the guide sits open. */
     private lateinit var nowPlayingBar: View
+    private lateinit var npLogo: ImageView
     private lateinit var npChannel: TextView
     private lateinit var npTitle: TextView
     private lateinit var npTime: TextView
     private lateinit var npProgress: ProgressBar
     private var nowPlayingJob: Job? = null
+    /** 8.1.0 (Nova): the logo URL the now-playing bar last loaded,
+     * so its 20s ticker doesn't re-issue the same Coil load on
+     * every tick (same guard as the details header's logo). */
+    private var npLogoUrl: String? = null
 
     /** 8.0.0 (Nova): programme reminder prompts while the guide is
      * in front. Watch now plays the reminded channel (the same
@@ -248,6 +253,7 @@ class GuideActivity : FragmentActivity() {
         // playback — the same trip BACK makes — so it reads as
         // "go back to what you were watching".
         nowPlayingBar = findViewById(R.id.guide_now_playing)
+        npLogo = findViewById(R.id.guide_np_logo)
         npChannel = findViewById(R.id.guide_np_channel)
         npTitle = findViewById(R.id.guide_np_title)
         npTime = findViewById(R.id.guide_np_time)
@@ -453,6 +459,16 @@ class GuideActivity : FragmentActivity() {
             return
         }
         npChannel.text = if (ch.number > 0) "${ch.number}  ${ch.name}" else ch.name
+        // 8.1.0 (Nova): the bar names the channel, and every other
+        // surface that names a channel shows its logo too — the
+        // guide column, the details header, the zap flash. Loaded
+        // through the same downsampling helper; a channel with no
+        // logo (or a dead URL) gets the placeholder, never a broken
+        // image, and the name text beside it always stays.
+        if (ch.logo == null || ch.logo != npLogoUrl) {
+            npLogoUrl = ch.logo
+            npLogo.loadLogo(ch.logo, 36, android.R.drawable.ic_media_play)
+        }
         val now = System.currentTimeMillis()
         val prog = GuideData.programmesForChannel(
             ch, epg, PlaylistRepository.epgOverrides(this)
@@ -624,9 +640,29 @@ class GuideActivity : FragmentActivity() {
         val epgMap = epg
         val hidden = PlaylistRepository.hiddenChannels(this)
         val overrides = PlaylistRepository.epgOverrides(this)
+        // 8.1.0 (Nova): the group filter applies HERE, at the row
+        // source — the channel list is restricted before rowChannels
+        // / LazyRows ever see it, so the lazy machinery, the now-line
+        // and the EPG fill-in all work on the filtered set exactly as
+        // they did on the full one. The stored choice is validated
+        // against the playlist (a group that left the playlist stops
+        // filtering), and if the surviving group has no visible
+        // channels left — all of them hidden, say — the filter is
+        // dropped and cleared rather than opening an empty guide.
+        val groupFilter = GuideData.effectiveGroupFilter(
+            channels, AppSettings.guideGroupFilter(this)
+        )
+        var rowSource = GuideData.rowChannels(
+            GuideData.filterChannelsByGroup(channels, groupFilter), hidden
+        )
+        if (rowSource.isEmpty() && groupFilter != null) {
+            AppSettings.setGuideGroupFilter(this, null)
+            rowSource = GuideData.rowChannels(channels, hidden)
+        }
+        val source = rowSource
         allRows = withContext(Dispatchers.Default) {
             GuideData.LazyRows(
-                GuideData.rowChannels(channels, hidden),
+                source,
                 epgMap, windowStart, windowHours, overrides
             )
         }
@@ -1510,6 +1546,35 @@ class GuideActivity : FragmentActivity() {
             showRemindersList()
         }
 
+        // 8.1.0 (Nova): jump to now — after browsing hours away in
+        // a 10-hour window there was no way back to the current
+        // programme short of reopening the guide.
+        view.findViewById<TextView>(R.id.menu_jump_now).setOnClickListener {
+            dialog.dismiss()
+            jumpToNow()
+        }
+
+        // 8.1.0 (Nova): the group filter — restrict the grid to one
+        // of the playlist's groups. Only offered when the playlist
+        // actually has more than one group to choose from; the
+        // label carries the active filter, like the reminders row
+        // carries its count.
+        val groupFilterRow = view.findViewById<TextView>(R.id.menu_group_filter)
+        val groups = GuideData.channelGroups(allChannels)
+        if (groups.size < 2) {
+            groupFilterRow.visibility = View.GONE
+        } else {
+            val activeFilter = GuideData.effectiveGroupFilter(
+                allChannels, AppSettings.guideGroupFilter(this)
+            )
+            groupFilterRow.text = getString(R.string.menu_group_filter) +
+                ": " + (activeFilter ?: getString(R.string.guide_group_all))
+            groupFilterRow.setOnClickListener {
+                dialog.dismiss()
+                showGroupFilterPicker(groups)
+            }
+        }
+
         view.findViewById<TextView>(R.id.menu_programme_title).text = programme.title
 
         view.findViewById<TextView>(R.id.menu_external_player).setOnClickListener {
@@ -1719,6 +1784,76 @@ class GuideActivity : FragmentActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /**
+     * 8.1.0 (Nova): pick the guide's group filter — all groups, or
+     * one of the playlist's groups (the M3U group-title). The
+     * picker shows the active choice, the choice persists
+     * (AppSettings), and the grid rebuilds on the filtered row
+     * source. Search is untouched: it keeps scanning the whole
+     * playlist, as it always has — clearing a search returns to
+     * the filtered grid.
+     */
+    private fun showGroupFilterPicker(groups: List<String>) {
+        val active = GuideData.effectiveGroupFilter(
+            allChannels, AppSettings.guideGroupFilter(this)
+        )
+        val labels = (listOf(getString(R.string.guide_group_all)) + groups)
+            .toTypedArray()
+        val checked = if (active == null) 0 else groups.indexOf(active) + 1
+        AlertDialog.Builder(this)
+            .setTitle(R.string.guide_group_picker_title)
+            .setSingleChoiceItems(labels, checked) { picker, which ->
+                AppSettings.setGuideGroupFilter(
+                    this, if (which == 0) null else groups[which - 1]
+                )
+                picker.dismiss()
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /**
+     * 8.1.0 (Nova): jump back to now — scroll the grid so the
+     * now-line is in view (the same landing the guide opens with)
+     * and focus the programme on now: the playing channel's when
+     * it has a row, otherwise the first on-now card among the
+     * rows already built (focus needs live views). Uses the real
+     * clock, not the build-time nowMillis, so the landing stays
+     * honest however long the guide has been open.
+     */
+    private fun jumpToNow() {
+        val now = System.currentTimeMillis()
+        val nowX = ((now - windowStart) / 60_000L * pxPerMinute).toInt()
+        val targetX = maxOf(0, nowX - PAST_VISIBLE_MINUTES * pxPerMinute)
+        hscroll.post { hscroll.scrollTo(targetX, 0) }
+        val channelId = currentChannelId
+        val idx = if (channelId != null) rowIndexOf(channelId) else -1
+        if (channelId != null && idx >= 0) {
+            if (idx >= builtRowCount) appendRows(idx + 1 - builtRowCount)
+            container.post {
+                if (!focusProgrammeAt(channelId, now)) {
+                    firstCardOfRow(idx)?.requestFocus()
+                }
+            }
+            return
+        }
+        for (i in 0 until builtRowCount) {
+            val rowLayout = programmeRowLayouts.getOrNull(i) ?: continue
+            for (j in 0 until rowLayout.childCount) {
+                val card = rowLayout.getChildAt(j)
+                val prog = card.tag as? EpgParser.Programme ?: continue
+                if (now in prog.startMillis until prog.stopMillis) {
+                    container.post { card.requestFocus() }
+                    return
+                }
+            }
+        }
     }
 
     private fun openExternalPlayer(channel: Channel) {

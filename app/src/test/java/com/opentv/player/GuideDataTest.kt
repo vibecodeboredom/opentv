@@ -244,4 +244,49 @@ class GuideDataTest {
         assertTrue(date.contains("Nov"))
         assertTrue(date.contains("7"))
     }
+
+    private fun groupedChannel(id: String, group: String) =
+        Channel(
+            id = id, name = id, url = "https://example.com/$id.m3u8",
+            group = group, logo = null, tvgId = id
+        )
+
+    @Test
+    fun channelGroupsAreDistinctInPlaylistOrder() {
+        val channels = listOf(
+            groupedChannel("a", "News"),
+            groupedChannel("b", "Sports"),
+            groupedChannel("c", "News"),
+            groupedChannel("d", "Movies")
+        )
+        assertEquals(
+            listOf("News", "Sports", "Movies"),
+            GuideData.channelGroups(channels)
+        )
+    }
+
+    @Test
+    fun effectiveGroupFilterDropsGroupsMissingFromPlaylist() {
+        val channels = listOf(groupedChannel("a", "News"))
+        assertEquals("News", GuideData.effectiveGroupFilter(channels, "News"))
+        assertEquals(null, GuideData.effectiveGroupFilter(channels, "Gone"))
+        assertEquals(null, GuideData.effectiveGroupFilter(channels, null))
+    }
+
+    @Test
+    fun filterChannelsByGroupKeepsOnlyThatGroup() {
+        val channels = listOf(
+            groupedChannel("a", "News"),
+            groupedChannel("b", "Sports"),
+            groupedChannel("c", "News")
+        )
+        assertEquals(
+            listOf("a", "c"),
+            GuideData.filterChannelsByGroup(channels, "News").map { it.id }
+        )
+        assertEquals(
+            channels,
+            GuideData.filterChannelsByGroup(channels, null)
+        )
+    }
 }

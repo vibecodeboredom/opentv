@@ -189,6 +189,32 @@ object GuideData {
     ): List<Channel> =
         channels.filter { !hidden.contains(it.id) }.take(MAX_GUIDE_ROWS)
 
+    /** 8.1.0 (Nova): the playlist's distinct channel groups, in
+     * playlist order (first appearance wins) — the guide group
+     * filter's choices. Groups are never empty strings: the parser
+     * defaults a missing group-title to "Other". */
+    fun channelGroups(channels: List<Channel>): List<String> {
+        val seen = LinkedHashSet<String>()
+        for (channel in channels) seen += channel.group
+        return seen.toList()
+    }
+
+    /** 8.1.0 (Nova): the group filter that actually applies — the
+     * stored choice when some channel in the playlist still
+     * carries that group, null (all groups) when nothing is stored
+     * or the group has left the playlist, so a stale preference
+     * can never filter the guide down to nothing on its own. */
+    fun effectiveGroupFilter(channels: List<Channel>, stored: String?): String? =
+        stored?.takeIf { group -> channels.any { it.group == group } }
+
+    /** 8.1.0 (Nova): restrict a channel list to one group, playlist
+     * order kept; a null group returns the list untouched. The
+     * guide applies this to the channel list BEFORE rowChannels /
+     * LazyRows, so filtering happens at the row source and the
+     * lazy row machinery never sees the filtered-out channels. */
+    fun filterChannelsByGroup(channels: List<Channel>, group: String?): List<Channel> =
+        if (group == null) channels else channels.filter { it.group == group }
+
     /**
      * Guide rows built one at a time, on first access, instead of all
      * at once: the guide screen only ever displays the first rows on
