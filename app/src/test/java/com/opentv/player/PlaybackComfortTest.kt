@@ -3,9 +3,32 @@ package com.opentv.player
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Combined port (from juniper-v10): playback speed + recording
- * seek skip — the parts of PlaybackComfort that came over. */
+/** 7.1.0: sleep timer, playback speed, recording seek skip. */
 class PlaybackComfortTest {
+
+    @Test
+    fun sleepDelayIsMinutesInMillis() {
+        assertEquals(15 * 60_000L, PlaybackComfort.sleepDelayMillis(15))
+        assertEquals(30 * 60_000L, PlaybackComfort.sleepDelayMillis(30))
+        assertEquals(60 * 60_000L, PlaybackComfort.sleepDelayMillis(60))
+        assertEquals(90 * 60_000L, PlaybackComfort.sleepDelayMillis(90))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun sleepDelayRejectsNonPositive() {
+        PlaybackComfort.sleepDelayMillis(0)
+    }
+
+    @Test
+    fun sleepLabelOffWhenNull() {
+        assertEquals("Off", PlaybackComfort.sleepLabel(null))
+        assertEquals("30 min", PlaybackComfort.sleepLabel(30))
+    }
+
+    @Test
+    fun sleepChoicesAreFour() {
+        assertEquals(listOf(15, 30, 60, 90), PlaybackComfort.SLEEP_MINUTES)
+    }
 
     @Test
     fun speedLabels() {
@@ -48,6 +71,12 @@ class PlaybackComfortTest {
         assertEquals(999_999L, PlaybackComfort.clampSeek(999_999L, -1L))
     }
 
+    // Extra cases from a Gemini review pass (7.1.0).
+    @Test(expected = IllegalArgumentException::class)
+    fun sleepDelayRejectsNegative() {
+        PlaybackComfort.sleepDelayMillis(-15)
+    }
+
     @Test
     fun clampSeekExactBoundaries() {
         assertEquals(0L, PlaybackComfort.clampSeek(0L, 100L))
@@ -55,6 +84,12 @@ class PlaybackComfortTest {
         assertEquals(0L, PlaybackComfort.clampSeek(0L, 0L))
     }
 
+    @Test
+    fun clampSeekNegativeDurationWithPositivePosition() {
+        assertEquals(50L, PlaybackComfort.clampSeek(50L, -100L))
+    }
+
+    // 7.1.1: recording seek toast position.
     @Test
     fun formatSeekTimeMinutesAndSeconds() {
         assertEquals("0:00", PlaybackComfort.formatSeekTime(0L))
