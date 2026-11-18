@@ -4,6 +4,10 @@ import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.memory.MemoryCache
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Application (6.1.0): bounds Coil's memory cache for low-RAM
@@ -21,9 +25,17 @@ import coil.memory.MemoryCache
  */
 class OpenTvApp : Application(), ImageLoaderFactory {
 
+    /** 7.3.0: background work that must never block startup — the
+     * logo refresh runs here and nowhere else. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override fun onCreate() {
         super.onCreate()
         PlaylistRepository.preload(this)
+        // 7.3.0: refresh stale channel logos in the background (at
+        // most 25 per launch) so a provider's new art shows up
+        // without a reinstall.
+        appScope.launch { LogoRefresh.refreshStaleLogos(this@OpenTvApp) }
     }
 
     override fun newImageLoader(): ImageLoader =

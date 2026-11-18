@@ -133,6 +133,15 @@
     <string name="playback_speed_title">Playback speed</string>
     <string name="playback_speed_set">Playback speed: %1$s</string>
     <string name="recording_seek_position">%1$s / %2$s</string>
+    <!-- Audio & picture (7.3.0). -->
+    <string name="audio_track_menu">Audio: %1$s</string>
+    <string name="audio_track_title">Audio track</string>
+    <string name="audio_track_auto">Auto</string>
+    <string name="audio_track_set">Audio: %1$s</string>
+    <string name="subtitles_menu">Subtitles: %1$s</string>
+    <string name="subtitles_title">Subtitles</string>
+    <string name="subtitles_off">Off</string>
+    <string name="subtitles_set">Subtitles: %1$s</string>
     <string name="prefs_favorites_only">Guide shows favorites only</string>
     <string name="menu_external_player">Open in external player</string>
     <string name="menu_record">Record</string>

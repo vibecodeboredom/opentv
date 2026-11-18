@@ -223,6 +223,11 @@ class GuideActivity : FragmentActivity() {
      * picking another channel in the guide does not reset it to 1×.
      * 1× when the guide was opened from anywhere else. */
     private var incomingPlaybackSpeed: Float = 1f
+    /** 7.3.0: the audio / subtitle languages the playback handed
+     * over, forwarded to whatever channel the guide starts. */
+    private var incomingAudioLanguage: String? = null
+    private var incomingSubtitleLanguage: String? = null
+    private var incomingSubtitlesOff: Boolean = false
 
     /** Left sidebar (4.6.2, shared ChannelSidebar helper) — the same
      * groups/channels panel as playback, over the guide grid. */
@@ -238,6 +243,10 @@ class GuideActivity : FragmentActivity() {
         setContentView(R.layout.activity_guide)
         currentChannelId = intent.getStringExtra(EXTRA_CURRENT_CHANNEL_ID)
         incomingPlaybackSpeed = intent.getFloatExtra(PlaybackActivity.EXTRA_PLAYBACK_SPEED, 1f)
+        // 7.3.0: the audio / subtitle choices ride along too.
+        incomingAudioLanguage = intent.getStringExtra(PlaybackActivity.EXTRA_AUDIO_LANGUAGE)
+        incomingSubtitleLanguage = intent.getStringExtra(PlaybackActivity.EXTRA_SUBTITLE_LANGUAGE)
+        incomingSubtitlesOff = intent.getBooleanExtra(PlaybackActivity.EXTRA_SUBTITLES_OFF, false)
         container = findViewById(R.id.guide_container)
         pinnedCol = findViewById(R.id.guide_pinned_col)
         loading = findViewById(R.id.guide_loading)
@@ -626,10 +635,20 @@ class GuideActivity : FragmentActivity() {
     /** 7.1.1: forward the viewing-session state to a playback the
      * guide starts, so a channel picked here keeps the chosen
      * playback speed instead of resetting to 1×. Catch-up replays
-     * do not get it — speed is live-only. */
+     * do not get it — speed is live-only.
+     * 7.3.0: the audio / subtitle choices ride along too. */
     private fun forwardSessionExtras(intent: Intent) {
         if (incomingPlaybackSpeed != 1f) {
             intent.putExtra(PlaybackActivity.EXTRA_PLAYBACK_SPEED, incomingPlaybackSpeed)
+        }
+        incomingAudioLanguage?.let {
+            intent.putExtra(PlaybackActivity.EXTRA_AUDIO_LANGUAGE, it)
+        }
+        incomingSubtitleLanguage?.let {
+            intent.putExtra(PlaybackActivity.EXTRA_SUBTITLE_LANGUAGE, it)
+        }
+        if (incomingSubtitlesOff) {
+            intent.putExtra(PlaybackActivity.EXTRA_SUBTITLES_OFF, true)
         }
     }
 

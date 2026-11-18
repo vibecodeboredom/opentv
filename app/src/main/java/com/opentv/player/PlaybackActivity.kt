@@ -26,6 +26,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
+import androidx.media3.common.trackselection.TrackSelectionOverride
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -106,6 +108,15 @@ class PlaybackActivity : FragmentActivity() {
         /** 7.1.1: the chosen playback speed, carried across a channel
          * change so it survives a zap instead of resetting to 1×. */
         const val EXTRA_PLAYBACK_SPEED = "playback_speed"
+        /** 7.3.0: the chosen audio / subtitle languages, carried
+         * across a channel change the same way as the speed. A
+         * subtitle choice of "off" rides as its own boolean — a
+         * null language alone can't tell "never chosen" from
+         * "turned off", and a rebuild must not turn captions back
+         * on after the user switched them off. */
+        const val EXTRA_AUDIO_LANGUAGE = "audio_language"
+        const val EXTRA_SUBTITLE_LANGUAGE = "subtitle_language"
+        const val EXTRA_SUBTITLES_OFF = "subtitles_off"
         /** Dead streams are common in the playlist — auto-try another random channel this many times. */
         private const val MAX_AUTO_RETRY = 3
         /** Overlay auto-hides after this long with no key press. */
@@ -201,6 +212,21 @@ class PlaybackActivity : FragmentActivity() {
      * the guide); a channel change starts a new activity, so it
      * resets to 1× there. */
     private var playbackSpeed: Float = 1f
+    /** 7.3.0: the chosen audio / subtitle languages (null = Auto
+     * for audio, nothing chosen for subtitles). Remembered so a
+     * player rebuild re-applies them when the tracks reload, and
+     * carried across a channel change like the speed. */
+    private var selectedAudioLanguage: String? = null
+    private var selectedSubtitleLanguage: String? = null
+    /** 7.3.0: true once the user has turned subtitles off. A null
+     * selectedSubtitleLanguage alone can't tell "never chosen"
+     * from "turned off" — and a rebuilt player defaults to
+     * auto-selecting a subtitle, so the off state needs its own
+     * flag or a rebuild would turn captions back on. */
+    private var subtitlesOff: Boolean = false
+    /** 7.3.0: guard so re-applying a track choice inside
+     * onTracksChanged never loops on its own callback. */
+    private var reapplyingTracks = false
     /** True while the overlay up is a channel up/down flash (short
      * timeout); the first Left/Right press upgrades it to the normal
      * Left/Right timeout instead. */
@@ -341,6 +367,17 @@ class PlaybackActivity : FragmentActivity() {
         // speeds — a stray float from an old intent is ignored.
         val carriedSpeed = intent.getFloatExtra(EXTRA_PLAYBACK_SPEED, 1f)
         if (carriedSpeed in PlaybackComfort.SPEEDS) playbackSpeed = carriedSpeed
+        // 7.3.0: a channel change within a viewing session carries
+        // the chosen audio / subtitle languages along, like the
+        // speed. A fresh launch has no extras and starts on Auto
+        // audio with subtitles unset.
+        intent.getStringExtra(EXTRA_AUDIO_LANGUAGE)?.takeIf { it.isNotBlank() }?.let {
+            selectedAudioLanguage = it
+        }
+        intent.getStringExtra(EXTRA_SUBTITLE_LANGUAGE)?.takeIf { it.isNotBlank() }?.let {
+            selectedSubtitleLanguage = it
+        }
+        subtitlesOff = intent.getBooleanExtra(EXTRA_SUBTITLES_OFF, false)
         // Started by a channel up/down press: flash the info overlay
         // briefly once the EPG is in, instead of the now/next toast.
         val briefInfo = intent.getBooleanExtra(EXTRA_SHOW_BRIEF_INFO, false)
@@ -622,6 +659,13 @@ class PlaybackActivity : FragmentActivity() {
                     }
                 }
                 updateTransportIcons()
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                // 7.3.0: the tracks just loaded (or changed) — a
+                // player rebuild drops the overrides, so re-apply
+                // the chosen audio / subtitle languages here.
+                reapplyTrackSelections()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -1406,11 +1450,16 @@ class PlaybackActivity : FragmentActivity() {
     /** 7.1.1: carry the viewing-session state across a channel
      * change — the chosen playback speed, so it survives a zap. A
      * session that ends (BACK, timer fired) carries nothing, and
-     * the next launch starts fresh at 1×. */
+     * the next launch starts fresh at 1×.
+     * 7.3.0: the chosen audio / subtitle languages ride along
+     * too, so a zap doesn't reset them either. */
     private fun carrySessionExtras(intent: Intent) {
         if (playbackSpeed != 1f) {
             intent.putExtra(EXTRA_PLAYBACK_SPEED, playbackSpeed)
         }
+        selectedAudioLanguage?.let { intent.putExtra(EXTRA_AUDIO_LANGUAGE, it) }
+        selectedSubtitleLanguage?.let { intent.putExtra(EXTRA_SUBTITLE_LANGUAGE, it) }
+        if (subtitlesOff) intent.putExtra(EXTRA_SUBTITLES_OFF, true)
     }
 
     /** 5.0.0: leave a catch-up replay and return to the live stream
@@ -1583,6 +1632,24 @@ class PlaybackActivity : FragmentActivity() {
                 PlaybackComfort.speedLabel(playbackSpeed)
             ) to { showSpeedPicker() }
         }
+        // 7.3.0: audio track + subtitles — only when the stream
+        // actually carries a choice. A single audio track has
+        // nothing to pick, and a stream with no subtitles has
+        // nothing to toggle.
+        val audio = audioChoices()
+        if (audio.size > 1) {
+            entries += getString(
+                R.string.audio_track_menu,
+                TrackSelection.audioLabel(currentAudioLanguage())
+            ) to { showAudioPicker(audio) }
+        }
+        val subs = subtitleChoices()
+        if (subs.isNotEmpty()) {
+            entries += getString(
+                R.string.subtitles_menu,
+                TrackSelection.subtitleLabel(currentSubtitleLanguage())
+            ) to { showSubtitlePicker(subs) }
+        }
         AlertDialog.Builder(this)
             .setTitle(ch?.name ?: recordingName ?: getString(R.string.app_name))
             .setItems(entries.map { it.first }.toTypedArray()) { _, which ->
@@ -1655,6 +1722,197 @@ class PlaybackActivity : FragmentActivity() {
                     getString(
                         R.string.playback_speed_set,
                         PlaybackComfort.speedLabel(playbackSpeed)
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .show()
+            .also { trackDialog(it) }
+    }
+
+    // ------------------------------------------------------------------
+    // 7.3.0 — Audio track + subtitle selection
+    // ------------------------------------------------------------------
+
+    /** The audio tracks of the current stream as selectable choices
+     * — supported tracks only, in group order. Empty before the
+     * tracks have loaded. */
+    private fun audioChoices(): List<TrackSelection.TrackChoice> =
+        trackChoicesOfType(C.TRACK_TYPE_AUDIO)
+
+    /** The subtitle tracks of the current stream as selectable
+     * choices — supported tracks only, in group order. */
+    private fun subtitleChoices(): List<TrackSelection.TrackChoice> =
+        trackChoicesOfType(C.TRACK_TYPE_TEXT)
+
+    private fun trackChoicesOfType(type: Int): List<TrackSelection.TrackChoice> {
+        val p = player ?: return emptyList()
+        val choices = mutableListOf<TrackSelection.TrackChoice>()
+        var fallback = 0
+        p.currentTracks.groups.forEachIndexed { groupIndex, group ->
+            if (group.type != type) return@forEachIndexed
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                val format = group.getTrackFormat(i)
+                choices += TrackSelection.TrackChoice(
+                    groupIndex = groupIndex,
+                    trackIndex = i,
+                    label = TrackSelection.displayName(
+                        format.language, format.label, fallback++
+                    ),
+                    language = format.language
+                )
+            }
+        }
+        return choices
+    }
+
+    /** The language of the audio track actually playing now, or
+     * null when no audio track is selected yet. The menu shows
+     * this — not the stored choice — so Auto shows what the
+     * selector picked. */
+    private fun currentAudioLanguage(): String? =
+        currentSelectedLanguage(C.TRACK_TYPE_AUDIO)
+
+    /** The language of the subtitle track actually showing now, or
+     * null when none is selected. */
+    private fun currentSubtitleLanguage(): String? =
+        currentSelectedLanguage(C.TRACK_TYPE_TEXT)
+
+    private fun currentSelectedLanguage(type: Int): String? {
+        val p = player ?: return null
+        for (group in p.currentTracks.groups) {
+            if (group.type != type) continue
+            for (i in 0 until group.length) {
+                if (group.isTrackSelected(i)) return group.getTrackFormat(i).language
+            }
+        }
+        return null
+    }
+
+    /** Apply an audio choice — null is Auto (clear the override and
+     * let the selector pick). The language is remembered so a
+     * player rebuild re-applies it. */
+    private fun applyAudioChoice(choice: TrackSelection.TrackChoice?) {
+        val p = player ?: return
+        selectedAudioLanguage = choice?.language
+        val params = p.trackSelectionParameters.buildUpon()
+        if (choice == null) {
+            params.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+        } else {
+            val group = p.currentTracks.groups.getOrNull(choice.groupIndex) ?: return
+            params.setOverrideForType(
+                TrackSelectionOverride(group.mediaTrackGroup, listOf(choice.trackIndex))
+            )
+        }
+        p.trackSelectionParameters = params.build()
+    }
+
+    /** Apply a subtitle choice — null turns captions off (the text
+     * type is disabled); a choice enables the type and overrides
+     * it to that track. */
+    private fun applySubtitleChoice(choice: TrackSelection.TrackChoice?) {
+        val p = player ?: return
+        val params = p.trackSelectionParameters.buildUpon()
+        if (choice == null) {
+            subtitlesOff = true
+            selectedSubtitleLanguage = null
+            params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            params.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        } else {
+            subtitlesOff = false
+            selectedSubtitleLanguage = choice.language
+            val group = p.currentTracks.groups.getOrNull(choice.groupIndex) ?: return
+            params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            params.setOverrideForType(
+                TrackSelectionOverride(group.mediaTrackGroup, listOf(choice.trackIndex))
+            )
+        }
+        p.trackSelectionParameters = params.build()
+    }
+
+    /** Re-apply the chosen audio / subtitle languages when the
+     * tracks reload — a player rebuild (returning from the guide)
+     * or a stream track change drops the overrides. Only applies
+     * when the current selection does not already carry the
+     * language, so this never loops on its own onTracksChanged;
+     * the reapplying flag covers the synchronous case. */
+    private fun reapplyTrackSelections() {
+        if (reapplyingTracks) return
+        val p = player ?: return
+        val wantedAudio = selectedAudioLanguage
+        if (wantedAudio != null &&
+            currentAudioLanguage()?.equals(wantedAudio, ignoreCase = true) != true
+        ) {
+            TrackSelection.findByLanguage(audioChoices(), wantedAudio)?.let { choice ->
+                reapplyingTracks = true
+                applyAudioChoice(choice)
+                reapplyingTracks = false
+            }
+        }
+        if (subtitlesOff) {
+            // The user turned captions off — a rebuilt player
+            // defaults to auto-selecting a subtitle, so disable
+            // the text type again if it is not already off.
+            if (C.TRACK_TYPE_TEXT !in p.trackSelectionParameters.disabledTrackTypes) {
+                reapplyingTracks = true
+                applySubtitleChoice(null)
+                reapplyingTracks = false
+            }
+            return
+        }
+        val wantedSub = selectedSubtitleLanguage
+        if (wantedSub != null &&
+            currentSubtitleLanguage()?.equals(wantedSub, ignoreCase = true) != true
+        ) {
+            TrackSelection.findByLanguage(subtitleChoices(), wantedSub)?.let { choice ->
+                reapplyingTracks = true
+                applySubtitleChoice(choice)
+                reapplyingTracks = false
+            }
+        }
+    }
+
+    /** 7.3.0: audio-track picker — Auto first, then the stream's
+     * tracks. The toast names the choice, not the (possibly
+     * still-loading) effective track. */
+    private fun showAudioPicker(choices: List<TrackSelection.TrackChoice>) {
+        val labels = mutableListOf(getString(R.string.audio_track_auto))
+        labels += choices.map { it.label }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.audio_track_title)
+            .setItems(labels.toTypedArray()) { _, which ->
+                val choice = if (which == 0) null else choices[which - 1]
+                applyAudioChoice(choice)
+                Toast.makeText(
+                    this,
+                    getString(
+                        R.string.audio_track_set,
+                        TrackSelection.audioLabel(choice?.language)
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .show()
+            .also { trackDialog(it) }
+    }
+
+    /** 7.3.0: subtitle picker — Off first, then the stream's
+     * subtitle tracks. PlayerView's built-in subtitle view renders
+     * the chosen track; nothing else is needed to show captions. */
+    private fun showSubtitlePicker(choices: List<TrackSelection.TrackChoice>) {
+        val labels = mutableListOf(getString(R.string.subtitles_off))
+        labels += choices.map { it.label }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.subtitles_title)
+            .setItems(labels.toTypedArray()) { _, which ->
+                val choice = if (which == 0) null else choices[which - 1]
+                applySubtitleChoice(choice)
+                Toast.makeText(
+                    this,
+                    getString(
+                        R.string.subtitles_set,
+                        TrackSelection.subtitleLabel(choice?.language)
                     ),
                     Toast.LENGTH_SHORT
                 ).show()
