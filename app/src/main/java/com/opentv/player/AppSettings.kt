@@ -23,6 +23,7 @@ object AppSettings {
     private const val KEY_NIGHT_DIM = "night_dim_percent"
     private const val KEY_QUALITY_MODE = "quality_mode"
     private const val KEY_GUIDE_GROUP_FILTER = "guide_group_filter"
+    private const val KEY_GUIDE_ZOOM_HOURS = "guide_zoom_hours"
 
     /** 7.3.0 (Nova): stream quality modes for the playback
      * track selector. AUTO is the player's default adaptive
@@ -124,16 +125,54 @@ object AppSettings {
      * Stored raw; GuideData.effectiveGroupFilter validates it
      * against the loaded playlist on every guide build, so a
      * group that disappears from the playlist simply stops
-     * filtering instead of emptying the guide. */
-    fun guideGroupFilter(context: Context): String? =
-        prefs(context).getString(KEY_GUIDE_GROUP_FILTER, null)
+     * filtering instead of emptying the guide.
+     *
+     * 8.1.1 (Nova): the value is scoped to the active playlist
+     * (keyed by its URL, the playlist identity every other
+     * playlist operation uses), so switching playlists no longer
+     * carries one playlist's group into another. A value stored
+     * under the old global key is adopted by the first playlist
+     * that reads it, then removed. */
+    private fun groupFilterKey(context: Context): String =
+        KEY_GUIDE_GROUP_FILTER + "|" + PlaylistRepository.activePlaylist(context).url
+
+    fun guideGroupFilter(context: Context): String? {
+        val scoped = prefs(context).getString(groupFilterKey(context), null)
             ?.takeIf { it.isNotEmpty() }
+        if (scoped != null) return scoped
+        val legacy = prefs(context).getString(KEY_GUIDE_GROUP_FILTER, null)
+            ?.takeIf { it.isNotEmpty() } ?: return null
+        // Adopt the pre-8.1.1 global value for this playlist.
+        prefs(context).edit()
+            .putString(groupFilterKey(context), legacy)
+            .remove(KEY_GUIDE_GROUP_FILTER)
+            .apply()
+        return legacy
+    }
 
     fun setGuideGroupFilter(context: Context, group: String?) {
         val edit = prefs(context).edit()
-        if (group == null) edit.remove(KEY_GUIDE_GROUP_FILTER)
-        else edit.putString(KEY_GUIDE_GROUP_FILTER, group)
+        if (group == null) edit.remove(groupFilterKey(context))
+        else edit.putString(groupFilterKey(context), group)
+        edit.remove(KEY_GUIDE_GROUP_FILTER)
         edit.apply()
+    }
+
+    /** 8.1.1 (Nova): how many hours of the guide grid are visible
+     * at once (2, 3 or 4). GuideActivity turns this into a
+     * pixels-per-minute scale from the actual grid width, so the
+     * same choice means the same span on TV and phone. Default 3 —
+     * on a TV that lands within a whisker of the old fixed
+     * 4dp/minute scale. */
+    fun guideZoomHours(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_GUIDE_ZOOM_HOURS, 3)
+        return if (stored in 2..4) stored else 3
+    }
+
+    fun setGuideZoomHours(context: Context, hours: Int) {
+        prefs(context).edit()
+            .putInt(KEY_GUIDE_ZOOM_HOURS, hours.coerceIn(2, 4))
+            .apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */

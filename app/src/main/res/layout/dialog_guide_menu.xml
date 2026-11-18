@@ -144,6 +144,37 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.1.1 (Nova): how many hours the grid shows at once; the
+         label carries the current span (set in code). -->
+    <TextView
+        android:id="@+id/menu_guide_zoom"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_guide_zoom"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.1.1 (Nova): bring back every hidden channel; the label
+         carries the hidden count (set in code) and the row hides
+         in code when nothing is hidden. -->
+    <TextView
+        android:id="@+id/menu_unhide_all"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_unhide_all"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <TextView
         android:id="@+id/menu_programme_title"
         android:layout_width="match_parent"

@@ -235,6 +235,12 @@
     <string name="menu_group_filter">Group filter</string>
     <string name="guide_group_all">All groups</string>
     <string name="guide_group_picker_title">Show channels from</string>
+    <!-- Nova 8.1.1: guide zoom + unhide all. -->
+    <string name="menu_guide_zoom">Guide zoom</string>
+    <string name="guide_zoom_picker_title">Hours shown at once</string>
+    <string name="guide_zoom_hours">%1$d hours</string>
+    <string name="menu_unhide_all">Unhide all channels</string>
+    <string name="menu_channels_unhidden">All channels are visible again</string>
     <string name="track_label_sdh">%1$s (SDH)</string>
     <string name="track_label_dub">%1$s (Dub)</string>
     <string name="track_label_descriptive">%1$s (Descriptive)</string>

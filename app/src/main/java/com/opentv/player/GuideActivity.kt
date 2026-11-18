@@ -280,7 +280,10 @@ class GuideActivity : FragmentActivity() {
             channelSidebar.hide()
         }
 
-        pxPerMinute = dpToPx(PX_PER_MINUTE_DP)
+        // 8.1.1 (Nova): pxPerMinute is no longer a fixed scale —
+        // it is derived from the guide zoom setting once the final
+        // channel column width is known (after the mobile override
+        // below). See pxPerMinuteForZoom.
         channelColWidth = dpToPx(CHANNEL_COL_DP)
         px3 = dpToPx(3)
         px4 = dpToPx(4)
@@ -308,9 +311,9 @@ class GuideActivity : FragmentActivity() {
         // channel column, 180dp details header with a 300dp preview
         // box) — on a phone that leaves no room for the programmes.
         // Narrow the pinned column to 160dp and shrink the header to
-        // 120dp with a 120dp preview box. The grid itself keeps its
-        // 4dp/minute scale (a 30-minute show stays readable) and
-        // scrolls horizontally by touch, as before. Cards, long-press
+        // 120dp with a 120dp preview box. The grid's scale comes
+        // from the guide zoom setting (8.1.1; it used to be a fixed
+        // 4dp/minute) and scrolls horizontally by touch, as before. Cards, long-press
         // menu, and the sidebar already work with touch — no other
         // guide change was needed.
         if (DeviceType.isMobile(this)) {
@@ -319,6 +322,8 @@ class GuideActivity : FragmentActivity() {
             guideHeader.layoutParams.height = dpToPx(MOBILE_HEADER_HEIGHT_DP)
             guidePreviewBox.layoutParams.width = dpToPx(MOBILE_PREVIEW_WIDTH_DP)
         }
+
+        pxPerMinute = pxPerMinuteForZoom(AppSettings.guideZoomHours(this))
 
         // The star is a touch target only — it must never steal DPAD
         // focus, or the guide opens with nothing in the grid focused
@@ -1575,6 +1580,42 @@ class GuideActivity : FragmentActivity() {
             }
         }
 
+        // 8.1.1 (Nova): the guide zoom — how many hours the grid
+        // shows at once. The label carries the current span, like
+        // the group filter carries its group.
+        val zoomRow = view.findViewById<TextView>(R.id.menu_guide_zoom)
+        zoomRow.text = getString(R.string.menu_guide_zoom) + ": " +
+            getString(R.string.guide_zoom_hours, AppSettings.guideZoomHours(this))
+        zoomRow.setOnClickListener {
+            dialog.dismiss()
+            showGuideZoomPicker()
+        }
+
+        // 8.1.1 (Nova): unhide all — the hide/block actions in the
+        // channel section below write to PlaylistRepository's
+        // hidden set, but until now nothing anywhere could undo
+        // them short of clearing the app data. Only offered while
+        // at least one channel is hidden; the label carries the
+        // count, like the reminders row.
+        val unhideRow = view.findViewById<TextView>(R.id.menu_unhide_all)
+        val hiddenCount = PlaylistRepository.hiddenChannels(this).size
+        if (hiddenCount == 0) {
+            unhideRow.visibility = View.GONE
+        } else {
+            unhideRow.text = getString(R.string.menu_unhide_all) + " ($hiddenCount)"
+            unhideRow.setOnClickListener {
+                dialog.dismiss()
+                PlaylistRepository.unhideAllChannels(this)
+                Toast.makeText(
+                    this, R.string.menu_channels_unhidden, Toast.LENGTH_SHORT
+                ).show()
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
+            }
+        }
+
         view.findViewById<TextView>(R.id.menu_programme_title).text = programme.title
 
         view.findViewById<TextView>(R.id.menu_external_player).setOnClickListener {
@@ -1818,6 +1859,32 @@ class GuideActivity : FragmentActivity() {
             .show()
     }
 
+    /** 8.1.1 (Nova): pick how many hours the grid shows at once.
+     * Changing it re-derives pxPerMinute and rebuilds the grid;
+     * finishGuideBuild lands the view back on now, like a fresh
+     * open. */
+    private fun showGuideZoomPicker() {
+        val choices = intArrayOf(2, 3, 4)
+        val labels = choices
+            .map { getString(R.string.guide_zoom_hours, it) }
+            .toTypedArray()
+        val checked = choices.indexOf(AppSettings.guideZoomHours(this))
+            .coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.guide_zoom_picker_title)
+            .setSingleChoiceItems(labels, checked) { picker, which ->
+                AppSettings.setGuideZoomHours(this, choices[which])
+                picker.dismiss()
+                pxPerMinute = pxPerMinuteForZoom(choices[which])
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     /**
      * 8.1.0 (Nova): jump back to now — scroll the grid so the
      * now-line is in view (the same landing the guide opens with)
@@ -1934,6 +2001,21 @@ class GuideActivity : FragmentActivity() {
             resources.displayMetrics
         ).toInt()
 
+    /** 8.1.1 (Nova): the pixel scale for a guide zoom of [hours]
+     * visible at once — the grid viewport (screen width minus the
+     * pinned channel column) divided by the span. Everything in
+     * the grid (cards, ruler, now-line, scroll targets) derives
+     * from pxPerMinute, so this one value rescales it all. The
+     * 2dp/minute floor keeps a 30-minute show legible on narrow
+     * screens (there the span is wider than the pick, rather than
+     * the text becoming microscopic); if the width maths ever
+     * comes back empty, fall back to the pre-8.1.1 fixed scale. */
+    private fun pxPerMinuteForZoom(hours: Int): Int {
+        val visiblePx = resources.displayMetrics.widthPixels - channelColWidth
+        if (visiblePx <= 0) return dpToPx(PX_PER_MINUTE_DP)
+        return maxOf(dpToPx(2), visiblePx / (hours * 60))
+    }
+
     companion object {
         /** Intent extra: id of the channel playing underneath. */
         const val EXTRA_CURRENT_CHANNEL_ID = "current_channel_id"
@@ -1951,6 +2033,9 @@ class GuideActivity : FragmentActivity() {
         /** 6.1.2: minutes of past left visible beside "now" when the
          * guide opens with the past window — scroll left for more. */
         private const val PAST_VISIBLE_MINUTES = 30
+        /** Pre-8.1.1 fixed grid scale; since 8.1.1 it is only the
+         * fallback pxPerMinuteForZoom uses if the grid width maths
+         * ever comes back empty. */
         private const val PX_PER_MINUTE_DP = 4
         private const val CHANNEL_COL_DP = 320
         /** Thinner rows (was 72) so more channels fit on one TV screen. */
