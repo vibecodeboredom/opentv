@@ -1,6 +1,7 @@
 package com.opentv.player
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -400,5 +401,125 @@ class GuideDataTest {
         // 2026-11-07 00:00 UTC -> anchor is midnight itself.
         val now = 1_794_009_600_000L
         assertEquals(1_794_009_600_000L, GuideData.dayAnchorMillis(now, 0))
+    }
+
+    // 7.2.1: Tonight empty states — anyRealProgrammes is the check
+    // behind "favorites exist but nothing is on tonight".
+
+    @Test
+    fun anyRealProgrammesTrueWhenProgrammeOverlapsWindow() {
+        val windowStart = 1_794_081_600_000L // 2026-11-07 20:00 UTC
+        val cnn = channel("CNN.us", "CNN")
+        val epg = mapOf(
+            "CNN.us" to listOf(
+                EpgParser.Programme("CNN.us", windowStart + hour, windowStart + 2 * hour, "News")
+            )
+        )
+        assertTrue(GuideData.anyRealProgrammes(listOf(cnn), epg, windowStart, 5))
+    }
+
+    @Test
+    fun anyRealProgrammesFalseWhenProgrammesOutsideWindow() {
+        val windowStart = 1_794_081_600_000L
+        val cnn = channel("CNN.us", "CNN")
+        val epg = mapOf(
+            "CNN.us" to listOf(
+                // Ends exactly at window start: outside.
+                EpgParser.Programme("CNN.us", windowStart - hour, windowStart, "Old Show"),
+                // Starts after the 5h window: outside.
+                EpgParser.Programme("CNN.us", windowStart + 6 * hour, windowStart + 7 * hour, "Late Show")
+            )
+        )
+        assertFalse(GuideData.anyRealProgrammes(listOf(cnn), epg, windowStart, 5))
+    }
+
+    @Test
+    fun anyRealProgrammesFalseWithNoEpg() {
+        val windowStart = 1_794_081_600_000L
+        val espn = channel("ESPN.us", "ESPN")
+        assertFalse(GuideData.anyRealProgrammes(listOf(espn), emptyMap(), windowStart, 5))
+    }
+
+    @Test
+    fun anyRealProgrammesFalseWithNoChannels() {
+        val windowStart = 1_794_081_600_000L
+        assertFalse(GuideData.anyRealProgrammes(emptyList(), emptyMap(), windowStart, 5))
+    }
+
+    @Test
+    fun anyRealProgrammesUsesEpgOverride() {
+        val windowStart = 1_794_081_600_000L
+        val ch = channel("custom.1", "Custom")
+        val epg = mapOf(
+            "CNN.us" to listOf(
+                EpgParser.Programme("CNN.us", windowStart, windowStart + hour, "News")
+            )
+        )
+        assertTrue(
+            GuideData.anyRealProgrammes(
+                listOf(ch), epg, windowStart, 5,
+                epgOverrides = mapOf("custom.1" to "CNN.us")
+            )
+        )
+    }
+
+    @Test
+    fun anyRealProgrammesTrueWhenOnlySecondChannelHasProgrammeInWindow() {
+        // Gemini-generated edge case, restyled to match this file.
+        val windowStart = 1_794_081_600_000L
+        val cnn = channel("CNN.us", "CNN")
+        val espn = channel("ESPN.us", "ESPN")
+        val epg = mapOf(
+            "CNN.us" to listOf(
+                EpgParser.Programme("CNN.us", windowStart - 4 * hour, windowStart - 2 * hour, "Too Early")
+            ),
+            "ESPN.us" to listOf(
+                EpgParser.Programme("ESPN.us", windowStart + hour, windowStart + 3 * hour, "Inside Window")
+            )
+        )
+        assertTrue(GuideData.anyRealProgrammes(listOf(cnn, espn), epg, windowStart, 6))
+    }
+
+    // 7.2.1: window-size layout — the header/row/now-line math must
+    // hold at the 24 h size, not just 6 h.
+
+    @Test
+    fun layoutCellAt24hWindowStaysInsideWindow() {
+        val windowStart = 1_794_081_600_000L
+        val windowEnd = windowStart + 24 * hour
+        // A programme near the far end of a 24 h window.
+        val p = EpgParser.Programme(
+            "CNN.us", windowStart + 22 * hour, windowStart + 23 * hour, "Late Movie"
+        )
+        val layout = GuideData.layoutCell(p, windowStart, windowEnd)
+        assertEquals(22 * 60L, layout.startOffsetMinutes)
+        assertEquals(60L, layout.widthMinutes)
+        assertTrue(layout.startOffsetMinutes + layout.widthMinutes <= 24 * 60L)
+    }
+
+    @Test
+    fun layoutCellAt24hWindowClampsProgrammePastTheEnd() {
+        val windowStart = 1_794_081_600_000L
+        val windowEnd = windowStart + 24 * hour
+        // Starts inside, runs past the window end.
+        val p = EpgParser.Programme(
+            "CNN.us", windowStart + 23 * hour, windowStart + 25 * hour, "Long Movie"
+        )
+        val layout = GuideData.layoutCell(p, windowStart, windowEnd)
+        assertEquals(23 * 60L, layout.startOffsetMinutes)
+        assertEquals(60L, layout.widthMinutes)
+    }
+
+    @Test
+    fun tonightWindowIsFiveHoursRegardlessOfWindowSize() {
+        // Tonight is a fixed 6–11 PM window — the 6/12/24 h guide
+        // window size never stretches it.
+        withUtc {
+            val now = 1_794_083_400_000L // 2026-11-07 20:30 UTC
+            val (start, hours) = GuideData.tonightWindow(now)
+            assertEquals(5, hours)
+            // 6 PM is 2 hours before the 8 PM top-of-hour anchor.
+            assertEquals(GuideData.dayAnchorMillis(now, 0) - 2 * hour, start)
+        }
     }
 }

@@ -63,6 +63,27 @@ object GuideData {
     const val TONIGHT_START_HOUR = 18
     const val TONIGHT_HOURS = 5
 
+    /** True when any channel in [channels] has a real (non-placeholder)
+     * programme inside the window. 7.2.1: Tonight's empty states — a
+     * favorite with no EPG in the window still gets a "No
+     * information" placeholder row, so an empty row list is not the
+     * only empty case; this checks the EPG directly, without building
+     * any rows (placeholders only exist when nothing overlaps). */
+    fun anyRealProgrammes(
+        channels: List<Channel>,
+        epg: Map<String, List<EpgParser.Programme>>,
+        windowStartMillis: Long,
+        windowHours: Int = 6,
+        epgOverrides: Map<String, String> = emptyMap()
+    ): Boolean {
+        val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
+        return channels.any { channel ->
+            programmesForChannel(channel, epg, epgOverrides).any {
+                it.stopMillis > windowStartMillis && it.startMillis < windowEnd
+            }
+        }
+    }
+
     /** Build the row for one channel: its programmes inside the window,
      * or "No information" placeholders when it has none. Hidden
      * channels get no row (null). The window math lives here so the

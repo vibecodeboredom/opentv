@@ -112,6 +112,12 @@ class GuideActivity : FragmentActivity() {
     /** 7.2.0: Tonight quick view — favorites only, fixed 6–11 PM
      * window. While on, the window size setting does not apply. */
     private var tonightMode: Boolean = false
+    /** 7.2.1: the channel to land focus on after a rebuild the user
+     * triggered from another day or a window-size change — the
+     * channel they were actually viewing, not necessarily the one
+     * playing underneath. Set by goToDay and the onResume
+     * window-size rebuild; consumed by finishGuideBuild. */
+    private var pendingFocusChannelId: String? = null
     /** 6.1.2: how many hours of past the window covers (0 when the
      * past-programming setting is off — the old top-of-hour window). */
     private var pastHours: Int = 0
@@ -430,6 +436,10 @@ class GuideActivity : FragmentActivity() {
         if (!tonightMode && allRows.isNotEmpty() &&
             AppSettings.guideWindowHours(this) != forwardHours
         ) {
+            // 7.2.1: keep the channel the user was viewing — a
+            // window-size change used to snap focus back to the
+            // playing channel and lose their place in the list.
+            pendingFocusChannelId = focusedChannelId()
             // The anchor is "now" — refresh it, the guide may have
             // been open for hours before Settings was opened.
             nowMillis = System.currentTimeMillis()
@@ -738,6 +748,9 @@ class GuideActivity : FragmentActivity() {
     private fun goToDay(offset: Int) {
         dayOffset = offset.coerceIn(0, MAX_DAY_OFFSET)
         tonightMode = false
+        // 7.2.1: keep the channel the user was viewing — a day jump
+        // used to snap focus back to the playing channel.
+        pendingFocusChannelId = focusedChannelId()
         nowMillis = System.currentTimeMillis()
         computeWindow()
         lifecycleScope.launch {
@@ -745,6 +758,28 @@ class GuideActivity : FragmentActivity() {
             buildGuide(allRows)
             updateEpgFreshness()
         }
+    }
+
+    /** 7.2.1: the channel the user is actually looking at — from the
+     * focused programme card (its row's channel) or the focused
+     * channel cell — so a day jump or window-size change lands back
+     * on the same channel instead of snapping to the one playing.
+     * Null when nothing in the grid has focus yet. The card case
+     * walks up to the row layout (tagged with its row index) instead
+     * of assuming the immediate parent's type. */
+    private fun focusedChannelId(): String? {
+        val focused = currentFocus ?: return null
+        if (focused.tag is EpgParser.Programme) {
+            var parent = focused.parent
+            while (parent != null) {
+                val idx = (parent as? View)?.tag as? Int
+                if (idx != null) return displayRows.getOrNull(idx)?.channel?.id
+                parent = parent.parent
+            }
+            return null
+        }
+        val rowIdx = focused.tag as? Int
+        return rowIdx?.let { displayRows.getOrNull(it)?.channel?.id }
     }
 
     /** 7.2.0: pick a day to view — today through +MAX_DAY_OFFSET. */
@@ -785,14 +820,29 @@ class GuideActivity : FragmentActivity() {
         lifecycleScope.launch {
             rebuildRows()
             if (allRows.isEmpty()) {
-                showEmptyGuide()
-                if (enabled) {
-                    Toast.makeText(
-                        this@GuideActivity,
-                        R.string.menu_no_favorites,
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+                // No rows at all: Tonight with no favorites, the
+                // favorites-only view with no favorites, or a full
+                // guide with nothing to show — each gets its own
+                // message instead of the old generic search text.
+                showEmptyGuide(
+                    when {
+                        enabled -> R.string.guide_empty_no_favorites
+                        favoritesOnly -> R.string.menu_no_favorites
+                        else -> R.string.no_guide_data
+                    }
+                )
+            } else if (enabled &&
+                !GuideData.anyRealProgrammes(
+                    (allRows as? GuideData.LazyRows)?.channels
+                        ?: allRows.map { it.channel },
+                    epg, windowStart, windowHours
+                )
+            ) {
+                // 7.2.1: favorites exist, but none has a real
+                // programme in the 6–11 PM window — their rows are
+                // all "No information" placeholders, so the grid
+                // would show a blank screen with no message.
+                showEmptyGuide(R.string.guide_empty_tonight_no_programmes)
             } else {
                 emptyView.visibility = View.GONE
                 scroll.visibility = View.VISIBLE
@@ -802,14 +852,20 @@ class GuideActivity : FragmentActivity() {
         }
     }
 
-    /** Clear the grid and show the empty view (7.2.0: factored out
-     * of the favorites-only empty branch for Tonight to share). */
-    private fun showEmptyGuide() {
+    /** Clear the grid and show the empty view with [messageRes]
+     * (7.2.1: one generic "no results" text used to cover every
+     * empty case, including Tonight with no favorites — the message
+     * now says which empty it is and what to do about it). Also
+     * drops a pending focus channel: an emptied grid has no rows
+     * to land on, and a stale id must not divert a later rebuild. */
+    private fun showEmptyGuide(@androidx.annotation.StringRes messageRes: Int) {
+        pendingFocusChannelId = null
         container.removeAllViews()
         pinnedCol.removeAllViews()
         displayRows = emptyList()
         builtRowCount = 0
         scroll.visibility = View.GONE
+        emptyView.setText(messageRes)
         emptyView.visibility = View.VISIBLE
     }
 
@@ -870,19 +926,10 @@ class GuideActivity : FragmentActivity() {
         lifecycleScope.launch {
             rebuildRows()
             if (allRows.isEmpty()) {
-                container.removeAllViews()
-                pinnedCol.removeAllViews()
-                displayRows = emptyList()
-                builtRowCount = 0
-                scroll.visibility = View.GONE
-                emptyView.visibility = View.VISIBLE
-                if (enabled) {
-                    Toast.makeText(
-                        this@GuideActivity,
-                        R.string.menu_no_favorites,
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+                // 7.2.1: the empty text says why (no favorites yet)
+                // instead of the generic search message + a toast
+                // saying the same thing.
+                showEmptyGuide(R.string.menu_no_favorites)
             } else {
                 emptyView.visibility = View.GONE
                 scroll.visibility = View.VISIBLE
@@ -966,6 +1013,10 @@ class GuideActivity : FragmentActivity() {
     private fun applySearch(query: String) {
         currentSearchQuery = query
         searchJob?.cancel()
+        // 7.2.1: a search is fresh navigation — drop any pending
+        // focus channel from a day jump, so the results land on the
+        // first match instead of a stale channel.
+        pendingFocusChannelId = null
         if (query.trim().isEmpty()) {
             buildGuide(allRows)
             emptyView.visibility = View.GONE
@@ -992,6 +1043,10 @@ class GuideActivity : FragmentActivity() {
                 displayRows = emptyList()
                 builtRowCount = 0
                 scroll.visibility = View.GONE
+                // 7.2.1: the empty text is per-case now — a search
+                // with no matches must reset it to the search
+                // message, not keep a stale Tonight/favorites text.
+                emptyView.setText(R.string.guide_no_results)
                 emptyView.visibility = View.VISIBLE
             } else {
                 emptyView.visibility = View.GONE
@@ -1545,19 +1600,23 @@ class GuideActivity : FragmentActivity() {
 
     /** After the first rows are in: details header, focus, and the now-line. */
     private fun finishGuideBuild() {
-        // 6.1.2: land on the channel playing underneath instead of the
-        // first row — the user was tired of scrolling to find it. The
-        // guide only builds the first screenful eagerly, so if the
-        // current channel sits further down, build rows up to its row
-        // first (same work scrolling would do, once, on open). Falls
-        // back to the first row when the setting is off, the channel
-        // has no row (hidden), or the guide was opened with no
-        // current channel.
-        if (AppSettings.guideOpensOnCurrentChannel(this)) {
-            val idx = rowIndexOf(currentChannelId)
-            if (idx >= 0 && idx >= builtRowCount) {
-                appendRows(idx + 1 - builtRowCount)
+        // 7.2.1: land on the channel the user was viewing (a day
+        // jump or window-size change sets it) before the playing
+        // channel — jumping days used to snap focus back to the
+        // playing channel and lose the user's place in the list.
+        val pendingRow = rowIndexOf(pendingFocusChannelId).takeIf { it >= 0 }
+        pendingFocusChannelId = null
+        val landingRow = pendingRow
+            ?: if (AppSettings.guideOpensOnCurrentChannel(this)) {
+                rowIndexOf(currentChannelId).takeIf { it >= 0 } ?: 0
+            } else {
+                0
             }
+        // The guide only builds the first screenful eagerly, so if
+        // the landing row sits further down, build rows up to it
+        // first (same work scrolling would do, once, on open).
+        if (landingRow >= builtRowCount) {
+            appendRows(landingRow + 1 - builtRowCount)
         }
         // Show the current channel's now programme in the details
         // header when we have it, else the first programme on now.
@@ -1575,11 +1634,8 @@ class GuideActivity : FragmentActivity() {
         // 7.2.0: a day view or Tonight before 6 PM has no "now"
         // programme — focus the current channel's first card (or the
         // first row's) so the guide never opens with nothing focused.
-        val landingRow = if (AppSettings.guideOpensOnCurrentChannel(this)) {
-            rowIndexOf(currentChannelId).takeIf { it >= 0 } ?: 0
-        } else {
-            0
-        }
+        // 7.2.1: the landing row is the viewed channel (see above)
+        // when one was set, else the playing channel or row 0.
         val landingCard = focusCard ?: firstCardOfRow(landingRow)
         landingCard?.let { card ->
             container.post {

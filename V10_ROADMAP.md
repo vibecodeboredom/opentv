@@ -88,10 +88,11 @@ Rules (from Chuni, 2026-11-17):
   3 extra unit tests; GLM 429'd and sat this one out. Day math
   is DST-correct (Calendar day add, not fixed 24 h).
 
-### 7.2.1 (planned) — Patch
+### 7.2.1 ✅ (this release) — Patch
 
-- Fixes + polish from 7.2.0 testing on the TV: day-jump focus
-  landing, tonight-view empty states, and window-size layout.
+- Day-jump focus landing: jumping days (or changing the window size) keeps the channel you were actually viewing instead of snapping back to the playing channel. The pending focus is cleared when the grid goes empty or a search starts, so a stale channel never diverts a later rebuild.
+- Tonight empty states: Tonight with no favorites, and favorites with no real programmes in 6–11 PM (all "No information" placeholders), each get their own message instead of the generic search text. Favorites-only empty uses the no-favorites text; search with no matches still says so.
+- Window-size layout: the 6/12/24 h header, rows and now-line share one px-per-minute scale, so alignment holds at every size — locked by unit tests (24 h cell math, Tonight fixed at 5 h regardless of window size). A window-size change no longer yanks focus either (same pending-focus fix as day jumps).
 
 ### 7.3.0 (planned) — Audio & picture
 

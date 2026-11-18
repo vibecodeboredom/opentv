@@ -102,6 +102,8 @@
     <string name="menu_favorites_only_enabled">Showing favorites only</string>
     <string name="menu_favorites_only_disabled">Showing all channels</string>
     <string name="menu_no_favorites">No favorites yet — add some first</string>
+    <string name="guide_empty_no_favorites">No favorites yet. Long-press a programme and choose Add to favorites, then come back for tonight.</string>
+    <string name="guide_empty_tonight_no_programmes">No programmes tonight for your favorites. The guide has no data for 6 to 11 PM. Try Refresh guide data in the menu.</string>
     <!-- Guide, day by day (7.2.0). -->
     <string name="menu_prev_day">←  Previous day</string>
     <string name="menu_next_day">Next day  →</string>
