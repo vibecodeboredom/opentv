@@ -94,12 +94,12 @@ Rules (from Chuni, 2026-11-17):
 - Tonight empty states: Tonight with no favorites, and favorites with no real programmes in 6–11 PM (all "No information" placeholders), each get their own message instead of the generic search text. Favorites-only empty uses the no-favorites text; search with no matches still says so.
 - Window-size layout: the 6/12/24 h header, rows and now-line share one px-per-minute scale, so alignment holds at every size — locked by unit tests (24 h cell math, Tonight fixed at 5 h regardless of window size). A window-size change no longer yanks focus either (same pending-focus fix as day jumps).
 
-### 7.3.0 (planned) — Audio & picture
+### 7.3.0 ✅ (this release) — Audio & picture
 
-- Audio track selection in playback (multi-language streams).
-- Subtitle / closed-caption toggle where the stream carries them.
-- Channel-logo cache: stale logos refresh in the background
-  instead of only on reinstall.
+- Audio track selection in playback: for multi-language streams, pick the track (language) from the playback menu (Auto + per-track, shown only when the stream carries 2+ audio tracks). Choice survives channel changes within a session and player rebuilds.
+- Subtitle / closed-caption toggle: where the stream carries subtitles, pick one (or Off) from the playback menu; PlayerView's built-in subtitle view renders the chosen track. Off survives rebuilds and zaps.
+- Channel-logo cache: stale logos refresh in the background (7-day TTL, max 25 per launch, forced network fetch overwriting the disk entry) instead of only on reinstall.
+- Gemini lite reviewed the diff (1 finding — wrong on verification: Coil WRITE_ONLY + network DISABLED is the correct forced-refresh combo, and its suggested constant doesn't exist); Gemini also wrote 4 extra unit tests, all verified correct and added.
 
 ### 7.3.1 (planned) — Patch
 
