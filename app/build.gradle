@@ -17,7 +17,7 @@ android {
         applicationId 'com.opentv.player.combined'
         minSdk 26
         targetSdk 35
-        versionCode 74
+        versionCode 75
         versionName '10.0.0'
     }
 

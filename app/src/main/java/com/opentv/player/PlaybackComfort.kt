@@ -1,27 +1,18 @@
 package com.opentv.player
 
 /**
- * 7.1.0 — Playback comfort: sleep timer, playback speed, recording
- * seek skip. Pure logic — no Android classes — so the option lists,
- * labels and seek clamping are unit-testable; PlaybackActivity owns
- * the player, the timer handler and the dialogs.
+ * 7.1.0 — Playback comfort: playback speed and recording seek
+ * skip. Pure logic — no Android classes — so the option lists,
+ * labels and seek clamping are unit-testable; PlaybackActivity
+ * owns the player and the dialogs.
  * 7.1.1 — seek-time formatting, so a recording seek says where
  * it landed.
+ * Combined: the sleep-timer helpers that originally lived here
+ * are gone — the combined sleep timer is Nova's, self-contained
+ * in PlaybackActivity (deadline, end-of-programme, fade-out),
+ * and nothing read these copies.
  */
 object PlaybackComfort {
-
-    /** Sleep-timer choices offered in the playback menu (minutes). */
-    val SLEEP_MINUTES = listOf(15, 30, 60, 90)
-
-    /** Delay in ms for a sleep timer of [minutes] minutes. */
-    fun sleepDelayMillis(minutes: Int): Long {
-        require(minutes > 0) { "sleep timer minutes must be positive, was $minutes" }
-        return minutes * 60_000L
-    }
-
-    /** Menu label for the sleep timer: "Off" when null, else "30 min". */
-    fun sleepLabel(minutes: Int?): String =
-        minutes?.let { "$it min" } ?: "Off"
 
     /** 7.1.1: a playback position as "m:ss" or "h:mm:ss" for the
      * recording seek toast. Negative values clamp to zero. */

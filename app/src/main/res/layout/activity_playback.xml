@@ -91,6 +91,26 @@
         android:textSize="15sp"
         android:visibility="gone" />
 
+    <!-- Combined (Juniper 7.0.0): channel-number entry pill — shows
+         the digits typed on the remote ("Ch 12") until the entry
+         settles and playback jumps. Top-centre, above the video
+         (the mobile Guide button sits top-right). -->
+    <TextView
+        android:id="@+id/playback_number_entry"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="24dp"
+        android:background="@drawable/mobile_pill_bg"
+        android:textColor="#FFFFFF"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:visibility="gone" />
+
     <!-- Paused cluster (4.6.0, TiviMate-style): a large centred play icon
          shown while playback is paused; tapping it (or the transport
          play/pause button, or the remote's play/pause key) resumes. -->

@@ -140,6 +140,10 @@ class PlaybackActivity : FragmentActivity() {
          * minute before a sleep deadline the dim veil rises to
          * black, so playback pauses out of a fade, not a cut. */
         private const val SLEEP_FADE_MS = 60_000L
+        /** Combined (Juniper 7.0.0): a typed channel number jumps
+         * on its own after this long with no further digit — the
+         * same settle the guide's entry uses. */
+        private const val NUMBER_ENTRY_TIMEOUT_MS = 1500L
         /** Overlay auto-hides after this long with no key press. */
         private const val OVERLAY_TIMEOUT_MS = 10_000L
         /** 6.0.0-rc3: mobile overlay auto-hide — 5s idle, then it
@@ -223,6 +227,17 @@ class PlaybackActivity : FragmentActivity() {
         }
     }
     private var longPressFired = false
+    /** Combined (Juniper 7.0.0): channel-number entry — digits
+     * typed on the remote accumulate here, show in the top pill,
+     * and jump on Enter or after a 1.5 s settle. The guide has
+     * the same entry over its rows; here the jump switches the
+     * playing channel. */
+    private val numberEntry = ChannelNumberEntry()
+    private lateinit var numberEntryView: TextView
+    /** Set when an Enter confirmed a number jump: its key-UP is
+     * swallowed so it can't also run the normal OK action. */
+    private var numberEnterConsumed = false
+    private val numberJumpRunnable = Runnable { jumpToChannelNumber() }
     /** 7.0.0 (Nova): sleep timer — the minutes chosen (0 = off), the
      * wall-clock deadline it fires at, and the runnable that pauses
      * playback. The deadline survives a guide visit: onStop removes
@@ -464,6 +479,7 @@ class PlaybackActivity : FragmentActivity() {
         reconnectView = findViewById(R.id.reconnect_view)
         // 8.3.0 (Nova): surf hint pill + idle screensaver views.
         surfHint = findViewById(R.id.surf_hint)
+        numberEntryView = findViewById(R.id.playback_number_entry)
         idleSaverView = findViewById(R.id.idle_saver_view)
         idleSaverClock = findViewById(R.id.idle_saver_clock)
         idleSaverTitle = findViewById(R.id.idle_saver_title)
@@ -869,6 +885,14 @@ class PlaybackActivity : FragmentActivity() {
         if (playbackSpeed != 1f) player.setPlaybackSpeed(playbackSpeed)
         sessionStartMillis = System.currentTimeMillis()
         player.addListener(object : Player.Listener {
+            override fun onTracksChanged(tracks: Tracks) {
+                // Combined (Juniper 7.3.1): the channel's tracks
+                // are known — restore its remembered audio /
+                // subtitle picks (once per channel; the helper
+                // guards and retries while tracks are missing).
+                applyStoredTrackPicks()
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 // 9.0.0 (Nova): a recording played to the end is
                 // finished — retire its resume point, so the
@@ -1136,6 +1160,51 @@ class PlaybackActivity : FragmentActivity() {
         }
         val sidebarUp = channelSidebar.isVisible()
         val overlayUp = overlay.visibility == View.VISIBLE
+        // Combined (Juniper 7.0.0): swallow the key-UP of an Enter
+        // that confirmed a number jump — the DOWN already jumped,
+        // and the UP must not also run the normal OK action.
+        if (event.action == KeyEvent.ACTION_UP && numberEnterConsumed &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                event.keyCode == KeyEvent.KEYCODE_ENTER)
+        ) {
+            numberEnterConsumed = false
+            return true
+        }
+        // Combined (Juniper 7.0.0): channel-number entry — same as
+        // the guide: digits accumulate in the top pill, Enter jumps
+        // immediately, any other key cancels the entry and proceeds
+        // normally, and a 1.5 s pause jumps on its own. Not during
+        // recording playback (there is no channel list to jump in).
+        if (event.action == KeyEvent.ACTION_DOWN && recordingUri == null) {
+            val digit = when (event.keyCode) {
+                KeyEvent.KEYCODE_0 -> 0
+                KeyEvent.KEYCODE_1 -> 1
+                KeyEvent.KEYCODE_2 -> 2
+                KeyEvent.KEYCODE_3 -> 3
+                KeyEvent.KEYCODE_4 -> 4
+                KeyEvent.KEYCODE_5 -> 5
+                KeyEvent.KEYCODE_6 -> 6
+                KeyEvent.KEYCODE_7 -> 7
+                KeyEvent.KEYCODE_8 -> 8
+                KeyEvent.KEYCODE_9 -> 9
+                else -> -1
+            }
+            if (digit >= 0) {
+                if (sidebarUp) hideSidebar()
+                onNumberDigit(digit)
+                return true
+            }
+            if (!numberEntry.isEmpty()) {
+                if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    event.keyCode == KeyEvent.KEYCODE_ENTER
+                ) {
+                    numberEnterConsumed = true
+                    jumpToChannelNumber()
+                    return true
+                }
+                clearNumberEntry()
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
@@ -2015,6 +2084,51 @@ class PlaybackActivity : FragmentActivity() {
         }
     }
 
+    /** One digit of a channel number: show it in the top pill and
+     * re-arm the settle timeout (combined: Juniper 7.0.0). */
+    private fun onNumberDigit(digit: Int) {
+        val text = numberEntry.press(digit)
+        numberEntryView.text = getString(R.string.guide_number_entry, text)
+        numberEntryView.visibility = View.VISIBLE
+        infoHandler.removeCallbacks(numberJumpRunnable)
+        infoHandler.postDelayed(numberJumpRunnable, NUMBER_ENTRY_TIMEOUT_MS)
+    }
+
+    /** Hide the number pill and drop the pending entry. */
+    private fun clearNumberEntry() {
+        infoHandler.removeCallbacks(numberJumpRunnable)
+        numberEntry.clear()
+        numberEntryView.visibility = View.GONE
+    }
+
+    /** Jump to the typed channel number (combined: Juniper
+     * 7.0.0): switch playback to it, or toast when no visible
+     * channel has that number. Numbers run over the playlist in
+     * order, hidden channels skipped — the same numbering the
+     * guide's channel cells show. */
+    private fun jumpToChannelNumber() {
+        val number = numberEntry.value()
+        clearNumberEntry()
+        if (number == null) return
+        lifecycleScope.launch {
+            val result = PlaylistRepository.loadPlaylist(this@PlaybackActivity)
+            val channels = result.getOrNull() ?: return@launch
+            val hidden = PlaylistRepository.hiddenChannels(this@PlaybackActivity)
+            val target = GuideData.channelByNumber(
+                channels.filter { it.id !in hidden }, number
+            )
+            if (target == null) {
+                Toast.makeText(
+                    this@PlaybackActivity,
+                    getString(R.string.guide_no_channel_number, number),
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@launch
+            }
+            switchToChannel(target, briefInfo = true)
+        }
+    }
+
     /**
      * Switch playback to the given channel (sidebar, strip recents,
      * channel up/down, dead-stream auto-retry).
@@ -2530,6 +2644,7 @@ class PlaybackActivity : FragmentActivity() {
         optionsDialog = null
         hideOverlay()
         hideSidebar()
+        clearNumberEntry()
         stopSurfMode()
         reminderWatcher.stop()
         if (player == null) {
@@ -2563,6 +2678,7 @@ class PlaybackActivity : FragmentActivity() {
             optionsDialog = null
             hideOverlay()
             hideSidebar()
+            clearNumberEntry()
         } else {
             reminderWatcher.start()
         }
@@ -3202,11 +3318,30 @@ class PlaybackActivity : FragmentActivity() {
         selector.setParameters(builder.build())
     }
 
+    /** Combined (Juniper 7.3.1): the channel ids whose stored
+     * track picks (TrackPrefs) have already been applied to the
+     * running player. Keyed by channel id, so a zap re-arms the
+     * restore for the new channel, and a pick the user makes
+     * mid-channel — which re-saves the store — is never fought
+     * by a stale restore. */
+    private var storedAudioAppliedFor: String? = null
+    private var storedSubsAppliedFor: String? = null
+
     /** 7.3.1 (Nova): one selectable track of the running
      * stream, flattened out of its Tracks.Group for the picker
      * dialogs. The group is kept whole because a selection
      * override names the group, not the flattened position. */
-    private class TrackChoice(val group: Tracks.Group, val index: Int, val label: String)
+    private class TrackChoice(
+        val group: Tracks.Group,
+        val index: Int,
+        val label: String,
+        /** Combined (Juniper 7.3.1): the track's language code —
+         * the key a remembered pick is stored and matched by.
+         * Null when the stream reports none (or "undetermined"),
+         * so a language-less track can be picked for now but
+         * never restored by language later. */
+        val language: String?
+    )
 
     /** 7.3.1 (Nova): the running stream's supported tracks of
      * one type, in group order. Empty when the stream carries
@@ -3221,7 +3356,10 @@ class PlaybackActivity : FragmentActivity() {
             for (i in 0 until group.length) {
                 if (!group.isTrackSupported(i, false)) continue
                 number++
-                choices += TrackChoice(group, i, trackLabel(group.getTrackFormat(i), type, number))
+                val format = group.getTrackFormat(i)
+                choices += TrackChoice(
+                    group, i, trackLabel(format, type, number), trackLanguage(format)
+                )
             }
         }
         return choices
@@ -3261,6 +3399,14 @@ class PlaybackActivity : FragmentActivity() {
             else -> label
         }
     }
+
+    /** Combined (Juniper 7.3.1): a track's language code as
+     * TrackPrefs stores it — null for blank / undetermined, so
+     * "no language" never masquerades as a pickable language. */
+    private fun trackLanguage(format: Format): String? =
+        format.language?.takeIf {
+            it.isNotBlank() && it != C.LANGUAGE_UNDETERMINED
+        }
 
     /** 7.3.1 (Nova): add the subtitle / audio picker entries
      * to an options menu under construction — each only when
@@ -3325,8 +3471,25 @@ class PlaybackActivity : FragmentActivity() {
      * constraints stay in force alongside the pin. Pins are
      * per-stream: a zap rebuilds the selector, and an override
      * naming the old stream's groups could never match the
-     * new one anyway. */
+     * new one anyway.
+     * Combined (Juniper 7.3.1): a pick from the dialogs is also
+     * remembered per channel (TrackPrefs), so returning to the
+     * channel restores it — see applyStoredTrackPicks. */
     private fun applyTrackChoice(choice: TrackChoice) {
+        pinTrackChoice(choice)
+        val id = channel?.id ?: return
+        when (choice.group.type) {
+            C.TRACK_TYPE_AUDIO ->
+                TrackPrefs.saveAudio(this, id, choice.language)
+            C.TRACK_TYPE_TEXT ->
+                TrackPrefs.saveSubtitle(this, id, choice.language, off = false)
+        }
+    }
+
+    /** Pin one track on the running player without touching
+     * the remembered picks — the restore path's half of
+     * applyTrackChoice. */
+    private fun pinTrackChoice(choice: TrackChoice) {
         val selector = trackSelector ?: return
         val builder = selector.parameters.buildUpon()
         builder.setTrackTypeDisabled(choice.group.type, false)
@@ -3339,13 +3502,80 @@ class PlaybackActivity : FragmentActivity() {
     /** 7.3.1 (Nova): subtitles off — disable the track type
      * outright and drop any pin of that type, so turning
      * subtitles back on later starts from the player's own
-     * selection instead of resurrecting a stale pin. */
+     * selection instead of resurrecting a stale pin.
+     * Combined (Juniper 7.3.1): the Off is remembered per
+     * channel too — an explicit Off is a pick, told apart from
+     * never having picked at all. */
     private fun clearTrackChoice(type: Int) {
+        disableTrackType(type)
+        if (type == C.TRACK_TYPE_TEXT) {
+            channel?.id?.let { TrackPrefs.saveSubtitle(this, it, null, off = true) }
+        }
+    }
+
+    /** Disable one track type and drop its pins, without
+     * touching the remembered picks — the restore path's half
+     * of clearTrackChoice. */
+    private fun disableTrackType(type: Int) {
         val selector = trackSelector ?: return
         val builder = selector.parameters.buildUpon()
         builder.clearOverridesOfType(type)
         builder.setTrackTypeDisabled(type, true)
         selector.setParameters(builder.build())
+    }
+
+    /** Combined (Juniper 7.3.1): restore the audio / subtitle
+     * picks remembered for the playing channel once its tracks
+     * are known. Runs from the player's onTracksChanged; each
+     * type is applied once per channel (the guard is the
+     * channel id, so a zap re-arms it), and a type whose tracks
+     * have not arrived yet stays unapplied and retries on the
+     * next tracks change. A remembered language the stream no
+     * longer carries simply matches nothing and the player's
+     * own selection stands — the same fall-back as Juniper's
+     * findByLanguage. A remembered Auto (audio) drops any pin;
+     * a remembered Off (subtitles) disables the type. */
+    private fun applyStoredTrackPicks() {
+        if (recordingUri != null) return
+        val id = channel?.id ?: return
+        val stored = TrackPrefs.load(this, id)
+        if (storedAudioAppliedFor != id) {
+            if (!stored.audioSet) {
+                storedAudioAppliedFor = id
+            } else {
+                val choices = trackChoices(C.TRACK_TYPE_AUDIO)
+                if (choices.isNotEmpty()) {
+                    val wanted = stored.audioLanguage
+                    if (wanted == null) {
+                        trackSelector?.let { selector ->
+                            val builder = selector.parameters.buildUpon()
+                            builder.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            selector.setParameters(builder.build())
+                        }
+                    } else {
+                        choices.firstOrNull {
+                            it.language?.equals(wanted, ignoreCase = true) == true
+                        }?.let { pinTrackChoice(it) }
+                    }
+                    storedAudioAppliedFor = id
+                }
+            }
+        }
+        if (storedSubsAppliedFor != id) {
+            if (!stored.subtitleSet) {
+                storedSubsAppliedFor = id
+            } else {
+                val choices = trackChoices(C.TRACK_TYPE_TEXT)
+                if (choices.isNotEmpty()) {
+                    val wanted = stored.subtitleLanguage
+                    if (wanted == null) disableTrackType(C.TRACK_TYPE_TEXT)
+                    else choices.firstOrNull {
+                        it.language?.equals(wanted, ignoreCase = true) == true
+                    }?.let { pinTrackChoice(it) }
+                    storedSubsAppliedFor = id
+                }
+            }
+        }
     }
 
     /** 7.3.1 (Nova): restart the live stream from the menu —
@@ -3386,6 +3616,9 @@ class PlaybackActivity : FragmentActivity() {
         // READY or error sorts it out.
         infoHandler.removeCallbacks(reconnectRunnable)
         infoHandler.removeCallbacks(stallWatchdogRunnable)
+        // Combined (Juniper 7.0.0): a pending channel-number jump
+        // must not fire into a stopped activity either.
+        clearNumberEntry()
         // 8.3.0 (Nova): surf mode and the idle screensaver stop
         // with the activity too — a hop must never land in a
         // stopped activity, and a return visit never finds the
