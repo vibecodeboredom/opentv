@@ -232,9 +232,9 @@ object BackupManager {
      * backup at all (bad JSON, wrong format, newer version than this
      * build understands). Missing fields fall back to the defaults,
      * so a backup from an older 8.x still restores. */
-    /** Nova's own backup format marker (see NovaBackup) — decode
-     * accepts it too, so a backup written by the Nova line
-     * restores here with nothing dropped. */
+    /** Nova's old backup format marker — decode accepts it too,
+     * so a backup written by the Nova line restores here with
+     * nothing dropped. */
     const val NOVA_FORMAT = "opentv-nova-backup"
 
     fun decode(text: String): Result<BackupData> {

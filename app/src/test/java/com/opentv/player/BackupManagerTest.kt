@@ -255,6 +255,157 @@ class BackupManagerTest {
         ).getOrThrow()
         assertTrue(decoded.playlists.isEmpty())
     }
+
+    // ---- Combine: Nova's old format ("opentv-nova-backup") --------
+    //
+    // NovaBackup is gone — the unified BackupManager decodes its
+    // format too, so a backup written by the Nova line still
+    // imports with nothing dropped.
+
+    private val novaFormatJson = """
+        {"format":"opentv-nova-backup","version":1,
+        "playlists":[
+          {"name":"US Playlist","url":"https://example.com/us.m3u","enabled":true},
+          {"name":"Old One","url":"https://example.com/old.m3u","enabled":false}],
+        "activePlaylistUrl":"https://example.com/us.m3u",
+        "epgUrl":"https://example.com/epg.xml","uploadUrl":"",
+        "favorites":["chan-b","chan-a"],
+        "favoriteOrder":["chan-a","chan-b"],
+        "hiddenChannels":["chan-x"],
+        "reminders":[{"channelId":"chan-a","channelName":"Channel A",
+          "startMillis":1700000000000,"stopMillis":1700003600000,
+          "title":"The Big Match"}],
+        "scheduledRecordings":[{"channelId":"chan-b","channelName":"Channel B",
+          "channelUrl":"https://example.com/b.m3u8",
+          "startMillis":1700100000000,"stopMillis":1700103600000,
+          "title":"Late Film"}],
+        "epgOverrides":{"chan-a":"a.example.tv"},
+        "keywords":["news","★ derby"],
+        "settings":{"accentChoice":2,"guideTextSize":1,"channelListSize":"large",
+          "favoritesZap":true,"nightDimPercent":50,"qualityMode":2,
+          "guideZoomHours":4,"idleSaverEnabled":false,"surfIntervalSeconds":20,
+          "guideOpensOnCurrentChannel":false,"tvInfoFade":true,
+          "guideShowsPast":false,
+          "recordingAutoDeleteCapBytes":5368709120}}
+    """.trimIndent()
+
+    @Test
+    fun novaFormatDecodesWithAllNovaFields() {
+        val decoded = BackupManager.decode(novaFormatJson).getOrThrow()
+        assertEquals(
+            listOf(
+                BackupManager.BackupPlaylist(
+                    "US Playlist", "https://example.com/us.m3u", true
+                ),
+                BackupManager.BackupPlaylist(
+                    "Old One", "https://example.com/old.m3u", false
+                )
+            ),
+            decoded.playlists
+        )
+        assertEquals("https://example.com/us.m3u", decoded.activePlaylistUrl)
+        assertEquals(listOf("https://example.com/epg.xml"), decoded.epgUrls)
+        assertEquals(setOf("chan-b", "chan-a"), decoded.favorites)
+        assertEquals(listOf("chan-a", "chan-b"), decoded.favoriteOrder)
+        assertEquals(setOf("chan-x"), decoded.hiddenChannels)
+        assertEquals(
+            listOf(
+                BackupManager.BackupReminder(
+                    "chan-a", "Channel A",
+                    1_700_000_000_000L, 1_700_003_600_000L, "The Big Match"
+                )
+            ),
+            decoded.reminders
+        )
+        assertEquals(
+            listOf(
+                BackupManager.BackupScheduled(
+                    "chan-b", "Channel B", "https://example.com/b.m3u8",
+                    1_700_100_000_000L, 1_700_103_600_000L, "Late Film"
+                )
+            ),
+            decoded.scheduledRecordings
+        )
+        assertEquals(mapOf("chan-a" to "a.example.tv"), decoded.epgOverrides)
+        assertEquals(listOf("news", "★ derby"), decoded.keywords)
+        assertEquals(2, decoded.accentChoice)
+        assertEquals(1, decoded.guideTextSize)
+        assertTrue(decoded.favoritesZap)
+        assertEquals(50, decoded.nightDimPercent)
+        assertEquals(2, decoded.qualityMode)
+        assertEquals(4, decoded.guideZoomHours)
+        assertFalse(decoded.idleSaverEnabled)
+        assertEquals(20, decoded.surfIntervalSeconds)
+        assertEquals(5L * 1024 * 1024 * 1024, decoded.autoDeleteCapBytes)
+        assertEquals("large", decoded.channelListSize)
+        assertFalse(decoded.guideOpensOnCurrentChannel)
+        assertTrue(decoded.tvInfoFade)
+        assertFalse(decoded.guideShowsPast)
+        assertTrue(decoded.hasNovaData)
+        // A Nova backup never carried Juniper's group overrides or
+        // accessibility settings — restore must leave those alone.
+        assertFalse(decoded.hasGroupOverrides)
+        assertFalse(decoded.hasAccessibilitySettings)
+    }
+
+    @Test
+    fun novaFormatMinimalFileFlagsNovaData() {
+        val decoded = BackupManager.decode(
+            """{"format":"opentv-nova-backup","version":1,"favorites":["a"]}"""
+        ).getOrThrow()
+        assertEquals(listOf("a"), decoded.favorites)
+        assertTrue(decoded.hasNovaData)
+        assertTrue(decoded.reminders.isEmpty())
+        assertTrue(decoded.keywords.isEmpty())
+    }
+
+    @Test
+    fun novaFormatFutureVersionIsRejected() {
+        assertTrue(
+            BackupManager.decode(
+                """{"format":"opentv-nova-backup","version":99}"""
+            ).isFailure
+        )
+    }
+
+    @Test
+    fun unifiedFormatWithNovaFieldsRoundTrips() {
+        val data = sampleData().copy(
+            favoriteOrder = listOf("ch-2", "ch-1"),
+            reminders = listOf(
+                BackupManager.BackupReminder(
+                    "ch-1", "Channel 1", 1_700_000_000_000L,
+                    1_700_003_600_000L, "Show"
+                )
+            ),
+            scheduledRecordings = listOf(
+                BackupManager.BackupScheduled(
+                    "ch-2", "Channel 2", "https://example.com/2.m3u8",
+                    1_700_100_000_000L, 1_700_103_600_000L, "Film"
+                )
+            ),
+            keywords = listOf("news"),
+            accentChoice = 1,
+            guideTextSize = 1,
+            favoritesZap = true,
+            nightDimPercent = 25,
+            qualityMode = 1,
+            guideZoomHours = 4,
+            idleSaverEnabled = false,
+            surfIntervalSeconds = 30,
+            autoDeleteCapBytes = 2L * 1024 * 1024 * 1024
+        )
+        val decoded = BackupManager.decode(BackupManager.encode(data)).getOrThrow()
+        assertEquals(data, decoded)
+    }
+
+    @Test
+    fun preCombineBackupWithoutNovaKeysFlagsNovaDataAbsent() {
+        val decoded = BackupManager.decode(
+            """{"format":"opentv-backup","version":1,"playlists":[]}"""
+        ).getOrThrow()
+        assertFalse(decoded.hasNovaData)
+    }
 }
 
 /** 8.0.0: EPG source list parsing (the storage split). */
