@@ -8,7 +8,10 @@ import org.junit.Test
 class GroupOverridesTest {
 
     private fun channel(id: String, name: String, group: String) =
-        Channel(id = id, name = name, url = "http://example.com/$id", group = group)
+        Channel(
+            id = id, name = name, url = "http://example.com/$id", group = group,
+            logo = null, tvgId = null
+        )
 
     private fun sampleChannels() = listOf(
         channel("c1", "News One", "News"),
