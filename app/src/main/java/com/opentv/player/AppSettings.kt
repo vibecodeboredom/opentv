@@ -28,6 +28,9 @@ object AppSettings {
     private const val KEY_SURF_INTERVAL = "surf_interval_seconds"
     private const val KEY_ACCENT_COLOR = "accent_color"
     private const val KEY_GUIDE_TEXT_SIZE = "guide_text_size"
+    private const val KEY_REC_AUTO_DELETE_CAP = "rec_auto_delete_cap_bytes"
+    private const val KEY_REC_LAST_AUTO_FREED = "rec_last_auto_freed_bytes"
+    private const val KEY_GUIDE_KEYWORDS = "guide_keywords"
 
     /** 7.3.0 (Nova): stream quality modes for the playback
      * track selector. AUTO is the player's default adaptive
@@ -324,4 +327,74 @@ object AppSettings {
             guideRowHeightDp = 56
         )
     }
+
+    /** 9.2.0 (Nova): the recordings storage guard's cap, in
+     * bytes — 0 (the default) is off; the other offered values
+     * are 2 / 5 / 10 GB. When recordings on disk exceed the cap,
+     * RecordingManager deletes the oldest completed ones (never
+     * an in-progress recording, never the newest one) at app
+     * start and as recordings finish. Anything stored outside
+     * the offered values reads as off. */
+    val REC_CAP_OPTIONS_BYTES = longArrayOf(
+        0L, 2L * 1024 * 1024 * 1024, 5L * 1024 * 1024 * 1024, 10L * 1024 * 1024 * 1024
+    )
+
+    fun recordingAutoDeleteCapBytes(context: Context): Long {
+        val stored = prefs(context).getLong(KEY_REC_AUTO_DELETE_CAP, 0L)
+        return if (stored in REC_CAP_OPTIONS_BYTES) stored else 0L
+    }
+
+    fun setRecordingAutoDeleteCapBytes(context: Context, bytes: Long) {
+        prefs(context).edit()
+            .putLong(
+                KEY_REC_AUTO_DELETE_CAP,
+                if (bytes in REC_CAP_OPTIONS_BYTES) bytes else 0L
+            )
+            .apply()
+    }
+
+    /** 9.2.0 (Nova): bytes freed by the most recent storage-guard
+     * run that actually deleted something, waiting to be shown
+     * once on the Recordings screen ("Freed X by auto-delete").
+     * The recordings screen reads and clears it; 0 = nothing to
+     * report. */
+    fun lastAutoFreedBytes(context: Context): Long =
+        prefs(context).getLong(KEY_REC_LAST_AUTO_FREED, 0L)
+
+    fun setLastAutoFreedBytes(context: Context, bytes: Long) {
+        prefs(context).edit().putLong(KEY_REC_LAST_AUTO_FREED, bytes).apply()
+    }
+
+    /** 9.2.0 (Nova): the guide keyword markers — user-chosen
+     * words, one per line in prefs (the reminders' storage
+     * pattern). A programme whose title contains any keyword
+     * (case-insensitive) gets a ★ marker in the guide. Stored
+     * as entered (trimmed, blanks and case-insensitive duplicates
+     * dropped); matching lowercases both sides. */
+    fun guideKeywords(context: Context): List<String> {
+        val raw = prefs(context).getString(KEY_GUIDE_KEYWORDS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        val seen = HashSet<String>()
+        return raw.split("\n").mapNotNull { line ->
+            val word = line.trim()
+            if (word.isEmpty() || !seen.add(word.lowercase())) null else word
+        }
+    }
+
+    fun setGuideKeywords(context: Context, keywords: List<String>) {
+        val seen = HashSet<String>()
+        val clean = keywords.mapNotNull { word ->
+            val trimmed = word.trim()
+            if (trimmed.isEmpty() || !seen.add(trimmed.lowercase())) null else trimmed
+        }
+        prefs(context).edit()
+            .putString(KEY_GUIDE_KEYWORDS, clean.joinToString("\n"))
+            .apply()
+    }
+
+    /** The keywords as a lowercase set, for guide matching —
+     * GuideActivity computes this once per guide build so the
+     * per-cell check is a set scan + contains, nothing more. */
+    fun guideKeywordSetLower(context: Context): Set<String> =
+        guideKeywords(context).map { it.lowercase() }.toSet()
 }

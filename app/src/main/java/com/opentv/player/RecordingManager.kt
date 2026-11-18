@@ -124,6 +124,13 @@ object RecordingManager {
             context, RecordingService::class.java, id,
             STOP_REASON_USER_STOPPED, false
         )
+        // 9.2.0 (Nova): a recording just finished — give the
+        // storage guard its pass. The stop lands asynchronously,
+        // so this recording may still read as in-progress in this
+        // pass and only become deletable on the next one (app
+        // start / recordings visit); older recordings over the
+        // cap are still collected here.
+        enforceRecordingStorageCap(context)
     }
 
     /**
@@ -264,6 +271,48 @@ object RecordingManager {
     /** Total bytes used by recordings on disk. */
     fun totalBytesUsed(context: Context): Long =
         listRecordings(context).sumOf { it.bytesDownloaded }
+
+    /**
+     * 9.2.0 (Nova): the recordings storage guard. When the user
+     * has set a cap (AppSettings, default off) and recordings on
+     * disk exceed it, delete the OLDEST completed recordings
+     * until back under the cap. Two recordings are untouchable:
+     * anything still recording, and the single most recent
+     * recording — the guard never leaves the user with nothing,
+     * and never pulls a download out from under the recorder.
+     * Runs at app start (MainActivity), when a recording stops,
+     * and when the Recordings screen loads. Returns the bytes
+     * freed; a run that freed anything leaves a note the
+     * Recordings screen shows once ("Freed X by auto-delete").
+     * With the cap off this is one pref read and nothing else —
+     * in particular it never builds the DownloadManager.
+     */
+    @Synchronized
+    fun enforceRecordingStorageCap(context: Context): Long {
+        val cap = AppSettings.recordingAutoDeleteCapBytes(context)
+        if (cap <= 0L) return 0L
+        val recordings = listRecordings(context)
+        var total = recordings.sumOf { it.bytesDownloaded }
+        if (total <= cap) return 0L
+        // listRecordings is newest-first: index 0 is the most
+        // recent recording and is never deleted.
+        val newestId = recordings.firstOrNull()?.id
+        var freed = 0L
+        for (recording in recordings.asReversed()) {
+            if (total <= cap) break
+            if (recording.inProgress || recording.id == newestId) continue
+            deleteRecording(context, recording.id)
+            // A deleted recording's resume point goes with it,
+            // exactly as on the manual delete path.
+            PlaylistRepository.clearRecordingProgress(context, recording.id)
+            total -= recording.bytesDownloaded
+            freed += recording.bytesDownloaded
+        }
+        if (freed > 0L) {
+            AppSettings.setLastAutoFreedBytes(context, freed)
+        }
+        return freed
+    }
 
     fun formatBytes(bytes: Long): String = when {
         bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)

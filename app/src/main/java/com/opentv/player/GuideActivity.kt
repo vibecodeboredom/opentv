@@ -122,6 +122,11 @@ class GuideActivity : FragmentActivity() {
      * past-programming setting is off — the old top-of-hour window). */
     private var pastHours: Int = 0
     private var nowMillis: Long = 0L
+    /** 9.2.0 (Nova): the guide keyword markers' lowercase set,
+     * captured per build in rebuildRows (and once in onCreate,
+     * so a search rebuild before any full rebuild still marks).
+     * Empty = no markers. See markedTitle. */
+    private var keywordSetLower: Set<String> = emptySet()
     private var pxPerMinute: Int = 0
     private var channelColWidth: Int = 0
     /** Pixel values for the dp sizes used in the per-row / per-card
@@ -423,6 +428,9 @@ class GuideActivity : FragmentActivity() {
                 return@launch
             }
             nowMillis = System.currentTimeMillis()
+            // 9.2.0 (Nova): the keyword set's first capture —
+            // rebuildRows refreshes it on every full build.
+            keywordSetLower = AppSettings.guideKeywordSetLower(this@GuideActivity)
             // 6.1.2: past programming in the guide — the window starts
             // 4 hours before the top of the current hour (10 hours
             // total), so programmes that already aired are visible
@@ -698,6 +706,11 @@ class GuideActivity : FragmentActivity() {
         val epgMap = epg
         val hidden = PlaylistRepository.hiddenChannels(this)
         val overrides = PlaylistRepository.epgOverrides(this)
+        // 9.2.0 (Nova): the keyword-marker set for this build,
+        // captured with the other prefs reads — lowercased once
+        // here so the per-cell check in markedTitle is a set
+        // scan over contains, nothing heavier.
+        keywordSetLower = AppSettings.guideKeywordSetLower(this)
         // 8.1.0 (Nova): the group filter applies HERE, at the row
         // source — the channel list is restricted before rowChannels
         // / LazyRows ever see it, so the lazy machinery, the now-line
@@ -797,6 +810,21 @@ class GuideActivity : FragmentActivity() {
             else -> 0xFFFFFFFF.toInt()
         }
 
+    /** 9.2.0 (Nova): a programme's title as the guide displays
+     * it — the ⏪ catch-up prefix it has had since 5.0.0, plus a
+     * ★ in front when the title contains any of the user's
+     * keywords (Settings → Guide keywords). Display only: the
+     * stored programme title is never touched. The keyword set
+     * is precomputed per build (see rebuildRows); the per-cell
+     * cost is one lowercase of the title plus a contains scan
+     * over a handful of keywords. */
+    private fun markedTitle(programme: EpgParser.Programme, isCatchup: Boolean): String {
+        val base = if (isCatchup) "⏪ ${programme.title}" else programme.title
+        if (keywordSetLower.isEmpty()) return base
+        val lower = programme.title.lowercase()
+        return if (keywordSetLower.any { lower.contains(it) }) "★ $base" else base
+    }
+
     /** Show a channel + programme in the details header. The
      * channel-specific fields (name, category, logo) are only set
      * when the channel actually changed — focus moves between
@@ -809,10 +837,10 @@ class GuideActivity : FragmentActivity() {
         val channelChanged = detailChannelShown?.id != channel.id
         detailChannelShown = channel
         // 5.0.0: a catch-up programme gets the ⏪ marker here too.
+        // 9.2.0 (Nova): markedTitle also adds any ★ keyword marker.
         val isCatchup = programme.stopMillis <= nowMillis &&
             CatchUp.isAvailable(channel, programme, nowMillis)
-        detailTitle.text =
-            if (isCatchup) "⏪ ${programme.title}" else programme.title
+        detailTitle.text = markedTitle(programme, isCatchup)
         detailTime.text = GuideData.formatTimeRange(programme.startMillis, programme.stopMillis)
         if (channelChanged) {
             detailChannel.text = if (channel.number > 0) {
@@ -1220,7 +1248,9 @@ class GuideActivity : FragmentActivity() {
                 }
             }
             val titleView = TextView(this).apply {
-                text = if (isCatchup) "⏪ ${programme.title}" else programme.title
+                // 9.2.0 (Nova): markedTitle adds any ★ keyword
+                // marker on top of the ⏪ catch-up prefix.
+                text = markedTitle(programme, isCatchup)
                 // "Now" cells sit on the accent background, so their text
                 // is dark for contrast; past cells are muted grey, except
                 // catch-up ones, which are brighter — they can be played.

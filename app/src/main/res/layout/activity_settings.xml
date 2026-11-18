@@ -391,6 +391,85 @@
                 android:textSize="16sp" />
         </RadioGroup>
 
+        <!-- 9.2.0 (Nova): the recordings storage guard — when
+             recordings pass the chosen cap, the oldest completed
+             ones are deleted automatically (see RecordingManager). -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_rec_auto_delete"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/pref_rec_cap"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/pref_cap_off"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/prefs_cap_off"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_cap_2gb"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_cap_2gb"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_cap_5gb"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_cap_5gb"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_cap_10gb"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_cap_10gb"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+        </RadioGroup>
+
+        <!-- 9.2.0 (Nova): guide keyword markers — programmes
+             whose title contains a keyword get a ★ in the guide.
+             The button opens the add/remove dialog. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_guide_keywords"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/pref_keywords_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_keywords_manage" />
+
     </LinearLayout>
 
     <!-- Share playlist (4.7.1): temporarily host a playlist on this

@@ -335,4 +335,22 @@
     <string name="prefs_size_small">Small</string>
     <string name="prefs_size_medium">Medium</string>
     <string name="prefs_size_large">Large</string>
+    <!-- 9.2.0 (Nova): discovery row, recordings storage guard, keyword markers. -->
+    <string name="more_of_what_you_watch">More of what you watch</string>
+    <string name="recordings_auto_freed">Freed %1$s by auto-delete</string>
+    <string name="prefs_rec_auto_delete">Auto-delete oldest recordings over</string>
+    <string name="prefs_cap_off">Off</string>
+    <string name="prefs_cap_2gb">2 GB</string>
+    <string name="prefs_cap_5gb">5 GB</string>
+    <string name="prefs_cap_10gb">10 GB</string>
+    <string name="prefs_guide_keywords">Guide keyword markers</string>
+    <string name="prefs_keywords_manage">Manage keywords</string>
+    <string name="prefs_keywords_manage_count">Manage keywords (%1$d)</string>
+    <string name="keywords_add">Add keyword…</string>
+    <string name="keywords_add_title">Add keyword</string>
+    <string name="keywords_empty">No keywords yet. A programme whose title contains a keyword gets a ★ marker in the guide.</string>
+    <string name="keywords_hint">Tap a keyword to remove it. A programme whose title contains a keyword gets a ★ marker in the guide.</string>
+    <string name="keyword_added">Keyword added — %1$s</string>
+    <string name="keyword_duplicate">Already a keyword — %1$s</string>
+    <string name="keyword_removed">Keyword removed — %1$s</string>
 </resources>

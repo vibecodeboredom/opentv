@@ -40,6 +40,9 @@ class BrowseFragment : BrowseSupportFragment() {
             // a reminded programme flipping to "On now" while the
             // home screen sits open updates its card unprompted.
             refreshWatchlistRow()
+            // 9.2.0 (Nova): "More of what you watch" rides it
+            // too — its programmes roll over the same way.
+            refreshMoreRow()
             onNowHandler.postDelayed(this, ON_NOW_TICK_MS)
         }
     }
@@ -48,6 +51,10 @@ class BrowseFragment : BrowseSupportFragment() {
     // while hidden) and the signature of the entries it shows.
     private var watchlistRow: ListRow? = null
     private var watchlistSignature: String = ""
+    // 9.2.0 (Nova): state for the "More of what you watch" row,
+    // same pattern again.
+    private var moreRow: ListRow? = null
+    private var moreSignature: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,6 +100,9 @@ class BrowseFragment : BrowseSupportFragment() {
         // a reminder set in the guide a moment ago shows up here
         // without waiting for the ticker.
         refreshWatchlistRow()
+        // 9.2.0 (Nova): the discovery row likewise — watch
+        // history may have moved on while the user was away.
+        refreshMoreRow()
         onNowHandler.removeCallbacks(onNowTicker)
         onNowHandler.postDelayed(onNowTicker, ON_NOW_TICK_MS)
     }
@@ -145,6 +155,9 @@ class BrowseFragment : BrowseSupportFragment() {
                 if (epgMap != null) {
                     homeEpg = epgMap
                     refreshOnNowRow()
+                    // 9.2.0 (Nova): the discovery row needs the
+                    // EPG too (each card shows what's on now).
+                    refreshMoreRow()
                 }
             }.onFailure {
                 title = "OpenTV"
@@ -166,6 +179,9 @@ class BrowseFragment : BrowseSupportFragment() {
         // re-adds it.
         watchlistRow = null
         watchlistSignature = ""
+        // 9.2.0 (Nova): the discovery row likewise.
+        moreRow = null
+        moreSignature = ""
 
         val hidden = PlaylistRepository.hiddenChannels(requireContext())
         val favorites = PlaylistRepository.favorites(requireContext())
@@ -258,6 +274,10 @@ class BrowseFragment : BrowseSupportFragment() {
         // refreshWatchlistRow positions it under "On now" (or at
         // the top until that row lands with the EPG).
         refreshWatchlistRow()
+        // 9.2.0 (Nova): the discovery row goes under the
+        // watchlist (refreshMoreRow positions it; until the EPG
+        // lands it has nothing to show and stays hidden).
+        refreshMoreRow()
     }
 
     /**
@@ -422,9 +442,126 @@ class BrowseFragment : BrowseSupportFragment() {
         return if (onNowIndex >= 0) onNowIndex + 1 else 0
     }
 
+    /**
+     * 9.2.0 (Nova): the "More of what you watch" entries —
+     * discovery from the watch history the app already keeps.
+     * StatsManager's per-channel watch time (read-only here; no
+     * new tracking) is totalled per channel GROUP over the
+     * channels still in the playlist, the two heaviest groups
+     * win, and their channels the user has NOT watched recently
+     * (the Recently watched list) become the cards, each paired
+     * with what's on it right now exactly like the "On now" row.
+     * Too little history (fewer than three watched channels in
+     * the playlist) or no unwatched channel in those groups
+     * hides the row — a discovery row with nothing to discover
+     * is just noise.
+     */
+    private fun buildMoreEntries(): List<OnNowEntry> {
+        val epgMap = homeEpg ?: return emptyList()
+        if (homeChannels.isEmpty() || !isAdded) return emptyList()
+        val context = requireContext()
+        val hidden = PlaylistRepository.hiddenChannels(context)
+        val visibleById = HashMap<String, Channel>()
+        for (ch in homeChannels) {
+            if (ch.id !in hidden) visibleById[ch.id] = ch
+        }
+        val watched = StatsManager.getStats(context).topChannels
+            .mapNotNull { stat -> visibleById[stat.id]?.let { it to stat.watchMillis } }
+        if (watched.size < 3) return emptyList()
+        val groupWatch = HashMap<String, Long>()
+        for ((channel, millis) in watched) {
+            groupWatch[channel.group] = (groupWatch[channel.group] ?: 0L) + millis
+        }
+        // Heaviest groups first; the sort is stable, so equal
+        // totals keep first-watched order.
+        val topGroups = groupWatch.entries
+            .sortedByDescending { it.value }
+            .take(2)
+            .map { it.key }
+            .toSet()
+        if (topGroups.isEmpty()) return emptyList()
+        val recentIds = PlaylistRepository.recentChannelIds(context).toSet()
+        val overrides = PlaylistRepository.epgOverrides(context)
+        val now = System.currentTimeMillis()
+        val entries = mutableListOf<OnNowEntry>()
+        for (channel in homeChannels) {
+            if (entries.size >= MORE_ROW_MAX_ENTRIES) break
+            if (channel.id in hidden || channel.id in recentIds) continue
+            if (channel.group !in topGroups) continue
+            val current = GuideData.programmesForChannel(channel, epgMap, overrides)
+                .firstOrNull { now in it.startMillis until it.stopMillis }
+            if (current != null && current.title != GuideData.NO_INFORMATION) {
+                entries += OnNowEntry(channel, current)
+            }
+        }
+        return entries
+    }
+
+    /**
+     * 9.2.0 (Nova): insert, update or hide the "More of what you
+     * watch" row, under the watchlist row (or under "On now", or
+     * at the top). Mirrors refreshOnNowRow, including the 8.2.1
+     * in-place rebind when the programme set is unchanged, so
+     * the cards' progress and minutes-left advance on the ticker
+     * without a rebuild under the focus. The cards are plain
+     * [OnNowEntry]s, so the existing presenter and click
+     * handling (tap plays the channel) apply unchanged.
+     */
+    private fun refreshMoreRow() {
+        if (!isAdded || homeEpg == null) return
+        val entries = buildMoreEntries()
+        val signature = entries.joinToString("|") {
+            it.channel.id + "@" + it.programme.startMillis
+        }
+        if (entries.isEmpty()) {
+            moreRow?.let { rowsAdapter.remove(it) }
+            moreRow = null
+            moreSignature = ""
+            return
+        }
+        if (signature == moreSignature && moreRow != null) {
+            val rowAdapter = moreRow?.adapter as? ArrayObjectAdapter
+            if (rowAdapter != null && rowAdapter.size() > 0) {
+                rowAdapter.notifyArrayItemRangeChanged(0, rowAdapter.size())
+            }
+            return
+        }
+        val adapter = ArrayObjectAdapter(OnNowPresenter())
+        entries.forEach { adapter.add(it) }
+        val row = ListRow(HeaderItem(getString(R.string.more_of_what_you_watch)), adapter)
+        val existing = moreRow
+        if (existing != null) {
+            val index = rowsAdapter.indexOf(existing)
+            if (index >= 0) {
+                rowsAdapter.remove(existing)
+                rowsAdapter.add(index, row)
+            } else {
+                rowsAdapter.add(moreInsertIndex(), row)
+            }
+        } else {
+            rowsAdapter.add(moreInsertIndex(), row)
+        }
+        moreRow = row
+        moreSignature = signature
+    }
+
+    /** 9.2.0 (Nova): where a fresh discovery row belongs —
+     * under the watchlist row when it is showing, else under
+     * "On now", else at the top. */
+    private fun moreInsertIndex(): Int {
+        val watchlistIndex = watchlistRow?.let { rowsAdapter.indexOf(it) } ?: -1
+        if (watchlistIndex >= 0) return watchlistIndex + 1
+        val onNowIndex = onNowRow?.let { rowsAdapter.indexOf(it) } ?: -1
+        return if (onNowIndex >= 0) onNowIndex + 1 else 0
+    }
+
     private companion object {
         /** 8.2.0 (Nova): how often the "On now" row re-checks the
          * EPG while the home screen sits open. */
         const val ON_NOW_TICK_MS = 60_000L
+
+        /** 9.2.0 (Nova): the discovery row's card cap — a row,
+         * not a catalogue. */
+        const val MORE_ROW_MAX_ENTRIES = 12
     }
 }

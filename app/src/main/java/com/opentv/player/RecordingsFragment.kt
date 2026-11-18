@@ -54,6 +54,10 @@ class RecordingsFragment : BrowseSupportFragment() {
     }
 
     private fun loadRecordings() {
+        // 9.2.0 (Nova): the storage guard's recordings-screen
+        // pass, before listing, so what this screen shows is
+        // already within the cap. No-op when the cap is off.
+        RecordingManager.enforceRecordingStorageCap(requireContext())
         val recordings = RecordingManager.listRecordings(requireContext())
         // 8.2.0 (Nova): scheduled recordings get their own row at
         // the top — they are not downloads yet, so they don't count
@@ -64,7 +68,15 @@ class RecordingsFragment : BrowseSupportFragment() {
         // called totalBytesUsed, which re-ran the whole DownloadIndex
         // query just to sum the same rows.
         val used = recordings.sumOf { it.bytesDownloaded }
-        title = if (recordings.isEmpty()) {
+        // 9.2.0 (Nova): a storage-guard run that freed space
+        // leaves a one-line note, shown once in this title and
+        // then cleared — the header is where this screen already
+        // reports its total size.
+        val freedNote = AppSettings.lastAutoFreedBytes(requireContext())
+        if (freedNote > 0L) {
+            AppSettings.setLastAutoFreedBytes(requireContext(), 0L)
+        }
+        val baseTitle = if (recordings.isEmpty()) {
             getString(R.string.recordings)
         } else {
             getString(
@@ -72,6 +84,14 @@ class RecordingsFragment : BrowseSupportFragment() {
                 recordings.size,
                 RecordingManager.formatBytes(used)
             )
+        }
+        title = if (freedNote > 0L) {
+            baseTitle + " • " + getString(
+                R.string.recordings_auto_freed,
+                RecordingManager.formatBytes(freedNote)
+            )
+        } else {
+            baseTitle
         }
         rowsAdapter.clear()
         if (scheduled.isNotEmpty()) {

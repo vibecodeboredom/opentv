@@ -180,6 +180,37 @@ class SettingsActivity : FragmentActivity() {
                 )
             }
         }
+        // 9.2.0 (Nova): the recordings storage guard cap
+        // (Off / 2 / 5 / 10 GB), same RadioGroup pattern. The
+        // guard itself runs at app start, on recording stop and
+        // on the Recordings screen — this only stores the cap.
+        findViewById<RadioGroup>(R.id.pref_rec_cap).apply {
+            check(
+                when (AppSettings.recordingAutoDeleteCapBytes(this@SettingsActivity)) {
+                    AppSettings.REC_CAP_OPTIONS_BYTES[1] -> R.id.pref_cap_2gb
+                    AppSettings.REC_CAP_OPTIONS_BYTES[2] -> R.id.pref_cap_5gb
+                    AppSettings.REC_CAP_OPTIONS_BYTES[3] -> R.id.pref_cap_10gb
+                    else -> R.id.pref_cap_off
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setRecordingAutoDeleteCapBytes(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_cap_2gb -> AppSettings.REC_CAP_OPTIONS_BYTES[1]
+                        R.id.pref_cap_5gb -> AppSettings.REC_CAP_OPTIONS_BYTES[2]
+                        R.id.pref_cap_10gb -> AppSettings.REC_CAP_OPTIONS_BYTES[3]
+                        else -> 0L
+                    }
+                )
+            }
+        }
+        // 9.2.0 (Nova): guide keyword markers — the button
+        // shows the count and opens the add/remove dialog.
+        updateKeywordsButton()
+        findViewById<Button>(R.id.pref_keywords_button).setOnClickListener {
+            showKeywordsDialog()
+        }
 
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)
@@ -400,6 +431,82 @@ class SettingsActivity : FragmentActivity() {
                     }
                 }
             }
+            .show()
+    }
+
+    /** 9.2.0 (Nova): the keywords button's label carries the
+     * current count, so the setting reads at a glance. */
+    private fun updateKeywordsButton() {
+        val count = AppSettings.guideKeywords(this).size
+        findViewById<Button>(R.id.pref_keywords_button).text = if (count == 0) {
+            getString(R.string.prefs_keywords_manage)
+        } else {
+            getString(R.string.prefs_keywords_manage_count, count)
+        }
+    }
+
+    /** 9.2.0 (Nova): manage the guide keyword markers — the
+     * dialog lists the keywords (tap one to remove it) plus an
+     * "Add keyword…" row. After every change the dialog reopens
+     * on the new list, the same reopen pattern the guide's
+     * reminders list uses. */
+    private fun showKeywordsDialog() {
+        val keywords = AppSettings.guideKeywords(this)
+        val items = keywords + getString(R.string.keywords_add)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.prefs_guide_keywords)
+            .setMessage(
+                if (keywords.isEmpty()) R.string.keywords_empty else R.string.keywords_hint
+            )
+            .setItems(items.toTypedArray()) { _, which ->
+                if (which == keywords.size) {
+                    showAddKeywordDialog()
+                } else {
+                    val removed = keywords[which]
+                    AppSettings.setGuideKeywords(this, keywords - removed)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.keyword_removed, removed),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    updateKeywordsButton()
+                    showKeywordsDialog()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** 9.2.0 (Nova): add one keyword (duplicates and blanks are
+     * dropped by the store; the toast says when that happened). */
+    private fun showAddKeywordDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.keywords_add_title)
+            .setView(input)
+            .setPositiveButton(R.string.keywords_add) { _, _ ->
+                val word = input.text.toString().trim()
+                if (word.isNotEmpty()) {
+                    val before = AppSettings.guideKeywords(this)
+                    AppSettings.setGuideKeywords(this, before + word)
+                    val added = AppSettings.guideKeywords(this).size > before.size
+                    Toast.makeText(
+                        this,
+                        if (added) {
+                            getString(R.string.keyword_added, word)
+                        } else {
+                            getString(R.string.keyword_duplicate, word)
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    updateKeywordsButton()
+                }
+                showKeywordsDialog()
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> showKeywordsDialog() }
             .show()
     }
 
