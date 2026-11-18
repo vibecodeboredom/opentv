@@ -39,6 +39,26 @@ class BackupManagerTest {
     }
 
     @Test
+    fun groupOverridesSurviveTheRoundTrip() {
+        val data = sampleData().copy(
+            groupOverrides = GroupOverrides(
+                renames = mapOf("News" to "My News"),
+                order = listOf("Movies", "News"),
+                moves = mapOf("ch-1" to "Sports")
+            )
+        )
+        val decoded = BackupManager.decode(BackupManager.encode(data)).getOrThrow()
+        assertEquals(data.groupOverrides, decoded.groupOverrides)
+    }
+
+    @Test
+    fun oldBackupWithoutGroupOverridesDecodesToEmpty() {
+        val text = """{"format":"opentv-backup","version":1,"playlists":[],"epgUrls":[],"uploadUrl":"","favorites":[],"hiddenChannels":[],"epgOverrides":{},"trackPrefs":{},"settings":{}}"""
+        val decoded = BackupManager.decode(text).getOrThrow()
+        assertEquals(GroupOverrides(), decoded.groupOverrides)
+    }
+
+    @Test
     fun encodedTextIsMarkedAsABackup() {
         val text = BackupManager.encode(sampleData())
         assertTrue(text.contains("\"format\":\"opentv-backup\""))

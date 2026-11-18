@@ -54,6 +54,10 @@ object PlaylistRepository {
     private const val KEY_FAVORITES = "favorites"
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
+    /** 8.1.0: custom channel groups — renames, order, moves. */
+    private const val KEY_GROUP_RENAMES = "group_renames"
+    private const val KEY_GROUP_ORDER = "group_order"
+    private const val KEY_GROUP_MOVES = "group_moves"
     private const val KEY_RECENT = "recent_channels"
     /** 4.9.3: guide search queries, one per line, most recent first. */
     private const val KEY_RECENT_SEARCHES = "recent_searches"
@@ -99,6 +103,11 @@ object PlaylistRepository {
     /** Parsed EPG-overrides map, cached the same way. Only
      * setEpgOverride() changes it, and it invalidates the cache. */
     @Volatile private var epgOverridesCache: Map<String, String>? = null
+
+    /** Parsed group-overrides, cached the same way. Only the
+     * setGroup*() / moveChannelToGroup() calls change it, and they
+     * invalidate the cache. */
+    @Volatile private var groupOverridesCache: GroupOverrides? = null
 
     /**
      * Background refresh (4.7.0): when a snapshot is stale, the fresh
@@ -473,6 +482,92 @@ object PlaylistRepository {
         epgOverridesCache = null
         val raw = overrides.entries.joinToString("\n") { "${it.key}=${it.value}" }
         prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
+    }
+
+    // ---- Channel groups (8.1.0) ----------------------------------------
+    //
+    // Custom groups are overrides on top of the playlist's own
+    // group-title values — the playlist file is never edited. See
+    // GroupOverrides for the model; the three maps live in three
+    // keys, one per kind, so a rename never has to re-write the
+    // moves and a move never has to re-write the order.
+
+    /** The user's group overrides (renames, order, moves). */
+    fun groupOverrides(context: Context): GroupOverrides {
+        groupOverridesCache?.let { return it }
+        val parsed = GroupOverrides(
+            renames = GroupOverrides.decodeMap(
+                prefs(context).getString(KEY_GROUP_RENAMES, "") ?: ""
+            ),
+            order = GroupOverrides.decodeOrder(
+                prefs(context).getString(KEY_GROUP_ORDER, "") ?: ""
+            ),
+            moves = GroupOverrides.decodeMap(
+                prefs(context).getString(KEY_GROUP_MOVES, "") ?: ""
+            )
+        )
+        groupOverridesCache = parsed
+        return parsed
+    }
+
+    /** 8.1.0 — Replace the group overrides wholesale (backup restore). */
+    fun setGroupOverrides(context: Context, overrides: GroupOverrides) {
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(overrides.renames))
+            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(overrides.order))
+            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(overrides.moves))
+            .apply()
+    }
+
+    /** Rename a playlist group (by its playlist name). A blank new
+     * name clears the rename, so the group shows under its playlist
+     * name again. Names are cleaned so a stored line stays one line. */
+    fun setGroupRename(context: Context, group: String, newName: String) {
+        val clean = GroupOverrides.cleanGroupName(newName)
+        val current = groupOverrides(context).renames.toMutableMap()
+        if (clean.isBlank()) current.remove(group) else current[group] = clean
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(current))
+            .apply()
+    }
+
+    /** Replace the custom group order wholesale. */
+    fun setGroupOrder(context: Context, order: List<String>) {
+        val clean = order.map { GroupOverrides.cleanGroupName(it) }
+            .filter { it.isNotEmpty() }.distinct()
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(clean))
+            .apply()
+    }
+
+    /** Move a channel to another group (by the target group's
+     * playlist name). A blank target clears the move, so the channel
+     * goes back to the group its playlist entry carries. */
+    fun moveChannelToGroup(context: Context, channelId: String, group: String) {
+        val clean = GroupOverrides.cleanGroupName(group)
+        val current = groupOverrides(context).moves.toMutableMap()
+        if (clean.isBlank()) current.remove(channelId) else current[channelId] = clean
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(current))
+            .apply()
+    }
+
+    /** Hide several channels at once (bulk hide, 8.1.0). */
+    fun hideChannels(context: Context, channelIds: Collection<String>) {
+        val current = hiddenChannels(context).toMutableSet()
+        current.addAll(channelIds)
+        prefs(context).edit().putStringSet(KEY_HIDDEN, current).apply()
+    }
+
+    /** Unhide several channels at once (bulk unhide, 8.1.0). */
+    fun unhideChannels(context: Context, channelIds: Collection<String>) {
+        val current = hiddenChannels(context).toMutableSet()
+        current.removeAll(channelIds.toSet())
+        prefs(context).edit().putStringSet(KEY_HIDDEN, current).apply()
     }
 
     private fun savePlaylists(context: Context, list: List<Playlist>) {

@@ -7,10 +7,10 @@ import android.content.Context
  * install "yours" — playlists (including the text of local "file:"
  * playlists, so they survive the move), the active playlist, EPG
  * sources, the recording upload URL, favorites, hidden channels,
- * per-channel EPG overrides, per-channel track picks, and the guide
- * & playback settings — into one JSON file the user can share or
- * save, and restores it on another device so a new TV starts with
- * the same setup instead of from scratch.
+ * per-channel EPG overrides, per-channel track picks, custom channel
+ * groups (8.1.0), and the guide & playback settings — into one JSON
+ * file the user can share or save, and restores it on another device
+ * so a new TV starts with the same setup instead of from scratch.
  *
  * The encode / decode is pure (no Context, no Android framework) so
  * it is unit-testable on the JVM: org.json is a framework stub that
@@ -43,6 +43,8 @@ object BackupManager {
         val hiddenChannels: Set<String>,
         val epgOverrides: Map<String, String>,
         val trackPrefs: Map<String, String>,
+        /** 8.1.0 — custom channel groups (renames, order, moves). */
+        val groupOverrides: GroupOverrides = GroupOverrides(),
         val guideOpensOnCurrentChannel: Boolean,
         val tvInfoFade: Boolean,
         val guideShowsPast: Boolean,
@@ -84,6 +86,11 @@ object BackupManager {
             "hiddenChannels" to data.hiddenChannels.sorted(),
             "epgOverrides" to data.epgOverrides,
             "trackPrefs" to data.trackPrefs,
+            "groupOverrides" to linkedMapOf<String, Any?>(
+                "renames" to data.groupOverrides.renames,
+                "order" to data.groupOverrides.order,
+                "moves" to data.groupOverrides.moves
+            ),
             "settings" to linkedMapOf<String, Any?>(
                 "guideOpensOnCurrentChannel" to data.guideOpensOnCurrentChannel,
                 "tvInfoFade" to data.tvInfoFade,
@@ -119,6 +126,14 @@ object BackupManager {
             )
         }
         val settings = root["settings"] as? Map<*, *>
+        // 8.1.0: group overrides are optional — a backup from an
+        // older 8.x has no "groupOverrides" key and decodes to empty.
+        val groupOverridesRaw = root["groupOverrides"] as? Map<*, *>
+        val groupOverrides = GroupOverrides(
+            renames = stringMap(groupOverridesRaw?.get("renames")),
+            order = stringList(groupOverridesRaw?.get("order")),
+            moves = stringMap(groupOverridesRaw?.get("moves"))
+        )
         val playlists = (root["playlists"] as? List<*>)?.mapNotNull { item ->
             val entry = item as? Map<*, *> ?: return@mapNotNull null
             val name = entry["name"] as? String ?: return@mapNotNull null
@@ -140,6 +155,7 @@ object BackupManager {
                 hiddenChannels = stringList(root["hiddenChannels"]).toSet(),
                 epgOverrides = stringMap(root["epgOverrides"]),
                 trackPrefs = stringMap(root["trackPrefs"]),
+                groupOverrides = groupOverrides,
                 guideOpensOnCurrentChannel = settings?.get("guideOpensOnCurrentChannel") as? Boolean ?: true,
                 tvInfoFade = settings?.get("tvInfoFade") as? Boolean ?: true,
                 guideShowsPast = settings?.get("guideShowsPast") as? Boolean ?: true,
@@ -187,6 +203,7 @@ object BackupManager {
             hiddenChannels = PlaylistRepository.hiddenChannels(context),
             epgOverrides = PlaylistRepository.epgOverrides(context),
             trackPrefs = TrackPrefs.allEntries(context),
+            groupOverrides = PlaylistRepository.groupOverrides(context),
             guideOpensOnCurrentChannel = AppSettings.guideOpensOnCurrentChannel(context),
             tvInfoFade = AppSettings.tvInfoFade(context),
             guideShowsPast = AppSettings.guideShowsPast(context),
@@ -247,6 +264,7 @@ object BackupManager {
         PlaylistRepository.setFavorites(context, data.favorites)
         PlaylistRepository.setHiddenChannels(context, data.hiddenChannels)
         PlaylistRepository.setEpgOverrides(context, data.epgOverrides)
+        PlaylistRepository.setGroupOverrides(context, data.groupOverrides)
         TrackPrefs.restoreAll(context, data.trackPrefs)
         AppSettings.setGuideOpensOnCurrentChannel(context, data.guideOpensOnCurrentChannel)
         AppSettings.setTvInfoFade(context, data.tvInfoFade)

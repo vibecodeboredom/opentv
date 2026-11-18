@@ -184,6 +184,32 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.1.0: bulk hide / unhide — guide-level actions, so they
+         live in this menu with the other guide-level actions. -->
+    <TextView
+        android:id="@+id/menu_hide_channels"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_hide_channels"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <TextView
+        android:id="@+id/menu_unhide_channels"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_unhide_channels"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <TextView
         android:id="@+id/menu_programme_title"
         android:layout_width="match_parent"
@@ -268,6 +294,20 @@
         android:layout_height="wrap_content"
         android:background="@drawable/guide_menu_item_bg"
         android:text="@string/menu_hide_channel"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.1.0: move this channel to another group (an override —
+         the playlist itself is never changed). -->
+    <TextView
+        android:id="@+id/menu_move_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_move_to_group"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:padding="16dp"

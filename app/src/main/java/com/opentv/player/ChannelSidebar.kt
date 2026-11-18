@@ -283,19 +283,15 @@ class ChannelSidebar(
         val hidden = PlaylistRepository.hiddenChannels(activity)
         val favorites = PlaylistRepository.favorites(activity)
         val recents = PlaylistRepository.recentChannelIds(activity)
-        // Single pass for the visible count, the per-group counts and
-        // the favorites count — the old code built a filtered copy of
-        // the whole playlist, then scanned it once per group (groupingBy)
-        // and once more for favorites.
-        val groupCounts = mutableMapOf<String, Int>()
-        var visibleCount = 0
-        var favoriteCount = 0
-        for (ch in channels) {
-            if (ch.id in hidden) continue
-            visibleCount++
-            groupCounts[ch.group] = (groupCounts[ch.group] ?: 0) + 1
-            if (ch.id in favorites) favoriteCount++
-        }
+        // 8.1.0: groups are the EFFECTIVE groups — renames applied
+        // for the label, moves applied for the membership, custom
+        // order applied for the list. The counts are the visible
+        // channels in each effective group (hidden channels excluded,
+        // as before).
+        val overrides = PlaylistRepository.groupOverrides(activity)
+        val visible = channels.filter { it.id !in hidden }
+        val effectiveGroups = GroupOverrides.effectiveGroups(visible, overrides)
+        val favoriteCount = visible.count { it.id in favorites }
         val items = mutableListOf<SidebarAdapter.Item>()
         // 4.8.0: "Playlists" first — it opens the playlist picker,
         // not a channel list. The count is the enabled (switchable)
@@ -307,7 +303,7 @@ class ChannelSidebar(
             )
         )
         items += SidebarAdapter.Item.GroupItem(
-            SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visibleCount)
+            SidebarGroup(GROUP_ALL, activity.getString(R.string.sidebar_all_channels), visible.size)
         )
         items += SidebarAdapter.Item.GroupItem(
             SidebarGroup(
@@ -320,8 +316,10 @@ class ChannelSidebar(
                 GROUP_HISTORY, activity.getString(R.string.sidebar_history), recents.size
             )
         )
-        for ((g, count) in groupCounts) {
-            items += SidebarAdapter.Item.GroupItem(SidebarGroup(g, g, count))
+        for (view in effectiveGroups) {
+            items += SidebarAdapter.Item.GroupItem(
+                SidebarGroup(view.key, view.displayName, view.channels.size)
+            )
         }
         adapter.submitList(items, emptyMap(), activity.getString(R.string.overlay_no_info))
         if (items.isEmpty()) {
@@ -335,13 +333,17 @@ class ChannelSidebar(
     }
 
     /** The channels of one group (or a pseudo-group), capped at 200 rows.
-     * Builds synchronously when the playlist is already in memory. */
+     * Builds synchronously when the playlist is already in memory.
+     * 8.1.0: a real group key is the playlist group name; the title
+     * shows its display name (renames applied). */
     private fun buildChannels(groupKey: String) {
         val groupLabel = when (groupKey) {
             GROUP_ALL -> activity.getString(R.string.sidebar_all_channels)
             GROUP_FAVORITES -> activity.getString(R.string.favorites)
             GROUP_HISTORY -> activity.getString(R.string.sidebar_history)
-            else -> groupKey
+            else -> GroupOverrides.displayGroup(
+                groupKey, PlaylistRepository.groupOverrides(activity)
+            )
         }
         title.text = groupLabel
         adapter.submitList(emptyList(), emptyMap(), "")
@@ -362,6 +364,10 @@ class ChannelSidebar(
     /** Render one group's channels from a channel list. Main thread. */
     private fun renderChannels(groupKey: String, channels: List<Channel>) {
         val hidden = PlaylistRepository.hiddenChannels(activity)
+        // 8.1.0: a real group matches by EFFECTIVE group (moves
+        // applied), so a channel moved to another group shows under
+        // its new group, not the one its playlist entry carries.
+        val overrides = PlaylistRepository.groupOverrides(activity)
         // Single pass, no filtered copy of the whole playlist — the
         // old code built one, then filtered it a second time for the
         // group. The id map is only built for History, the one group
@@ -391,7 +397,9 @@ class ChannelSidebar(
             else -> {
                 val list = mutableListOf<Channel>()
                 for (ch in channels) {
-                    if (ch.id !in hidden && ch.group == groupKey) list += ch
+                    if (ch.id !in hidden &&
+                        GroupOverrides.effectiveGroup(ch, overrides) == groupKey
+                    ) list += ch
                 }
                 list
             }

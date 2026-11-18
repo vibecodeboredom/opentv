@@ -1118,7 +1118,13 @@ class GuideActivity : FragmentActivity() {
             } else {
                 channel.name
             }
-            detailCategory.text = channel.group
+            // 8.1.0: the group shown is the EFFECTIVE group (moves
+            // and renames applied), not the playlist's raw value.
+            val groupOverrides = PlaylistRepository.groupOverrides(this)
+            detailCategory.text = GroupOverrides.displayGroup(
+                GroupOverrides.effectiveGroup(channel, groupOverrides),
+                groupOverrides
+            )
             // Skip re-loading the same logo — but only for a real URL:
             // a null logo still loads every time (Coil shows the
             // placeholder), exactly as before. 6.1.0: downsampled to
@@ -1906,6 +1912,17 @@ class GuideActivity : FragmentActivity() {
             setTonightMode(!tonightMode)
         }
 
+        // 8.1.0: bulk hide / unhide — guide-level actions, so they
+        // live in this menu with the other guide-level actions.
+        view.findViewById<TextView>(R.id.menu_hide_channels).setOnClickListener {
+            dialog.dismiss()
+            showBulkHideDialog()
+        }
+        view.findViewById<TextView>(R.id.menu_unhide_channels).setOnClickListener {
+            dialog.dismiss()
+            showBulkUnhideDialog()
+        }
+
         view.findViewById<TextView>(R.id.menu_programme_title).text = programme.title
 
         view.findViewById<TextView>(R.id.menu_external_player).setOnClickListener {
@@ -1973,6 +1990,12 @@ class GuideActivity : FragmentActivity() {
                 rebuildRows()
                 buildGuide(allRows)
             }
+        }
+
+        // 8.1.0: move this channel to another group (an override).
+        view.findViewById<TextView>(R.id.menu_move_group).setOnClickListener {
+            dialog.dismiss()
+            showMoveToGroupDialog(channel)
         }
 
         view.findViewById<TextView>(R.id.menu_assign_epg).setOnClickListener {
@@ -2084,12 +2107,162 @@ class GuideActivity : FragmentActivity() {
             .show()
     }
 
+    // ---- Channel groups (8.1.0) ------------------------------------------
+    //
+    // Move one channel to another group, or hide / unhide several
+    // at once. All three are overrides — the playlist itself is
+    // never changed — and the guide rebuilds after each one.
+
+    /** Move one channel to another group: pick from the effective
+     * groups (display names), the channel's current group marked.
+     * Moving to the group it already belongs to clears the move. */
+    private fun showMoveToGroupDialog(channel: Channel) {
+        val overrides = PlaylistRepository.groupOverrides(this)
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val visible = allChannels.filter { it.id !in hidden }
+        val groups = GroupOverrides.effectiveGroups(visible, overrides)
+        if (groups.isEmpty()) return
+        val currentKey = GroupOverrides.effectiveGroup(channel, overrides)
+        val labels = groups.map { view ->
+            if (view.key == currentKey) "● ${view.displayName}" else view.displayName
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.move_to_group_title, channel.name))
+            .setItems(labels) { _, which ->
+                val target = groups[which].key
+                // Picking the group it already shows under changes
+                // nothing — no write, no toast, no rebuild.
+                if (target == currentKey) return@setItems
+                // Picking its playlist group clears a move override,
+                // so the channel goes back to its playlist group;
+                // any other pick stores the move.
+                val moveTo = if (target == channel.group) "" else target
+                PlaylistRepository.moveChannelToGroup(this, channel.id, moveTo)
+                Toast.makeText(
+                    this,
+                    getString(
+                        R.string.channel_moved_to_group,
+                        GroupOverrides.displayGroup(target, overrides)
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Bulk hide: pick a group, then tick several of its visible
+     * channels to hide them all at once. "All channels" lists the
+     * whole visible guide (playlist order). */
+    private fun showBulkHideDialog() {
+        val overrides = PlaylistRepository.groupOverrides(this)
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val visible = GuideData.rowChannels(guideChannels(), hidden)
+        if (visible.isEmpty()) {
+            Toast.makeText(this, R.string.hide_channels_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val groups = GroupOverrides.effectiveGroups(visible, overrides)
+        val groupLabels = groups.map { view ->
+            "${view.displayName} (${view.channels.size})"
+        }.toMutableList()
+        groupLabels.add(0, getString(R.string.sidebar_all_channels))
+        AlertDialog.Builder(this)
+            .setTitle(R.string.hide_channels_title)
+            .setItems(groupLabels.toTypedArray()) { _, which ->
+                val picked = if (which == 0) visible
+                else groups[which - 1].channels
+                showBulkHidePickDialog(picked)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** The tick-several dialog for one bulk-hide set. */
+    private fun showBulkHidePickDialog(candidates: List<Channel>) {
+        val labels = candidates.map { ch ->
+            if (ch.number > 0) "${ch.number}  ${ch.name}" else ch.name
+        }.toTypedArray()
+        val checked = BooleanArray(candidates.size)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.hide_channels_title)
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val picked = candidates.filterIndexed { i, _ -> checked[i] }
+                if (picked.isEmpty()) return@setPositiveButton
+                PlaylistRepository.hideChannels(this, picked.map { it.id })
+                Toast.makeText(
+                    this,
+                    getString(R.string.channels_hidden, picked.size),
+                    Toast.LENGTH_SHORT
+                ).show()
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Bulk unhide: tick several hidden channels to show them
+     * again. Hidden channels are few by nature, so one list covers
+     * them all — no group picker needed. */
+    private fun showBulkUnhideDialog() {
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        if (hidden.isEmpty()) {
+            Toast.makeText(this, R.string.unhide_channels_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val byId = allChannels.associateBy { it.id }
+        val candidates = hidden.mapNotNull { byId[it] }
+        if (candidates.isEmpty()) {
+            Toast.makeText(this, R.string.unhide_channels_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val labels = candidates.map { ch ->
+            if (ch.number > 0) "${ch.number}  ${ch.name}" else ch.name
+        }.toTypedArray()
+        val checked = BooleanArray(candidates.size)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.unhide_channels_title)
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val picked = candidates.filterIndexed { i, _ -> checked[i] }
+                if (picked.isEmpty()) return@setPositiveButton
+                PlaylistRepository.unhideChannels(this, picked.map { it.id })
+                Toast.makeText(
+                    this,
+                    getString(R.string.channels_unhidden, picked.size),
+                    Toast.LENGTH_SHORT
+                ).show()
+                lifecycleScope.launch {
+                    rebuildRows()
+                    buildGuide(allRows)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun showChannelOptions(channel: Channel) {
+        val overrides = PlaylistRepository.groupOverrides(this)
         val details = getString(
             R.string.menu_channel_details,
             channel.number,
             channel.name,
-            channel.group,
+            // 8.1.0: the effective group (moves + renames applied).
+            GroupOverrides.displayGroup(
+                GroupOverrides.effectiveGroup(channel, overrides), overrides
+            ),
             channel.tvgId ?: "—"
         )
         AlertDialog.Builder(this)

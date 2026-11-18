@@ -236,6 +236,33 @@
     <string name="backup_imported">Backup restored — %1$d playlists, %2$d favorites, %3$d EPG sources</string>
     <string name="backup_import_failed">That file is not a valid OpenTV backup.</string>
     <string name="backup_no_picker">No file picker on this TV.</string>
+    <!-- Channel groups (8.1.0): custom groups as overrides. -->
+    <string name="channel_groups_title">Channel groups</string>
+    <string name="channel_groups_hint">Rename groups, reorder them, and move channels between them — the playlist itself is never changed. Tap a group for its options.</string>
+    <string name="channel_groups_empty">No groups yet — load a playlist first.</string>
+    <string name="channel_groups_count">%1$d channels</string>
+    <string name="group_options_title">%1$s</string>
+    <string name="group_rename">Rename</string>
+    <string name="group_rename_title">Rename group</string>
+    <string name="group_rename_hint">New name, blank to use the playlist name</string>
+    <string name="group_renamed">Group renamed</string>
+    <string name="group_move_up">Move up</string>
+    <string name="group_move_down">Move down</string>
+    <string name="group_reset">Reset to playlist group</string>
+    <string name="group_reset_done">Group reset</string>
+    <string name="group_moved">Group moved</string>
+    <!-- Bulk hide / unhide (8.1.0). -->
+    <string name="menu_hide_channels">Hide channels…</string>
+    <string name="menu_unhide_channels">Show hidden channels…</string>
+    <string name="menu_move_to_group">Move to group…</string>
+    <string name="hide_channels_title">Hide channels</string>
+    <string name="unhide_channels_title">Show hidden channels</string>
+    <string name="hide_channels_none">No channels to hide here.</string>
+    <string name="unhide_channels_none">No hidden channels.</string>
+    <string name="channels_hidden">%1$d channels hidden</string>
+    <string name="channels_unhidden">%1$d channels shown again</string>
+    <string name="move_to_group_title">Move %1$s to…</string>
+    <string name="channel_moved_to_group">Moved to %1$s</string>
     <!-- Mobile (6.0.0-rc1): touch home screen + playback. -->
     <string name="mobile_continue_watching">▶  Continue watching</string>
     <string name="mobile_refresh">↻ Refresh</string>

@@ -123,6 +123,7 @@ class SettingsActivity : FragmentActivity() {
 
         buildPlaylistsUi()
         buildEpgSourcesUi()
+        buildChannelGroupsUi()
 
         // 6.1.2: guide & playback preferences — toggles save
         // immediately; the channel-list size applies the next time
@@ -231,6 +232,7 @@ class SettingsActivity : FragmentActivity() {
             uploadUrl.setText("")
             buildPlaylistsUi()
             buildEpgSourcesUi()
+            buildChannelGroupsUi()
         }
 
         findViewById<Button>(R.id.unhide_button).setOnClickListener {
@@ -698,6 +700,174 @@ class SettingsActivity : FragmentActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    // ---- Channel groups (8.1.0) ------------------------------------------
+    //
+    // One row per playlist group: display name + visible channel
+    // count. Long-press a row for Rename / Move up / Move down /
+    // Reset. Channels are moved between groups from the guide's
+    // long-press menu, not here — this screen manages the groups
+    // themselves. The rows build synchronously when the playlist is
+    // already in memory, else once the load lands.
+
+    /** All playlist groups (raw names, playlist order) with their
+     * effective visible counts — including groups whose channels
+     * were all moved away (0 channels), so they can still be
+     * renamed, reordered, or moved back into. */
+    private fun groupSummaries(
+        channels: List<Channel>
+    ): List<Triple<String, String, Int>> {
+        val overrides = PlaylistRepository.groupOverrides(this)
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val visible = channels.filter { it.id !in hidden }
+        val counts = GroupOverrides.effectiveGroups(visible, overrides)
+            .associate { it.key to it.channels.size }
+        return channels.map { it.group }.distinct().map { key ->
+            Triple(key, GroupOverrides.displayGroup(key, overrides), counts[key] ?: 0)
+        }
+    }
+
+    private fun buildChannelGroupsUi() {
+        val container = findViewById<LinearLayout>(R.id.channel_groups_list)
+        container.removeAllViews()
+        val cached = PlaylistRepository.cachedPlaylist()
+        if (cached != null) {
+            renderChannelGroups(cached)
+            return
+        }
+        lifecycleScope.launch {
+            val channels = PlaylistRepository.loadPlaylist(this@SettingsActivity)
+                .getOrNull() ?: emptyList()
+            renderChannelGroups(channels)
+        }
+    }
+
+    private fun renderChannelGroups(channels: List<Channel>) {
+        val container = findViewById<LinearLayout>(R.id.channel_groups_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val summaries = groupSummaries(channels)
+        if (summaries.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.channel_groups_empty)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+            })
+            return
+        }
+        for ((key, displayName, count) in summaries) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            val nameView = TextView(this).apply {
+                text = displayName
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val countView = TextView(this).apply {
+                text = getString(R.string.channel_groups_count, count)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            }
+            row.addView(nameView)
+            row.addView(countView)
+            // Tap opens the options too — on a TV remote OK fires a
+            // click, not a long-press, so long-press alone would
+            // leave the row dead for remote users.
+            row.setOnClickListener {
+                showGroupOptionsDialog(key, displayName)
+            }
+            row.setOnLongClickListener {
+                showGroupOptionsDialog(key, displayName)
+                true
+            }
+            container.addView(row)
+        }
+    }
+
+    /** Long-press options for one group: rename, move up/down in
+     * the sidebar order, or reset it to its playlist name + order. */
+    private fun showGroupOptionsDialog(groupKey: String, displayName: String) {
+        val labels = arrayOf(
+            getString(R.string.group_rename),
+            getString(R.string.group_move_up),
+            getString(R.string.group_move_down),
+            getString(R.string.group_reset)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.group_options_title, displayName))
+            .setItems(labels) { _, which ->
+                when (which) {
+                    0 -> showRenameGroupDialog(groupKey, displayName)
+                    1 -> moveGroup(groupKey, up = true)
+                    2 -> moveGroup(groupKey, up = false)
+                    3 -> resetGroup(groupKey)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showRenameGroupDialog(groupKey: String, displayName: String) {
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val input = EditText(this).apply {
+            setText(displayName)
+            hint = getString(R.string.group_rename_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.group_rename_title)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                PlaylistRepository.setGroupRename(this, groupKey, input.text.toString())
+                Toast.makeText(this, R.string.group_renamed, Toast.LENGTH_SHORT).show()
+                buildChannelGroupsUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Move a group one step up or down in the custom order. */
+    private fun moveGroup(groupKey: String, up: Boolean) {
+        val channels = PlaylistRepository.cachedPlaylist() ?: return
+        val allGroups = channels.map { it.group }.distinct()
+        val order = PlaylistRepository.groupOverrides(this).order
+        val full = order.filter { it in allGroups } +
+            allGroups.filter { it !in order }
+        val updated = GroupOverrides.reorderedOrder(order, allGroups, groupKey, up)
+        // No-op when the group is already first (up) or last (down).
+        if (updated == full) return
+        PlaylistRepository.setGroupOrder(this, updated)
+        Toast.makeText(this, R.string.group_moved, Toast.LENGTH_SHORT).show()
+        buildChannelGroupsUi()
+    }
+
+    /** Clear a group's rename and drop it from the custom order —
+     * it goes back to its playlist name and playlist position.
+     * Channels moved into it stay moved. */
+    private fun resetGroup(groupKey: String) {
+        PlaylistRepository.setGroupRename(this, groupKey, "")
+        val order = PlaylistRepository.groupOverrides(this).order - groupKey
+        PlaylistRepository.setGroupOrder(this, order)
+        Toast.makeText(this, R.string.group_reset_done, Toast.LENGTH_SHORT).show()
+        buildChannelGroupsUi()
     }
 
     // ---- Backup & restore (8.0.0) ----------------------------------------
