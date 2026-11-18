@@ -289,10 +289,27 @@ Rules (from Chuni, 2026-11-17):
   unit tests, all verified correct and added; GLM 429'd and sat
   this one out.
 
-### 9.1.1 (planned) — Patch
+### 9.1.1 ✅ (this release) — Patch
 
-- Fixes + polish from 9.1.0 testing on the TV: density layout
-  overflow, font scaling in the details header, and focus colours.
+- Density layout overflow: the guide row-height floor is now
+  font-aware (Large titles need 29dp, not the old flat 28dp), so
+  a Compact row can never clip the programme title; the guide
+  header's date cell and hour labels ellipsize instead of clipping
+  past their cells at Large (worst on the 160dp mobile column).
+- Font scaling in the details header: the header's title, channel,
+  star, time, remaining, category and freshness text now scale
+  with the font-size setting (they were fixed sizes before), and
+  the header is wrap_content with the platform height as its
+  minimum, so the scaled text can never push the bottom
+  freshness/category row out — on mobile it clipped even at
+  Medium with a two-line title.
+- Focus colours: the high-contrast outline now reaches the home
+  rails (channel/action/recording cards get a 3dp accent outline
+  when focused) and the guide channel cell (outline + brighter
+  fill, like the programme cells) — the two focus surfaces that
+  had none.
+- Gemini lite reviewed the diff (no findings) and wrote 1 extra
+  unit test; GLM 429'd on its review call and sat this one out.
 
 ### 9.2.0 (planned) — Performance
 
