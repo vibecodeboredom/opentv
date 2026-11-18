@@ -59,7 +59,9 @@ object BackupManager {
         val guideShowsPast: Boolean,
         val guideFavoritesOnly: Boolean,
         val channelListSize: String,
-        val guideWindowSize: String
+        val guideWindowSize: String,
+        /** 8.3.0 — auto-delete old recordings, days to keep (0 = off). */
+        val autoDeleteRecordingsDays: Int = 0
     )
 
     /** What a restore did, for the toast. */
@@ -106,7 +108,8 @@ object BackupManager {
                 "guideShowsPast" to data.guideShowsPast,
                 "guideFavoritesOnly" to data.guideFavoritesOnly,
                 "channelListSize" to data.channelListSize,
-                "guideWindowSize" to data.guideWindowSize
+                "guideWindowSize" to data.guideWindowSize,
+                "autoDeleteRecordingsDays" to data.autoDeleteRecordingsDays
             )
         )
         return Json.stringify(root)
@@ -175,7 +178,9 @@ object BackupManager {
                 guideShowsPast = settings?.get("guideShowsPast") as? Boolean ?: true,
                 guideFavoritesOnly = settings?.get("guideFavoritesOnly") as? Boolean ?: false,
                 channelListSize = settings?.get("channelListSize") as? String ?: "small",
-                guideWindowSize = settings?.get("guideWindowSize") as? String ?: "6"
+                guideWindowSize = settings?.get("guideWindowSize") as? String ?: "6",
+                autoDeleteRecordingsDays = (settings?.get("autoDeleteRecordingsDays") as? Number)
+                    ?.toInt()?.coerceAtLeast(0) ?: 0
             )
         )
     }
@@ -223,7 +228,8 @@ object BackupManager {
             guideShowsPast = AppSettings.guideShowsPast(context),
             guideFavoritesOnly = AppSettings.guideFavoritesOnly(context),
             channelListSize = AppSettings.channelListSize(context).name.lowercase(),
-            guideWindowSize = AppSettings.guideWindowSize(context).hours.toString()
+            guideWindowSize = AppSettings.guideWindowSize(context).hours.toString(),
+            autoDeleteRecordingsDays = AppSettings.autoDeleteRecordingsDays(context)
         )
     }
 
@@ -306,6 +312,7 @@ object BackupManager {
                 else -> AppSettings.GuideWindowSize.SIX
             }
         )
+        AppSettings.setAutoDeleteRecordingsDays(context, data.autoDeleteRecordingsDays)
         return RestoreReport(
             playlists = playlistCount,
             favorites = data.favorites.size,

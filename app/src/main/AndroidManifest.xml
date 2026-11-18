@@ -78,6 +78,12 @@
             android:name=".RecordStopReceiver"
             android:exported="false" />
 
+        <!-- 8.3.0: fires when a scheduled recording's programme
+             starts — starts the recording and schedules its stop. -->
+        <receiver
+            android:name=".RecordStartReceiver"
+            android:exported="false" />
+
         <!-- 8.0.0: share the backup file (written to the cache dir)
              with other apps — the share sheet gets a content:// URI,
              never a raw file path. -->

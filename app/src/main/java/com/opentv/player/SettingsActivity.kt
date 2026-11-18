@@ -125,6 +125,7 @@ class SettingsActivity : FragmentActivity() {
         buildEpgSourcesUi()
         buildMissingGuideUi()
         buildChannelGroupsUi()
+        buildRecordingsUi()
 
         // 6.1.2: guide & playback preferences — toggles save
         // immediately; the channel-list size applies the next time
@@ -247,6 +248,7 @@ class SettingsActivity : FragmentActivity() {
             buildEpgSourcesUi()
             buildMissingGuideUi()
             buildChannelGroupsUi()
+            buildRecordingsUi()
         }
 
         findViewById<Button>(R.id.unhide_button).setOnClickListener {
@@ -268,6 +270,9 @@ class SettingsActivity : FragmentActivity() {
         super.onResume()
         updateShareUi()
         startShareTicker()
+        // 8.3.0: a schedule may have been added or cancelled from
+        // the guide while Settings was open.
+        buildRecordingsUi()
     }
 
     override fun onPause() {
@@ -1035,6 +1040,111 @@ class SettingsActivity : FragmentActivity() {
         PlaylistRepository.setGroupOrder(this, order)
         Toast.makeText(this, R.string.group_reset_done, Toast.LENGTH_SHORT).show()
         buildChannelGroupsUi()
+    }
+
+    // ---- Recordings (8.3.0) ----------------------------------------------
+    //
+    // Auto-delete setting (a row that opens a picker) and the
+    // scheduled recordings picked in the guide (tap one to cancel
+    // it — the alarm is cancelled too).
+
+    private fun buildRecordingsUi() {
+        val keepDays = AppSettings.autoDeleteRecordingsDays(this)
+        findViewById<TextView>(R.id.recordings_auto_delete_row).apply {
+            text = getString(R.string.recordings_auto_delete_title) + ": " +
+                if (keepDays <= 0) getString(R.string.auto_delete_off)
+                else getString(R.string.auto_delete_days, keepDays)
+            setOnClickListener { showAutoDeleteDialog(keepDays) }
+        }
+        val container = findViewById<LinearLayout>(R.id.scheduled_recordings_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val scheduled = PlaylistRepository.scheduledRecordings(this)
+        if (scheduled.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.scheduled_recordings_empty)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+            })
+            return
+        }
+        for (rec in scheduled) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            val nameView = TextView(this).apply {
+                text = rec.programmeTitle
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val timeView = TextView(this).apply {
+                text = "${rec.channelName} • ${GuideData.formatDate(rec.startMillis)}, " +
+                    GuideData.formatClock(rec.startMillis)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            }
+            row.addView(nameView)
+            row.addView(timeView)
+            row.setOnClickListener { showCancelScheduledDialog(rec) }
+            row.setOnLongClickListener {
+                showCancelScheduledDialog(rec)
+                true
+            }
+            container.addView(row)
+        }
+    }
+
+    /** Pick how many days of finished recordings to keep (0 = off). */
+    private fun showAutoDeleteDialog(currentDays: Int) {
+        val options = intArrayOf(0, 7, 14, 30, 90)
+        val labels = options.map { days ->
+            if (days <= 0) getString(R.string.auto_delete_off)
+            else getString(R.string.auto_delete_days, days)
+        }.toTypedArray()
+        val checked = options.indexOf(currentDays).takeIf { it >= 0 } ?: 0
+        AlertDialog.Builder(this)
+            .setTitle(R.string.auto_delete_choose_title)
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                AppSettings.setAutoDeleteRecordingsDays(this, options[which])
+                dialog.dismiss()
+                buildRecordingsUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Confirm, then cancel the alarm and drop the schedule. */
+    private fun showCancelScheduledDialog(rec: ScheduledRecordings.ScheduledRecording) {
+        AlertDialog.Builder(this)
+            .setTitle(rec.programmeTitle)
+            .setMessage(
+                "${rec.channelName} • ${GuideData.formatDate(rec.startMillis)}, " +
+                    GuideData.formatTimeRange(rec.startMillis, rec.stopMillis)
+            )
+            .setPositiveButton(R.string.delete) { _, _ ->
+                RecordingManager.cancelScheduledRecording(this, rec.id)
+                PlaylistRepository.removeScheduledRecording(this, rec.id)
+                Toast.makeText(
+                    this, R.string.recording_schedule_cancelled, Toast.LENGTH_SHORT
+                ).show()
+                buildRecordingsUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // ---- Backup & restore (8.0.0) ----------------------------------------

@@ -103,7 +103,15 @@ class RecordingPresenter : Presenter() {
         val recording = item as Recording
         val cardView = viewHolder.view as ImageCardView
         cardView.titleText = recording.channelName
-        cardView.contentText = RecordingManager.formatBytes(recording.bytesDownloaded) +
+        // 8.3.0: per-recording storage + date on the card, not only
+        // in the options dialog — "Sat, Nov 7, 8:00 PM • 128 MB •
+        // Recording…". A recording with no start time recorded
+        // (old metadata) shows just the size.
+        val date = if (recording.startedAtMillis > 0) {
+            GuideData.formatDateTime(recording.startedAtMillis) + " • "
+        } else ""
+        cardView.contentText = date +
+            RecordingManager.formatBytes(recording.bytesDownloaded) +
             if (recording.inProgress) " • Recording…" else ""
         cardView.mainImage = ContextCompat.getDrawable(
             cardView.context,

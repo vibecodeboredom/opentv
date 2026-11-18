@@ -255,6 +255,21 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.3.0: record a future programme when it starts (or cancel
+         it). Hidden for past / on-now programmes and for the "No
+         information" placeholders — there is nothing to record. -->
+    <TextView
+        android:id="@+id/menu_schedule_recording"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_schedule_recording"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <TextView
         android:id="@+id/menu_channel_name"
         android:layout_width="match_parent"

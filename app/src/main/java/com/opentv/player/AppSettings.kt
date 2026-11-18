@@ -21,6 +21,11 @@ object AppSettings {
     private const val KEY_GUIDE_FAVORITES_ONLY = "guide_favorites_only"
     private const val KEY_CHANNEL_LIST_SIZE = "channel_list_size"
     private const val KEY_GUIDE_WINDOW_SIZE = "guide_window_size"
+    /** 8.3.0: auto-delete old recordings — days to keep (0 = off). */
+    private const val KEY_AUTO_DELETE_RECORDINGS_DAYS = "auto_delete_recordings_days"
+    /** 8.3.0: recordings list sort + filter (persist across opens). */
+    private const val KEY_RECORDINGS_SORT = "recordings_sort"
+    private const val KEY_RECORDINGS_FILTER = "recordings_filter"
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -113,6 +118,44 @@ object AppSettings {
 
     fun setChannelListSize(context: Context, size: ChannelListSize) {
         prefs(context).edit().putString(KEY_CHANNEL_LIST_SIZE, size.name.lowercase()).apply()
+    }
+
+    /** 8.3.0 — Auto-delete old recordings: how many days to keep
+     * (0 = off, keep everything). Enforced when the recordings
+     * screen opens and when a scheduled recording starts — the
+     * check never builds the DownloadManager just to prune, so it
+     * only runs where the recording infra is already awake. */
+    fun autoDeleteRecordingsDays(context: Context): Int =
+        prefs(context).getInt(KEY_AUTO_DELETE_RECORDINGS_DAYS, 0)
+
+    fun setAutoDeleteRecordingsDays(context: Context, days: Int) {
+        prefs(context).edit().putInt(KEY_AUTO_DELETE_RECORDINGS_DAYS, days.coerceAtLeast(0)).apply()
+    }
+
+    /** 8.3.0 — Recordings list sort (default Newest first). */
+    fun recordingsSort(context: Context): RecordingLibrary.Sort {
+        return runCatching {
+            RecordingLibrary.Sort.valueOf(
+                prefs(context).getString(KEY_RECORDINGS_SORT, "NEWEST") ?: "NEWEST"
+            )
+        }.getOrDefault(RecordingLibrary.Sort.NEWEST)
+    }
+
+    fun setRecordingsSort(context: Context, sort: RecordingLibrary.Sort) {
+        prefs(context).edit().putString(KEY_RECORDINGS_SORT, sort.name).apply()
+    }
+
+    /** 8.3.0 — Recordings list filter (default All). */
+    fun recordingsFilter(context: Context): RecordingLibrary.Filter {
+        return runCatching {
+            RecordingLibrary.Filter.valueOf(
+                prefs(context).getString(KEY_RECORDINGS_FILTER, "ALL") ?: "ALL"
+            )
+        }.getOrDefault(RecordingLibrary.Filter.ALL)
+    }
+
+    fun setRecordingsFilter(context: Context, filter: RecordingLibrary.Filter) {
+        prefs(context).edit().putString(KEY_RECORDINGS_FILTER, filter.name).apply()
     }
 
     /** Dimensions for the current channel-list size. */

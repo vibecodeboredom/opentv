@@ -145,6 +145,80 @@ object RecordingManager {
         alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, stopAtMillis, pending)
     }
 
+    /**
+     * 8.3.0 — Schedule a recording to START at a future programme's
+     * start time. Fires [RecordStartReceiver] at
+     * [recording.startMillis]; the receiver starts the recording and
+     * schedules its stop. Inexact like the stop alarm (no exact-alarm
+     * permission needed), so it may land a few minutes late. The
+     * request code comes from the schedule's id, so two programmes
+     * on one channel never share an alarm.
+     */
+    fun scheduleRecording(context: Context, recording: ScheduledRecordings.ScheduledRecording) {
+        val intent = Intent(context, RecordStartReceiver::class.java).apply {
+            putExtra(RecordStartReceiver.EXTRA_SCHEDULED_ID, recording.id)
+        }
+        val pending = PendingIntent.getBroadcast(
+            context,
+            recording.id.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, recording.startMillis, pending)
+    }
+
+    /** 8.3.0 — Cancel a scheduled recording's start alarm. The
+     * stored schedule itself is removed by
+     * PlaylistRepository.removeScheduledRecording. */
+    fun cancelScheduledRecording(context: Context, recordingId: String) {
+        val intent = Intent(context, RecordStartReceiver::class.java).apply {
+            putExtra(RecordStartReceiver.EXTRA_SCHEDULED_ID, recordingId)
+        }
+        val pending = PendingIntent.getBroadcast(
+            context,
+            recordingId.hashCode(),
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        ) ?: return
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.cancel(pending)
+        pending.cancel()
+    }
+
+    /**
+     * 8.3.0 — Delete the finished recordings older than [keepDays]
+     * days (see [RecordingLibrary.oldRecordings]), returning the
+     * ones deleted. The recordings screen calls this with the list
+     * it already fetched, so the DownloadIndex is not queried twice
+     * for one screen load — and the caller drops the returned ids
+     * from its fetched list instead of re-querying.
+     */
+    fun deleteOldRecordings(
+        context: Context,
+        recordings: List<Recording>,
+        keepDays: Int,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<Recording> {
+        val old = RecordingLibrary.oldRecordings(recordings, keepDays, nowMillis)
+        for (recording in old) {
+            deleteRecording(context, recording.id)
+        }
+        return old
+    }
+
+    /**
+     * 8.3.0 — The same pruning, fetching the list first — for
+     * callers that do not have one (the scheduled-record start
+     * receiver, which runs in the background). Returns how many
+     * were deleted.
+     */
+    fun pruneOldRecordings(
+        context: Context,
+        keepDays: Int,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Int = deleteOldRecordings(context, listRecordings(context), keepDays, nowMillis).size
+
     /** True while a channel's recording is actively downloading.
      * 6.1.0: does NOT create the DownloadManager. updateTransportIcons
      * calls this on every play/pause change and overlay open, and the

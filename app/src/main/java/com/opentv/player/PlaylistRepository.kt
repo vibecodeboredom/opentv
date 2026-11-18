@@ -61,6 +61,9 @@ object PlaylistRepository {
     private const val KEY_GROUP_RENAMES = "group_renames"
     private const val KEY_GROUP_ORDER = "group_order"
     private const val KEY_GROUP_MOVES = "group_moves"
+    /** 8.3.0: scheduled recordings, one per line (see
+     * ScheduledRecordings.encode). */
+    private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"
     private const val KEY_RECENT = "recent_channels"
     /** 4.9.3: guide search queries, one per line, most recent first. */
     private const val KEY_RECENT_SEARCHES = "recent_searches"
@@ -111,6 +114,11 @@ object PlaylistRepository {
      * setGroup*() / moveChannelToGroup() calls change it, and they
      * invalidate the cache. */
     @Volatile private var groupOverridesCache: GroupOverrides? = null
+
+    /** Parsed scheduled recordings, cached the same way. Only the
+     * add/removeScheduledRecording() calls change it, and they
+     * invalidate the cache. */
+    @Volatile private var scheduledRecordingsCache: List<ScheduledRecordings.ScheduledRecording>? = null
 
     /**
      * Background refresh (4.7.0): when a snapshot is stale, the fresh
@@ -594,6 +602,65 @@ object PlaylistRepository {
         prefs(context).edit()
             .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(current))
             .apply()
+    }
+
+    // ---- Scheduled recordings (8.3.0) ------------------------------------
+    //
+    // Future programmes picked in the guide. The stored list is
+    // pruned on read: a schedule whose programme already ended
+    // (the TV was off when its alarm fired) is dropped and the
+    // pruned list is written back, so it never sits in the list
+    // forever.
+
+    /** The scheduled recordings still in the future, soonest first. */
+    fun scheduledRecordings(context: Context): List<ScheduledRecordings.ScheduledRecording> {
+        scheduledRecordingsCache?.let { return it }
+        val decoded = ScheduledRecordings.decode(
+            prefs(context).getString(KEY_SCHEDULED_RECORDINGS, "") ?: ""
+        )
+        val upcoming = ScheduledRecordings.upcoming(decoded, System.currentTimeMillis())
+        if (upcoming.size != decoded.size) {
+            prefs(context).edit()
+                .putString(KEY_SCHEDULED_RECORDINGS, ScheduledRecordings.encode(upcoming))
+                .apply()
+        }
+        scheduledRecordingsCache = upcoming
+        return upcoming
+    }
+
+    /** Replace the scheduled recordings wholesale. */
+    fun setScheduledRecordings(
+        context: Context,
+        list: List<ScheduledRecordings.ScheduledRecording>
+    ) {
+        val upcoming = ScheduledRecordings.upcoming(list, System.currentTimeMillis())
+        scheduledRecordingsCache = null
+        prefs(context).edit()
+            .putString(KEY_SCHEDULED_RECORDINGS, ScheduledRecordings.encode(upcoming))
+            .apply()
+    }
+
+    /** Add a schedule. False when that channel + start time is
+     * already scheduled — the guide offers Cancel instead. */
+    fun addScheduledRecording(
+        context: Context,
+        recording: ScheduledRecordings.ScheduledRecording
+    ): Boolean {
+        val current = scheduledRecordings(context)
+        if (ScheduledRecordings.isScheduled(current, recording.channelId, recording.startMillis)) {
+            return false
+        }
+        setScheduledRecordings(context, current + recording)
+        return true
+    }
+
+    /** Drop the schedule with this id. False when there was none. */
+    fun removeScheduledRecording(context: Context, id: String): Boolean {
+        val current = scheduledRecordings(context)
+        val updated = ScheduledRecordings.withoutId(current, id)
+        if (updated.size == current.size) return false
+        setScheduledRecordings(context, updated)
+        return true
     }
 
     /** Hide several channels at once (bulk hide, 8.1.0). */

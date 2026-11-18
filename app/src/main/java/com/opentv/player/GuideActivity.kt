@@ -1951,6 +1951,56 @@ class GuideActivity : FragmentActivity() {
             showCustomRecordingPicker(channel)
         }
 
+        // 8.3.0: record this programme when it starts — only for
+        // future programmes with a real title. The row toggles to
+        // Cancel when it is already scheduled.
+        val scheduleRow = view.findViewById<TextView>(R.id.menu_schedule_recording)
+        val isFutureProgramme = programme.startMillis > System.currentTimeMillis() &&
+            programme.title != GuideData.NO_INFORMATION
+        if (!isFutureProgramme) {
+            scheduleRow.visibility = View.GONE
+        } else {
+            val scheduled = ScheduledRecordings.find(
+                PlaylistRepository.scheduledRecordings(this),
+                channel.id, programme.startMillis
+            )
+            scheduleRow.text = getString(
+                if (scheduled != null) R.string.menu_cancel_scheduled_recording
+                else R.string.menu_schedule_recording
+            )
+            scheduleRow.setOnClickListener {
+                dialog.dismiss()
+                if (scheduled != null) {
+                    RecordingManager.cancelScheduledRecording(this, scheduled.id)
+                    PlaylistRepository.removeScheduledRecording(this, scheduled.id)
+                    Toast.makeText(
+                        this, R.string.recording_schedule_cancelled, Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    val toSchedule = ScheduledRecordings.ScheduledRecording(
+                        channelId = channel.id,
+                        channelName = channel.name,
+                        channelUrl = channel.url,
+                        programmeTitle = programme.title,
+                        startMillis = programme.startMillis,
+                        stopMillis = programme.stopMillis
+                    )
+                    if (PlaylistRepository.addScheduledRecording(this, toSchedule)) {
+                        RecordingManager.scheduleRecording(this, toSchedule)
+                        Toast.makeText(
+                            this,
+                            getString(
+                                R.string.recording_scheduled,
+                                programme.title,
+                                GuideData.formatClock(programme.startMillis)
+                            ),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        }
+
         view.findViewById<TextView>(R.id.menu_channel_name).text =
             if (channel.number > 0) "${channel.number}  ${channel.name}" else channel.name
 

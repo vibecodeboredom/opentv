@@ -31,7 +31,12 @@ class RecordingsFragment : BrowseSupportFragment() {
         title = getString(R.string.recordings)
         adapter = rowsAdapter
         onItemViewClickedListener = OnItemViewClickedListener { _, item, _, _ ->
-            if (item is Recording) showRecordingOptions(item)
+            when (item) {
+                is Recording -> showRecordingOptions(item)
+                // 8.3.0: sort / filter controls and scheduled
+                // recordings (tap one to cancel it).
+                is MenuAction -> onMenuAction(item)
+            }
         }
     }
 
@@ -46,7 +51,28 @@ class RecordingsFragment : BrowseSupportFragment() {
     }
 
     private fun loadRecordings() {
-        val recordings = RecordingManager.listRecordings(requireContext())
+        val all = RecordingManager.listRecordings(requireContext())
+        // 8.3.0: auto-delete — finished recordings older than the
+        // keep setting go now, from the list already fetched (no
+        // second DownloadIndex query). The deleted ones are dropped
+        // from the fetched list too, so the screen never shows a
+        // recording that is already gone.
+        val keepDays = AppSettings.autoDeleteRecordingsDays(requireContext())
+        var recordings = all
+        if (keepDays > 0) {
+            val deleted = RecordingManager.deleteOldRecordings(
+                requireContext(), all, keepDays
+            )
+            if (deleted.isNotEmpty()) {
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.recordings_old_deleted, deleted.size),
+                    Toast.LENGTH_LONG
+                ).show()
+                val deletedIds = deleted.map { it.id }.toSet()
+                recordings = all.filter { it.id !in deletedIds }
+            }
+        }
         // Total bytes from the list already fetched — the old code
         // called totalBytesUsed, which re-ran the whole DownloadIndex
         // query just to sum the same rows.
@@ -61,13 +87,122 @@ class RecordingsFragment : BrowseSupportFragment() {
             )
         }
         rowsAdapter.clear()
-        if (recordings.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.no_recordings, Toast.LENGTH_LONG).show()
+        // 8.3.0: sort & filter controls, always on top so the list
+        // order can change without leaving the screen.
+        val sort = AppSettings.recordingsSort(requireContext())
+        val filter = AppSettings.recordingsFilter(requireContext())
+        val controlsAdapter = ArrayObjectAdapter(ActionPresenter())
+        controlsAdapter.add(
+            MenuAction("sort", getString(R.string.recordings_sort), sortLabel(sort))
+        )
+        controlsAdapter.add(
+            MenuAction("filter", getString(R.string.recordings_filter), filterLabel(filter))
+        )
+        rowsAdapter.add(
+            ListRow(HeaderItem(getString(R.string.recordings_sort_filter)), controlsAdapter)
+        )
+        // 8.3.0: scheduled recordings — future programmes picked in
+        // the guide. Tap one to cancel it.
+        val scheduled = PlaylistRepository.scheduledRecordings(requireContext())
+        if (scheduled.isNotEmpty()) {
+            val schedAdapter = ArrayObjectAdapter(ActionPresenter())
+            for (rec in scheduled) {
+                schedAdapter.add(
+                    MenuAction(
+                        "sched:${rec.id}",
+                        rec.programmeTitle,
+                        "${rec.channelName} • ${GuideData.formatDate(rec.startMillis)}, " +
+                            GuideData.formatTimeRange(rec.startMillis, rec.stopMillis)
+                    )
+                )
+            }
+            rowsAdapter.add(
+                ListRow(HeaderItem(getString(R.string.scheduled_row_title)), schedAdapter)
+            )
+        }
+        val shown = RecordingLibrary.sortAndFilter(recordings, sort, filter)
+        if (shown.isEmpty()) {
+            if (recordings.isEmpty() && scheduled.isEmpty()) {
+                Toast.makeText(requireContext(), R.string.no_recordings, Toast.LENGTH_LONG).show()
+            }
             return
         }
         val adapter = ArrayObjectAdapter(RecordingPresenter())
-        recordings.forEach { adapter.add(it) }
+        shown.forEach { adapter.add(it) }
         rowsAdapter.add(ListRow(HeaderItem(getString(R.string.recordings)), adapter))
+    }
+
+    /** 8.3.0: tapping a control cycles it to the next value, saves
+     * the choice, and reloads the list. */
+    private fun onMenuAction(action: MenuAction) {
+        when {
+            action.id == "sort" -> {
+                val next = when (AppSettings.recordingsSort(requireContext())) {
+                    RecordingLibrary.Sort.NEWEST -> RecordingLibrary.Sort.OLDEST
+                    RecordingLibrary.Sort.OLDEST -> RecordingLibrary.Sort.LARGEST
+                    RecordingLibrary.Sort.LARGEST -> RecordingLibrary.Sort.SMALLEST
+                    RecordingLibrary.Sort.SMALLEST -> RecordingLibrary.Sort.NAME
+                    RecordingLibrary.Sort.NAME -> RecordingLibrary.Sort.NEWEST
+                }
+                AppSettings.setRecordingsSort(requireContext(), next)
+                loadRecordings()
+            }
+            action.id == "filter" -> {
+                val next = when (AppSettings.recordingsFilter(requireContext())) {
+                    RecordingLibrary.Filter.ALL -> RecordingLibrary.Filter.IN_PROGRESS
+                    RecordingLibrary.Filter.IN_PROGRESS -> RecordingLibrary.Filter.FINISHED
+                    RecordingLibrary.Filter.FINISHED -> RecordingLibrary.Filter.ALL
+                }
+                AppSettings.setRecordingsFilter(requireContext(), next)
+                loadRecordings()
+            }
+            action.id.startsWith("sched:") -> {
+                val id = action.id.removePrefix("sched:")
+                val rec = PlaylistRepository.scheduledRecordings(requireContext())
+                    .firstOrNull { it.id == id } ?: return
+                showCancelScheduledDialog(rec)
+            }
+        }
+    }
+
+    private fun sortLabel(sort: RecordingLibrary.Sort): String = getString(
+        when (sort) {
+            RecordingLibrary.Sort.NEWEST -> R.string.sort_newest
+            RecordingLibrary.Sort.OLDEST -> R.string.sort_oldest
+            RecordingLibrary.Sort.LARGEST -> R.string.sort_largest
+            RecordingLibrary.Sort.SMALLEST -> R.string.sort_smallest
+            RecordingLibrary.Sort.NAME -> R.string.sort_name
+        }
+    )
+
+    private fun filterLabel(filter: RecordingLibrary.Filter): String = getString(
+        when (filter) {
+            RecordingLibrary.Filter.ALL -> R.string.filter_all
+            RecordingLibrary.Filter.IN_PROGRESS -> R.string.filter_in_progress
+            RecordingLibrary.Filter.FINISHED -> R.string.filter_finished
+        }
+    )
+
+    /** 8.3.0: confirm, then cancel the alarm and drop the schedule. */
+    private fun showCancelScheduledDialog(rec: ScheduledRecordings.ScheduledRecording) {
+        AlertDialog.Builder(requireContext())
+            .setTitle(rec.programmeTitle)
+            .setMessage(
+                "${rec.channelName} • ${GuideData.formatDate(rec.startMillis)}, " +
+                    GuideData.formatTimeRange(rec.startMillis, rec.stopMillis)
+            )
+            .setPositiveButton(R.string.delete) { _, _ ->
+                RecordingManager.cancelScheduledRecording(requireContext(), rec.id)
+                PlaylistRepository.removeScheduledRecording(requireContext(), rec.id)
+                Toast.makeText(
+                    requireContext(),
+                    R.string.recording_schedule_cancelled,
+                    Toast.LENGTH_SHORT
+                ).show()
+                loadRecordings()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showRecordingOptions(recording: Recording) {
