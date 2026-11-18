@@ -353,4 +353,10 @@
     <string name="keyword_added">Keyword added — %1$s</string>
     <string name="keyword_duplicate">Already a keyword — %1$s</string>
     <string name="keyword_removed">Keyword removed — %1$s</string>
+    <!-- 9.2.1 (Nova): keyword hits list, storage-guard favorite protection. -->
+    <string name="menu_keyword_hits">★ Keyword hits</string>
+    <string name="keyword_hits_title">Keyword hits</string>
+    <string name="keyword_hits_empty">No programmes coming up today or tomorrow match your keywords.</string>
+    <string name="recordings_auto_delete_blocked">Auto-delete held back — the rest are favorites</string>
+    <string name="prefs_rec_auto_delete_caption">Oldest recordings are deleted first. Recordings of favorite channels are never auto-deleted, and neither is the newest recording or one still recording.</string>
 </resources>

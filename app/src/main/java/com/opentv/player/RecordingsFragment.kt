@@ -76,6 +76,14 @@ class RecordingsFragment : BrowseSupportFragment() {
         if (freedNote > 0L) {
             AppSettings.setLastAutoFreedBytes(requireContext(), 0L)
         }
+        // 9.2.1 (Nova): the same one-shot pattern for a guard
+        // pass that stayed over the cap because the remaining
+        // recordings belong to favorite channels — read here,
+        // cleared here, so it is reported exactly once.
+        val deleteBlocked = AppSettings.lastAutoDeleteBlocked(requireContext())
+        if (deleteBlocked) {
+            AppSettings.setLastAutoDeleteBlocked(requireContext(), false)
+        }
         val baseTitle = if (recordings.isEmpty()) {
             getString(R.string.recordings)
         } else {
@@ -85,13 +93,21 @@ class RecordingsFragment : BrowseSupportFragment() {
                 RecordingManager.formatBytes(used)
             )
         }
-        title = if (freedNote > 0L) {
-            baseTitle + " • " + getString(
-                R.string.recordings_auto_freed,
-                RecordingManager.formatBytes(freedNote)
-            )
-        } else {
-            baseTitle
+        title = buildString {
+            append(baseTitle)
+            if (freedNote > 0L) {
+                append(" • ")
+                append(
+                    getString(
+                        R.string.recordings_auto_freed,
+                        RecordingManager.formatBytes(freedNote)
+                    )
+                )
+            }
+            if (deleteBlocked) {
+                append(" • ")
+                append(getString(R.string.recordings_auto_delete_blocked))
+            }
         }
         rowsAdapter.clear()
         if (scheduled.isNotEmpty()) {

@@ -450,6 +450,17 @@
                 android:textSize="16sp" />
         </RadioGroup>
 
+        <!-- 9.2.1 (Nova): what the guard will not touch, spelled
+             out under the cap so the protection is discoverable
+             where the cap is set. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/prefs_rec_auto_delete_caption"
+            android:textColor="#9A9AA3"
+            android:textSize="14sp" />
+
         <!-- 9.2.0 (Nova): guide keyword markers — programmes
              whose title contains a keyword get a ★ in the guide.
              The button opens the add/remove dialog. -->

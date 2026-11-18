@@ -1750,6 +1750,19 @@ class GuideActivity : FragmentActivity() {
             jumpToTonight()
         }
 
+        // 9.2.1 (Nova): keyword hits — 9.2.0's ★ markers as a
+        // list of what's on and coming up. Hidden when no
+        // keywords are set: with the markers off, a hits list
+        // would have nothing to match.
+        val keywordHitsRow = view.findViewById<TextView>(R.id.menu_keyword_hits)
+        if (AppSettings.guideKeywords(this).isEmpty()) {
+            keywordHitsRow.visibility = View.GONE
+        }
+        keywordHitsRow.setOnClickListener {
+            dialog.dismiss()
+            showKeywordHits()
+        }
+
         // 8.2.0 (Nova): day jump — shift the whole grid a day
         // forward or back. The next-day row hides at the offset
         // cap (a week out, the EPG has nothing real left to show);
@@ -2347,6 +2360,131 @@ class GuideActivity : FragmentActivity() {
     }
 
     /**
+     * 9.2.1 (Nova): the keyword hits list — every programme on
+     * now or coming up today and tomorrow (within the loaded
+     * EPG) whose title matches a guide keyword (9.2.0), across
+     * all visible channels, soonest first. The scan walks the
+     * full EPG like search does, so it runs off the main
+     * thread. Tapping a hit jumps the grid to it
+     * (jumpToProgramme). The dialog mirrors the reminders
+     * list's shape — same label format, same empty state.
+     */
+    private fun showKeywordHits() {
+        val keywords = AppSettings.guideKeywordSetLower(this)
+        if (keywords.isEmpty()) return
+        val channels = allChannels
+        val epgMap = epg
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val overrides = PlaylistRepository.epgOverrides(this)
+        lifecycleScope.launch {
+            val now = System.currentTimeMillis()
+            // End of tomorrow, local — hits cover the rest of
+            // today plus all of tomorrow, as far as the EPG goes.
+            val horizon = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, 2)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val hits = withContext(Dispatchers.Default) {
+                val found = mutableListOf<Pair<Channel, EpgParser.Programme>>()
+                for (channel in channels) {
+                    if (channel.id in hidden) continue
+                    val programmes = GuideData.programmesForChannel(
+                        channel, epgMap, overrides
+                    )
+                    for (programme in programmes) {
+                        if (programme.stopMillis <= now) continue
+                        if (programme.startMillis >= horizon) continue
+                        if (programme.title == GuideData.NO_INFORMATION) continue
+                        val lower = programme.title.lowercase()
+                        if (keywords.any { lower.contains(it) }) {
+                            found += channel to programme
+                        }
+                    }
+                }
+                found.sortBy { it.second.startMillis }
+                found.take(KEYWORD_HITS_MAX)
+            }
+            if (hits.isEmpty()) {
+                AlertDialog.Builder(this@GuideActivity)
+                    .setTitle(R.string.keyword_hits_title)
+                    .setMessage(R.string.keyword_hits_empty)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+                return@launch
+            }
+            val labels = hits.map { (channel, programme) ->
+                "${programme.title}\n${channel.name} • " +
+                    "${GuideData.formatDate(programme.startMillis)}, " +
+                    GuideData.formatClock(programme.startMillis)
+            }.toTypedArray()
+            AlertDialog.Builder(this@GuideActivity)
+                .setTitle(R.string.keyword_hits_title)
+                .setItems(labels) { _, which ->
+                    val (channel, programme) = hits[which]
+                    jumpToProgramme(channel.id, programme.startMillis)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
+    /**
+     * 9.2.1 (Nova): jump the grid to a specific programme —
+     * the keyword hits list's landing. Modelled on
+     * jumpToTonight: the window re-anchors so the programme
+     * starts where "now" sits in a normal open (the past-hours
+     * lookback before it), expressed in the same day state
+     * (whole-day offset + in-day shift — the two always sum to
+     * the exact target, clamped or not), so day hops from here
+     * behave and jump-to-now still returns. An active search
+     * is cleared (its filtered grid is replaced wholesale),
+     * and if the channel has no row under the active group
+     * filter the filter is cleared rather than landing
+     * nowhere.
+     */
+    private fun jumpToProgramme(channelId: String, startMillis: Long) {
+        val inRows = (allRows as? GuideData.LazyRows)?.indexOfChannel(channelId)
+            ?: allRows.indexOfFirst { it.channel.id == channelId }
+        if (inRows < 0) {
+            AppSettings.setGuideGroupFilter(this, null)
+        }
+        if (currentSearchQuery.isNotBlank()) {
+            searchJob?.cancel()
+            currentSearchQuery = ""
+            emptyView.visibility = View.GONE
+            scroll.visibility = View.VISIBLE
+        }
+        val targetStart = startMillis - pastHours * 60L * 60 * 1000
+        val deltaMillis = targetStart - baseWindowStart
+        dayOffsetDays = (deltaMillis / DAY_MILLIS).toInt()
+            .coerceIn(0, MAX_DAY_OFFSET_DAYS)
+        anchorShiftMillis = deltaMillis - dayOffsetDays * DAY_MILLIS
+        windowStart = baseWindowStart + dayOffsetDays * DAY_MILLIS + anchorShiftMillis
+        lifecycleScope.launch {
+            rebuildRows()
+            buildGuide(allRows)
+            scroll.scrollTo(0, 0)
+            val targetX = ((startMillis - windowStart) / 60_000L * pxPerMinute).toInt()
+            val scrollX = maxOf(0, targetX - PAST_VISIBLE_MINUTES * pxPerMinute)
+            hscroll.post { hscroll.scrollTo(scrollX, 0) }
+            val idx = rowIndexOf(channelId)
+            if (idx >= 0) {
+                if (idx >= builtRowCount) appendRows(idx + 1 - builtRowCount)
+                container.post {
+                    if (!focusProgrammeAt(channelId, startMillis)) {
+                        firstCardOfRow(idx)?.requestFocus()
+                    }
+                }
+            } else {
+                container.post { firstCardOfRow(0)?.requestFocus() }
+            }
+        }
+    }
+
+    /**
      * 8.1.0 (Nova): pick the guide's group filter — all groups, or
      * one of the playlist's groups (the M3U group-title). The
      * picker shows the active choice, the choice persists
@@ -2673,6 +2811,9 @@ class GuideActivity : FragmentActivity() {
          * over and the jump aims at tomorrow's 19:00. */
         private const val TONIGHT_HOUR = 19
         private const val TONIGHT_CUTOFF_HOUR = 23
+        /** 9.2.1 (Nova): the keyword hits list's cap — a
+         * pick-list, not a catalogue. */
+        private const val KEYWORD_HITS_MAX = 50
         /** 8.0.0 (Nova): how often the now-playing bar refreshes
          * its programme + progress while the guide sits open. */
         private const val NOW_PLAYING_TICK_MS = 20_000L

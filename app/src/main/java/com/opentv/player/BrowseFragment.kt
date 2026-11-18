@@ -443,58 +443,17 @@ class BrowseFragment : BrowseSupportFragment() {
     }
 
     /**
-     * 9.2.0 (Nova): the "More of what you watch" entries —
-     * discovery from the watch history the app already keeps.
-     * StatsManager's per-channel watch time (read-only here; no
-     * new tracking) is totalled per channel GROUP over the
-     * channels still in the playlist, the two heaviest groups
-     * win, and their channels the user has NOT watched recently
-     * (the Recently watched list) become the cards, each paired
-     * with what's on it right now exactly like the "On now" row.
-     * Too little history (fewer than three watched channels in
-     * the playlist) or no unwatched channel in those groups
-     * hides the row — a discovery row with nothing to discover
-     * is just noise.
+     * 9.2.0 (Nova): the "More of what you watch" entries.
+     * 9.2.1 (Nova): the selection itself moved to [Discovery],
+     * shared with the mobile home section — this is just the
+     * fragment's guard + delegation. See Discovery for the
+     * rules (heaviest watched groups, not-recently-watched
+     * channels, what's on now).
      */
     private fun buildMoreEntries(): List<OnNowEntry> {
         val epgMap = homeEpg ?: return emptyList()
         if (homeChannels.isEmpty() || !isAdded) return emptyList()
-        val context = requireContext()
-        val hidden = PlaylistRepository.hiddenChannels(context)
-        val visibleById = HashMap<String, Channel>()
-        for (ch in homeChannels) {
-            if (ch.id !in hidden) visibleById[ch.id] = ch
-        }
-        val watched = StatsManager.getStats(context).topChannels
-            .mapNotNull { stat -> visibleById[stat.id]?.let { it to stat.watchMillis } }
-        if (watched.size < 3) return emptyList()
-        val groupWatch = HashMap<String, Long>()
-        for ((channel, millis) in watched) {
-            groupWatch[channel.group] = (groupWatch[channel.group] ?: 0L) + millis
-        }
-        // Heaviest groups first; the sort is stable, so equal
-        // totals keep first-watched order.
-        val topGroups = groupWatch.entries
-            .sortedByDescending { it.value }
-            .take(2)
-            .map { it.key }
-            .toSet()
-        if (topGroups.isEmpty()) return emptyList()
-        val recentIds = PlaylistRepository.recentChannelIds(context).toSet()
-        val overrides = PlaylistRepository.epgOverrides(context)
-        val now = System.currentTimeMillis()
-        val entries = mutableListOf<OnNowEntry>()
-        for (channel in homeChannels) {
-            if (entries.size >= MORE_ROW_MAX_ENTRIES) break
-            if (channel.id in hidden || channel.id in recentIds) continue
-            if (channel.group !in topGroups) continue
-            val current = GuideData.programmesForChannel(channel, epgMap, overrides)
-                .firstOrNull { now in it.startMillis until it.stopMillis }
-            if (current != null && current.title != GuideData.NO_INFORMATION) {
-                entries += OnNowEntry(channel, current)
-            }
-        }
-        return entries
+        return Discovery.moreEntries(requireContext(), homeChannels, epgMap)
     }
 
     /**
@@ -560,8 +519,5 @@ class BrowseFragment : BrowseSupportFragment() {
          * EPG while the home screen sits open. */
         const val ON_NOW_TICK_MS = 60_000L
 
-        /** 9.2.0 (Nova): the discovery row's card cap — a row,
-         * not a catalogue. */
-        const val MORE_ROW_MAX_ENTRIES = 12
     }
 }

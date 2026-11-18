@@ -55,6 +55,10 @@ class MobileHomeActivity : FragmentActivity() {
     )
 
     private var allChannels: List<Channel> = emptyList()
+    /** 9.2.1 (Nova): the EPG, loaded after the playlist (the
+     * playlist load doesn't wait for it) — only the discovery
+     * section needs it, for what's on now. Empty until it lands. */
+    private var epgMap: Map<String, List<EpgParser.Programme>> = emptyMap()
     private var favorites: Set<String> = emptySet()
     /** Favorites as last rendered, so onResume only rebuilds when
      * something actually changed (e.g. favorited from playback) —
@@ -163,6 +167,17 @@ class MobileHomeActivity : FragmentActivity() {
                 lastChannel = allChannels.firstOrNull { it.id == lastId }
                 updateContinueCard()
                 renderList()
+                // 9.2.1 (Nova): fetch the EPG for the discovery
+                // section — loadEpg is single-flight and usually
+                // already warm from the app-start preload. When
+                // it lands, re-render so the section appears.
+                lifecycleScope.launch {
+                    val loaded = PlaylistRepository.loadEpg(this@MobileHomeActivity)
+                    if (loaded.isNotEmpty()) {
+                        epgMap = loaded
+                        if (currentQuery.trim().isEmpty()) renderList()
+                    }
+                }
             }.onFailure {
                 recycler.visibility = View.GONE
                 emptyText.setText(R.string.load_failed)
@@ -199,6 +214,25 @@ class MobileHomeActivity : FragmentActivity() {
                 items += MobileChannelAdapter.Item.Header(getString(R.string.favorites))
                 favoriteChannels.forEach {
                     items += MobileChannelAdapter.Item.ChannelItem(it, true)
+                }
+            }
+            // 9.2.1 (Nova): "More of what you watch" — the same
+            // discovery selection as the TV home row (Discovery,
+            // shared), as a section under Favorites. It needs
+            // the EPG, so it shows only once loadEpg has landed;
+            // like Favorites, its channels also stay listed in
+            // their group sections below.
+            if (epgMap.isNotEmpty()) {
+                val more = Discovery.moreEntries(this, allChannels, epgMap)
+                if (more.isNotEmpty()) {
+                    items += MobileChannelAdapter.Item.Header(
+                        getString(R.string.more_of_what_you_watch)
+                    )
+                    more.forEach {
+                        items += MobileChannelAdapter.Item.ChannelItem(
+                            it.channel, it.channel.id in favorites
+                        )
+                    }
                 }
             }
             val grouped = linkedMapOf<String, MutableList<Channel>>()

@@ -143,6 +143,22 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 9.2.1 (Nova): upcoming programmes matching the guide
+         keywords (9.2.0's markers, as a list). Hides in code
+         when no keywords are set. -->
+    <TextView
+        android:id="@+id/menu_keyword_hits"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_keyword_hits"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <!-- 8.2.0 (Nova): browse a day forward/back — the grid's
          window shifts by 24h. Previous day hides in code while
          the grid is on today; jump to now returns from any day. -->

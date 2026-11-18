@@ -1252,6 +1252,15 @@ class PlaybackActivity : FragmentActivity() {
             if (isFav) R.drawable.ic_star_filled
             else R.drawable.ic_star
         )
+        // 9.2.1 (Nova): amber while a favorite, white when not —
+        // the same state colours as the guide's and mobile's
+        // stars. Filled-vs-outline alone, both in white at 30dp,
+        // was too subtle to read as a state across a room; the
+        // record button below already works exactly this way
+        // (colour is the state).
+        transportFavorite.setColorFilter(
+            if (isFav) 0xFFFFC107.toInt() else 0xFFFFFFFF.toInt()
+        )
         transportRecord.setImageResource(R.drawable.ic_record)
         val isRecording = ch != null && RecordingManager.isRecording(this, ch.id)
         // Red dot while recording; white when idle. Alpha stays 1.0 —
@@ -1909,7 +1918,24 @@ class PlaybackActivity : FragmentActivity() {
 
     /** Activate whichever strip tile currently has focus. */
     private fun activateFocusedTile() {
-        stripTiles.firstOrNull { it.isFocused }?.performClick()
+        stripTiles.firstOrNull { it.isFocused }?.let {
+            it.performClick()
+            return
+        }
+        // 9.2.1 (Nova): the transport buttons below the strip
+        // (play/pause, prev/next, record, favorite) are focusable
+        // too, and this dispatcher owns OK while the overlay is
+        // up — the ACTION_DOWN was consumed above, so a focused
+        // transport button never sees the key and its click
+        // listener never fires. On a TV remote the buttons were
+        // dead (the favorite star never toggled, so it never
+        // changed appearance either); touch was unaffected,
+        // which is how it survived. Give the focused clickable
+        // view its click, like a normal dispatch would.
+        val focused = currentFocus
+        if (focused != null && focused.isClickable) {
+            focused.performClick()
+        }
     }
 
     /**

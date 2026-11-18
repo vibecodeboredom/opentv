@@ -30,6 +30,7 @@ object AppSettings {
     private const val KEY_GUIDE_TEXT_SIZE = "guide_text_size"
     private const val KEY_REC_AUTO_DELETE_CAP = "rec_auto_delete_cap_bytes"
     private const val KEY_REC_LAST_AUTO_FREED = "rec_last_auto_freed_bytes"
+    private const val KEY_REC_AUTO_DELETE_BLOCKED = "rec_auto_delete_blocked"
     private const val KEY_GUIDE_KEYWORDS = "guide_keywords"
 
     /** 7.3.0 (Nova): stream quality modes for the playback
@@ -363,6 +364,19 @@ object AppSettings {
 
     fun setLastAutoFreedBytes(context: Context, bytes: Long) {
         prefs(context).edit().putLong(KEY_REC_LAST_AUTO_FREED, bytes).apply()
+    }
+
+    /** 9.2.1 (Nova): the most recent storage-guard pass ended
+     * still over the cap because every remaining candidate was
+     * protected (a favorite channel's recording). Written by
+     * every guard pass — set when blocked, cleared when a pass
+     * gets under the cap or the cap is off — and shown once on
+     * the Recordings screen, which clears it after reading. */
+    fun lastAutoDeleteBlocked(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_REC_AUTO_DELETE_BLOCKED, false)
+
+    fun setLastAutoDeleteBlocked(context: Context, blocked: Boolean) {
+        prefs(context).edit().putBoolean(KEY_REC_AUTO_DELETE_BLOCKED, blocked).apply()
     }
 
     /** 9.2.0 (Nova): the guide keyword markers — user-chosen

@@ -286,21 +286,47 @@ object RecordingManager {
      * Recordings screen shows once ("Freed X by auto-delete").
      * With the cap off this is one pref read and nothing else —
      * in particular it never builds the DownloadManager.
+     *
+     * 9.2.1 (Nova): a third untouchable — recordings of channels
+     * that are CURRENT favorites. A recording's download id is
+     * derived from its channel id (Recording.idForChannel), so
+     * the protected set is the favorites mapped through the same
+     * derivation. If a pass ends still over the cap because the
+     * remaining candidates were favorites, it records that in
+     * AppSettings and the Recordings screen's note says so.
      */
     @Synchronized
     fun enforceRecordingStorageCap(context: Context): Long {
         val cap = AppSettings.recordingAutoDeleteCapBytes(context)
-        if (cap <= 0L) return 0L
+        if (cap <= 0L) {
+            AppSettings.setLastAutoDeleteBlocked(context, false)
+            return 0L
+        }
         val recordings = listRecordings(context)
         var total = recordings.sumOf { it.bytesDownloaded }
-        if (total <= cap) return 0L
+        if (total <= cap) {
+            AppSettings.setLastAutoDeleteBlocked(context, false)
+            return 0L
+        }
         // listRecordings is newest-first: index 0 is the most
         // recent recording and is never deleted.
         val newestId = recordings.firstOrNull()?.id
+        // 9.2.1 (Nova): favorite channels' recordings are
+        // protected — compare download ids, which are derived
+        // from channel ids by the same function the recorder
+        // uses, so the mapping is exact.
+        val protectedIds = PlaylistRepository.favorites(context)
+            .map { Recording.idForChannel(it) }
+            .toSet()
         var freed = 0L
+        var skippedProtected = false
         for (recording in recordings.asReversed()) {
             if (total <= cap) break
             if (recording.inProgress || recording.id == newestId) continue
+            if (recording.id in protectedIds) {
+                skippedProtected = true
+                continue
+            }
             deleteRecording(context, recording.id)
             // A deleted recording's resume point goes with it,
             // exactly as on the manual delete path.
@@ -311,6 +337,11 @@ object RecordingManager {
         if (freed > 0L) {
             AppSettings.setLastAutoFreedBytes(context, freed)
         }
+        // Still over the cap with favorites in the way: the
+        // Recordings note reports the hold-back once.
+        AppSettings.setLastAutoDeleteBlocked(
+            context, blocked = total > cap && skippedProtected
+        )
         return freed
     }
 
