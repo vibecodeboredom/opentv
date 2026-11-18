@@ -8,8 +8,10 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
@@ -64,7 +66,13 @@ object PlaylistRepository {
     /** Combined (Juniper 8.2.0): per-source EPG fetch status,
      * encoded by EpgQuality.encodeStatuses. */
     private const val KEY_EPG_SOURCE_STATUS = "epg_source_status"
-    private const val KEY_RECENT = "recent_channels"
+    /** 8.1.0: custom channel groups — renames, order, moves. */
+    private const val KEY_GROUP_RENAMES = "group_renames"
+    private const val KEY_GROUP_ORDER = "group_order"
+    private const val KEY_GROUP_MOVES = "group_moves"
+    /** Scheduled recordings, one per line (see
+     * [scheduledRecordings]). */
+    private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"    private const val KEY_RECENT = "recent_channels"
     /** 4.9.3: guide search queries, one per line, most recent first. */
     private const val KEY_RECENT_SEARCHES = "recent_searches"
     /** Id of the last channel that actually played (4.6.0: resume it on launch). */
@@ -84,10 +92,6 @@ object PlaylistRepository {
      * prompt and the list can name them even if the playlist has
      * changed since the reminder was set. */
     private const val KEY_REMINDERS = "programme_reminders"
-
-    /** 8.2.0 (Nova): scheduled recordings, same one-per-line
-     * storage as the reminders above. */
-    private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"
 
     /** 9.0.0 (Nova): recording playback progress, same
      * one-per-line storage as the reminders: recording id,
@@ -110,6 +114,11 @@ object PlaylistRepository {
      * shows the first 3; 7.0.0 (Nova) keeps 12 so the home screen's
      * Recently watched row and the sidebar History group have a
      * real history to show. */
+    /** 9.0.0: how many most recent channels are kept (most recent
+     * first). The TV home's Recent rail and the sidebar History
+     * list show up to this many; the playback overlay strip still
+     * caps itself at 3 (its own take(3)), so it is unchanged. Was
+     * 3 — too thin for a rail. */
     private const val MAX_RECENT = 12
     /** Guide search remembers this many past queries. */
     private const val MAX_RECENT_SEARCHES = 8
@@ -131,6 +140,10 @@ object PlaylistRepository {
     /** Playlist is re-downloaded at most every 6h; EPG at most every 12h. */
     private const val PLAYLIST_TTL_MS = 6L * 60 * 60 * 1000
     private const val EPG_TTL_MS = 12L * 60 * 60 * 1000
+    /** 9.2.0: the EPG warm-up in preload() waits this long after
+     * process start, so the playlist load — the critical path to
+     * the first screen — gets the IO/CPU first on a 1 GB box. */
+    private const val EPG_PRELOAD_DELAY_MS = 2_000L
 
     /** In-memory cache so a playlist / EPG is never re-downloaded or
      * re-parsed twice in one session. @Volatile: replaced atomically,
@@ -149,6 +162,15 @@ object PlaylistRepository {
     /** Parsed EPG-overrides map, cached the same way. Only
      * setEpgOverride() changes it, and it invalidates the cache. */
     @Volatile private var epgOverridesCache: Map<String, String>? = null
+
+    /** Parsed group-overrides, cached the same way. Only the
+     * setGroup*() / moveChannelToGroup() calls change it, and they
+     * invalidate the cache. */
+    @Volatile private var groupOverridesCache: GroupOverrides? = null
+
+    /** Parsed scheduled recordings, cached the same way. Only the
+     * add/removeScheduledRecording() calls change it, and they
+     * invalidate the cache. */
 
     /**
      * Background refresh (4.7.0): when a snapshot is stale, the fresh
@@ -177,7 +199,6 @@ object PlaylistRepository {
      * single-flight too — two taps on the guide's "Refresh guide
      * data" share one download + parse instead of racing two. */
     @Volatile private var epgRefreshLoad: Deferred<Map<String, List<EpgParser.Programme>>>? = null
-
     private fun playlistLoadDeferred(context: Context): Deferred<Result<List<Channel>>> {
         playlistLoad?.let { return it }
         synchronized(loadLock) {
@@ -242,15 +263,59 @@ object PlaylistRepository {
      * reads them (active playlist, configured EPG URLs). Failures are
      * swallowed: a failed warm-up leaves the caches cold and the next
      * screen load behaves exactly as it did before the preload existed.
+     *
+     * 9.2.0: the playlist load starts at once (it is the critical path
+     * to the first screen); the EPG warm-up waits 2 s so the two heavy
+     * snapshot reads do not contend on a 1 GB box. A screen opening
+     * the guide in the meantime starts the EPG load immediately
+     * (single-flight), so the delay only ever reorders background
+     * work, never the user's wait.
+     *
+     * 9.2.1: the 2 s is a cap, not a fixed wait — the delay only
+     * exists to let the playlist win the IO race, so once the
+     * playlist load finishes there is nothing left to protect and
+     * the EPG warm-up starts at once (startEpgWarmupWhenReady). On
+     * a fast box that hands the guide its EPG head start back: before,
+     * a cold start that reached the guide inside the 2 s window
+     * found the EPG still unwarm and painted "No information"
+     * placeholders until the fill-in landed.
      */
     fun preload(context: Context) {
         try {
             val appContext = context.applicationContext
-            playlistLoadDeferred(appContext)
-            epgLoadDeferred(appContext)
+            val playlist = playlistLoadDeferred(appContext)
+            refreshScope.launch {
+                startEpgWarmupWhenReady(playlist) { epgLoadDeferred(appContext) }
+            }
         } catch (ignored: Exception) {
             // Best-effort: the warm-up must never break app startup.
         }
+    }
+
+    /**
+     * 9.2.1: start the EPG warm-up as soon as the playlist load
+     * finishes, or when [delayMs] elapses — whichever comes first.
+     * A stalled playlist load can never starve the EPG warm-up past
+     * the cap. The playlist Deferred is only awaited, never
+     * cancelled, so a slow load keeps running for its own awaiters.
+     */
+    internal suspend fun startEpgWarmupWhenReady(
+        playlistLoad: Deferred<Result<List<Channel>>>,
+        delayMs: Long = EPG_PRELOAD_DELAY_MS,
+        startEpg: () -> Unit
+    ) {
+        withTimeoutOrNull(delayMs) { playlistLoad.await() }
+        startEpg()
+    }
+
+    /** 9.2.0: drop the in-memory playlist + EPG caches (memory
+     * pressure, or the app backgrounded — see MemoryPressure). Both
+     * rebuild from the SQLite snapshot on the next load, so this
+     * costs the user nothing. An in-flight load is unaffected: its
+     * Deferred re-sets the cache when it completes. */
+    fun releaseMemoryCaches() {
+        playlistCache = null
+        epgCache = null
     }
 
     /** The in-memory playlist when it is already loaded and fresh, else
@@ -423,6 +488,24 @@ object PlaylistRepository {
      * un-loadable entry can never be created.
      */
     fun saveLocalPlaylist(context: Context, name: String, text: String): Playlist? {
+        val entry = storeLocalPlaylistFile(context, name, text) ?: return null
+        val list = playlists(context).toMutableList()
+        // A distinct file name per upload, so this is always an append.
+        list += entry
+        savePlaylists(context, list)
+        return entry
+    }
+
+    /**
+     * 8.0.0 — Write an M3U text to a local file and return its
+     * playlist entry WITHOUT touching the playlist list. The backup
+     * restore uses this so it can build the new list first and
+     * replace it in one go (saveLocalPlaylist appends to the old
+     * list, which would leave strays behind when the restore then
+     * replaces it). Returns null when the text is not a usable
+     * playlist (same checks as saveLocalPlaylist).
+     */
+    fun storeLocalPlaylistFile(context: Context, name: String, text: String): Playlist? {
         if (!text.trimStart().startsWith("#EXTM3U")) return null
         if (M3uParser.parse(text).isEmpty()) return null
         val fileName = SHARED_FILE_PREFIX + System.currentTimeMillis() + ".m3u"
@@ -430,12 +513,7 @@ object PlaylistRepository {
             context.openFileOutput(fileName, Context.MODE_PRIVATE)
                 .use { it.write(text.toByteArray(Charsets.UTF_8)) }
             val cleanName = cleanPlaylistName(name).ifBlank { "Shared playlist" }
-            val entry = Playlist(cleanName, LOCAL_SCHEME + fileName)
-            val list = playlists(context).toMutableList()
-            // A distinct file name per upload, so this is always an append.
-            list += entry
-            savePlaylists(context, list)
-            entry
+            Playlist(cleanName, LOCAL_SCHEME + fileName)
         } catch (ignored: Exception) {
             null
         }
@@ -451,6 +529,122 @@ object PlaylistRepository {
         } catch (ignored: Exception) {
             null
         }
+    }
+
+    /**
+     * 8.0.0 — Replace the whole playlist list at once (backup
+     * restore). The list must have at least one entry and at least
+     * one enabled entry, and the active URL must be an enabled entry
+     * in it; anything else is refused and the current list is left
+     * alone. Clears the in-memory playlist cache so the next load
+     * fetches the new setup.
+     */
+    fun restorePlaylists(context: Context, list: List<Playlist>, activeUrl: String): Boolean {
+        if (list.isEmpty() || list.none { it.enabled }) return false
+        if (list.none { it.url == activeUrl && it.enabled }) return false
+        savePlaylists(context, list)
+        prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, activeUrl).apply()
+        playlistCache = null
+        return true
+    }
+
+    /** 8.0.0 — Replace the per-channel EPG overrides wholesale
+     * (backup restore). */
+    fun setEpgOverrides(context: Context, overrides: Map<String, String>) {
+        epgOverridesCache = null
+        val raw = overrides.entries.joinToString("\n") { "${it.key}=${it.value}" }
+        prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
+    }
+
+    // ---- Channel groups (8.1.0) ----------------------------------------
+    //
+    // Custom groups are overrides on top of the playlist's own
+    // group-title values — the playlist file is never edited. See
+    // GroupOverrides for the model; the three maps live in three
+    // keys, one per kind, so a rename never has to re-write the
+    // moves and a move never has to re-write the order.
+
+    /** The user's group overrides (renames, order, moves). */
+    fun groupOverrides(context: Context): GroupOverrides {
+        groupOverridesCache?.let { return it }
+        val parsed = GroupOverrides(
+            renames = GroupOverrides.decodeMap(
+                prefs(context).getString(KEY_GROUP_RENAMES, "") ?: ""
+            ),
+            order = GroupOverrides.decodeOrder(
+                prefs(context).getString(KEY_GROUP_ORDER, "") ?: ""
+            ),
+            moves = GroupOverrides.decodeMap(
+                prefs(context).getString(KEY_GROUP_MOVES, "") ?: ""
+            )
+        )
+        groupOverridesCache = parsed
+        return parsed
+    }
+
+    /** 8.1.0 — Replace the group overrides wholesale (backup restore).
+     * 8.1.1: the set is sanitized first, so a foreign backup can
+     * never store a value that breaks the line format (a rename
+     * with a newline in it would split into two stored lines and
+     * corrupt the entry on the next read). */
+    fun setGroupOverrides(context: Context, overrides: GroupOverrides) {
+        val clean = GroupOverrides.sanitize(overrides)
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(clean.renames))
+            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(clean.order))
+            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(clean.moves))
+            .apply()
+    }
+
+    /** Rename a playlist group (by its playlist name). A blank new
+     * name clears the rename, so the group shows under its playlist
+     * name again. Names are cleaned so a stored line stays one line. */
+    fun setGroupRename(context: Context, group: String, newName: String) {
+        val clean = GroupOverrides.cleanGroupName(newName)
+        val current = groupOverrides(context).renames.toMutableMap()
+        if (clean.isBlank()) current.remove(group) else current[group] = clean
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(current))
+            .apply()
+    }
+
+    /** Replace the custom group order wholesale. */
+    fun setGroupOrder(context: Context, order: List<String>) {
+        val clean = order.map { GroupOverrides.cleanGroupName(it) }
+            .filter { it.isNotEmpty() }.distinct()
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(clean))
+            .apply()
+    }
+
+    /** Move a channel to another group (by the target group's
+     * playlist name). A blank target clears the move, so the channel
+     * goes back to the group its playlist entry carries. */
+    fun moveChannelToGroup(context: Context, channelId: String, group: String) {
+        val clean = GroupOverrides.cleanGroupName(group)
+        val current = groupOverrides(context).moves.toMutableMap()
+        if (clean.isBlank()) current.remove(channelId) else current[channelId] = clean
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(current))
+            .apply()
+    }
+
+    /** Hide several channels at once (bulk hide, 8.1.0). */
+    fun hideChannels(context: Context, channelIds: Collection<String>) {
+        val current = hiddenChannels(context).toMutableSet()
+        current.addAll(channelIds)
+        prefs(context).edit().putStringSet(KEY_HIDDEN, current).apply()
+    }
+
+    /** Unhide several channels at once (bulk unhide, 8.1.0). */
+    fun unhideChannels(context: Context, channelIds: Collection<String>) {
+        val current = hiddenChannels(context).toMutableSet()
+        current.removeAll(channelIds.toSet())
+        prefs(context).edit().putStringSet(KEY_HIDDEN, current).apply()
     }
 
     private fun savePlaylists(context: Context, list: List<Playlist>) {
@@ -488,6 +682,35 @@ object PlaylistRepository {
 
     fun epgUrl(context: Context): String =
         prefs(context).getString(KEY_EPG_URL, DEFAULT_EPG_URL) ?: DEFAULT_EPG_URL
+
+    /**
+     * 8.0.0 — EPG sources as a list. The stored string is split on
+     * commas or newlines (the same split the loader uses), so a list
+     * written before 8.0.0 as one comma-separated field reads back
+     * as its sources with no migration. An empty or missing value
+     * falls back to the single default source.
+     */
+    fun epgUrls(context: Context): List<String> =
+        parseEpgUrls(prefs(context).getString(KEY_EPG_URL, null) ?: "")
+
+    /** Split a stored EPG value into its sources (pure, tested). */
+    fun parseEpgUrls(raw: String): List<String> {
+        val urls = raw.split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        return urls.ifEmpty { listOf(DEFAULT_EPG_URL) }
+    }
+
+    /** Replace the EPG source list. Stored newline-joined — the
+     * loader splits on commas or newlines, so both separators read
+     * back, and a newline never appears inside a URL. An empty list
+     * stores the default (the app always needs one source). */
+    fun setEpgUrls(context: Context, urls: List<String>) {
+        val clean = urls.map { it.trim() }
+            .filter { it.startsWith("http://") || it.startsWith("https://") }
+            .distinct()
+            .ifEmpty { listOf(DEFAULT_EPG_URL) }
+        prefs(context).edit().putString(KEY_EPG_URL, clean.joinToString("\n")).apply()
+        epgCache = null
+    }
 
     /** Base URL recordings are uploaded to (HTTP PUT). Empty = not configured. */
     fun uploadUrl(context: Context): String =
@@ -1552,8 +1775,7 @@ object PlaylistRepository {
      * the guide shows the programme twice and coverage counts
      * double. [force] bypasses the sources' 12 h disk cache (the
      * guide's manual refresh).
-     */
-    private fun loadEpgFresh(
+     */    private fun loadEpgFresh(
         context: Context,
         force: Boolean = false
     ): Map<String, List<EpgParser.Programme>> {
@@ -1561,8 +1783,7 @@ object PlaylistRepository {
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
         val statuses = mutableListOf<EpgQuality.SourceStatus>()
         // Airings already merged under each key, so a programme
-        // carried by two sources is stored once.
-        val seen = mutableMapOf<String, MutableSet<Triple<Long, Long, String>>>()
+        // carried by two sources is stored once.        val seen = mutableMapOf<String, MutableSet<Triple<Long, Long, String>>>()
         /** Append a source's programmes under [key], skipping airings
          * already there. Returns how many were added. */
         fun addProgrammes(key: String, incoming: List<EpgParser.Programme>): Int {
@@ -1592,8 +1813,7 @@ object PlaylistRepository {
                 statuses += if (result.fetchFailed) {
                     // The fetch failed and this is the stale disk
                     // copy: the guide still works, but the status
-                    // must say so instead of claiming a fresh load.
-                    EpgQuality.SourceStatus(
+                    // must say so instead of claiming a fresh load.                    EpgQuality.SourceStatus(
                         url, result.fetchedAtMillis, false,
                         "Fetch failed, using cached data",
                         parsed.size, programmes
@@ -1626,8 +1846,7 @@ object PlaylistRepository {
         /** When the data was actually fetched: the disk file's time
          * for a cached copy, now for a fresh download. */
         val fetchedAtMillis: Long,
-        /** True when the fetch failed and [text] is the stale disk
-         * copy. */
+        /** True when the fetch failed and [text] is the stale disk         * copy. */
         val fetchFailed: Boolean
     )
 
@@ -1636,8 +1855,7 @@ object PlaylistRepository {
      * is fresh (12h TTL), otherwise the URL is fetched and the disk
      * copy refreshed. Falls back to a stale disk copy when the fetch
      * fails. [force] skips the fresh-disk read (a fetch failure
-     * still falls back to the stale copy).
-     */
+     * still falls back to the stale copy).     */
     private fun epgXml(context: Context, url: String, force: Boolean = false): EpgXmlResult {
         val fileName = EPG_CACHE_PREFIX + url.hashCode().toString(16) + ".xml"
         val file = context.getFileStreamPath(fileName)
@@ -1645,6 +1863,10 @@ object PlaylistRepository {
             System.currentTimeMillis() - file.lastModified() < EPG_TTL_MS
         if (fresh) {
             try {
+                // 8.2.1: a cached read is stamped with when the data
+                // was fetched (the file's time), not with now — the
+                // old code claimed "Loaded just now" for data hours
+                // old.
                 return EpgXmlResult(
                     file.bufferedReader().use { it.readText() },
                     file.lastModified(), false
@@ -1666,8 +1888,7 @@ object PlaylistRepository {
             if (file.exists()) {
                 EpgXmlResult(
                     file.bufferedReader().use { it.readText() },
-                    file.lastModified(), true
-                )
+                    file.lastModified(), true                )
             } else throw e
         }
     }

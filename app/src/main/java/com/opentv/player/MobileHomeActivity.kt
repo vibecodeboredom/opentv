@@ -197,51 +197,59 @@ class MobileHomeActivity : FragmentActivity() {
     }
 
     /** Build the sectioned list for the current query: Favorites
-     * first, then one section per group in playlist order (the
-     * LinkedHashMap keeps first-occurrence order, like the TV
-     * browse menu). A non-empty query shows a single "Results"
-     * section of name/group matches instead. */
+     * first, then one section per group (9.0.0: built by the shared
+     * HomeRails builder, so the mobile home and the TV home show
+     * the same sections — favorites first, then the effective
+     * groups with renames, moves and custom order applied. The
+     * mobile home passes no recents: it keeps its Continue card
+     * instead of a Recent rail). A non-empty query shows a single
+     * "Results" section of name/group matches instead. */
     private fun renderList() {
         val query = currentQuery.trim()
         val items = mutableListOf<MobileChannelAdapter.Item>()
         if (query.isEmpty()) {
-            // 9.1.0 (Nova): the user's custom favorites order,
-            // once one is set (playlist order until then).
-            val favoriteChannels = PlaylistRepository.applyFavoriteOrder(
-                this, allChannels.filter { it.id in favorites }
+            val rails = HomeRails.buildRails(
+                channels = allChannels,
+                favorites = favorites,
+                recentIds = emptyList(),
+                hidden = emptySet(),
+                overrides = PlaylistRepository.groupOverrides(this),
+                favoritesTitle = getString(R.string.favorites),
+                recentsTitle = ""
             )
-            if (favoriteChannels.isNotEmpty()) {
-                items += MobileChannelAdapter.Item.Header(getString(R.string.favorites))
-                favoriteChannels.forEach {
-                    items += MobileChannelAdapter.Item.ChannelItem(it, true)
+            for ((index, rail) in rails.withIndex()) {
+                // 9.1.0 (Nova): the user's custom favorites order,
+                // once one is set (playlist order until then) — the
+                // Favorites rail is first when it exists.
+                val railChannels = if (rail.title == getString(R.string.favorites)) {
+                    PlaylistRepository.applyFavoriteOrder(this, rail.channels)
+                } else {
+                    rail.channels
                 }
-            }
-            // 9.2.1 (Nova): "More of what you watch" — the same
-            // discovery selection as the TV home row (Discovery,
-            // shared), as a section under Favorites. It needs
-            // the EPG, so it shows only once loadEpg has landed;
-            // like Favorites, its channels also stay listed in
-            // their group sections below.
-            if (epgMap.isNotEmpty()) {
-                val more = Discovery.moreEntries(this, allChannels, epgMap)
-                if (more.isNotEmpty()) {
-                    items += MobileChannelAdapter.Item.Header(
-                        getString(R.string.more_of_what_you_watch)
-                    )
-                    more.forEach {
-                        items += MobileChannelAdapter.Item.ChannelItem(
-                            it.channel, it.channel.id in favorites
+                items += MobileChannelAdapter.Item.Header(rail.title)
+                railChannels.forEach {
+                    items += MobileChannelAdapter.Item.ChannelItem(it, it.id in favorites)
+                }
+                // 9.2.1 (Nova): "More of what you watch" — the same
+                // discovery selection as the TV home row, as a
+                // section under Favorites. It needs the EPG, so it
+                // shows only once loadEpg has landed; like
+                // Favorites, its channels also stay listed in their
+                // group sections below.
+                if (index == 0 && epgMap.isNotEmpty()) {
+                    val more = Discovery.moreEntries(this, allChannels, epgMap)
+                    if (more.isNotEmpty()) {
+                        items += MobileChannelAdapter.Item.Header(
+                            getString(R.string.more_of_what_you_watch)
                         )
+                        more.forEach {
+                            items += MobileChannelAdapter.Item.ChannelItem(
+                                it.channel, it.channel.id in favorites
+                            )
+                        }
                     }
                 }
             }
-            val grouped = linkedMapOf<String, MutableList<Channel>>()
-            for (ch in allChannels) {
-                (grouped.getOrPut(ch.group) { mutableListOf() }) += ch
-            }
-            for ((group, groupChannels) in grouped) {
-                items += MobileChannelAdapter.Item.Header(group)
-                groupChannels.forEach {
                     items += MobileChannelAdapter.Item.ChannelItem(it, it.id in favorites)
                 }
             }
