@@ -2,6 +2,7 @@ package com.opentv.player
 
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
@@ -1555,6 +1556,46 @@ class PlaybackActivity : FragmentActivity() {
         startActivity(intent)
     }
 
+    /** 10.0.0: enter picture-in-picture and open the guide on top,
+     * so the channel keeps playing in a small window while
+     * browsing. The options dialog is dismissed first — entering
+     * PiP with a dialog up would leave it floating over the small
+     * window. When PiP entry fails (the feature is present but the
+     * system refuses), the guide stays closed so playback doesn't
+     * silently stop for nothing. */
+    private fun enterPipAndOpenGuide() {
+        currentDialog?.dismiss()
+        currentDialog = null
+        hideOverlay()
+        hideSidebar()
+        numberEntryView.visibility = View.GONE
+        val entered = enterPictureInPictureMode(PictureInPicture.buildParams(this))
+        if (entered) {
+            openGuide()
+        } else {
+            Toast.makeText(this, R.string.pip_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 10.0.0: entering PiP shows video only in the small window —
+     * the overlay, sidebar, number pill and any dialog would sit
+     * cramped over the picture. Leaving PiP needs nothing: the
+     * overlay stays hidden until the next key press, like any
+     * other return to playback. */
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) {
+            currentDialog?.dismiss()
+            currentDialog = null
+            hideOverlay()
+            hideSidebar()
+            numberEntryView.visibility = View.GONE
+        }
+    }
+
     /** Pick a different random channel and restart playback with it.
      * Allocation-free (same two-pass pattern 4.9.5 used for channel
      * up/down): the old code built a filtered copy of the whole
@@ -1714,6 +1755,13 @@ class PlaybackActivity : FragmentActivity() {
                 R.string.subtitles_menu,
                 TrackSelection.subtitleLabel(currentSubtitleLanguage())
             ) to { showSubtitlePicker(subs) }
+        }
+        // 10.0.0: picture-in-picture — keep watching in a small
+        // window while browsing the guide. Only on devices with
+        // the PiP feature; a recording replays from disk the same
+        // way a live stream does, so it is offered for both.
+        if (PictureInPicture.isSupported(this)) {
+            entries += getString(R.string.pip_menu) to { enterPipAndOpenGuide() }
         }
         AlertDialog.Builder(this)
             .setTitle(ch?.name ?: recordingName ?: getString(R.string.app_name))
@@ -2049,15 +2097,22 @@ class PlaybackActivity : FragmentActivity() {
             }
         }
         hideSidebar()
-        // Log the watch session (local only, never shared).
-        val watchedMillis = System.currentTimeMillis() - sessionStartMillis
-        if (sessionStartMillis > 0L && watchedMillis > 0L) {
-            val id = channel?.id ?: recordingId ?: "unknown"
-            val name = channel?.name ?: recordingName ?: "Unknown"
-            StatsManager.logWatchSession(this, id, name, watchedMillis)
+        // 10.0.0: in PiP the activity is paused, not stopped — but
+        // if the system does stop it while the window is up (screen
+        // off), releasing the player would black out the window,
+        // and the session isn't over anyway: it keeps accruing and
+        // is logged when playback really ends.
+        if (!isInPictureInPictureMode) {
+            // Log the watch session (local only, never shared).
+            val watchedMillis = System.currentTimeMillis() - sessionStartMillis
+            if (sessionStartMillis > 0L && watchedMillis > 0L) {
+                val id = channel?.id ?: recordingId ?: "unknown"
+                val name = channel?.name ?: recordingName ?: "Unknown"
+                StatsManager.logWatchSession(this, id, name, watchedMillis)
+            }
+            sessionStartMillis = 0L
+            player?.release()
+            player = null
         }
-        sessionStartMillis = 0L
-        player?.release()
-        player = null
     }
 }

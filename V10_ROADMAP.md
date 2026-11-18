@@ -397,10 +397,30 @@ Rules (from Chuni, 2026-11-17):
   near-duplicates). GLM 429'd on its test-generation call and sat
   this one out.
 
-## 10.0.0 (planned) — Juniper v10
+## 10.0.0 ✅ (this release) — Juniper v10
 
 - Capstone: the full ladder's features, a final startup-time and
   memory pass over the whole app, and one headline feature picked
   at the time from what tested best on the TV.
+- Headline — picture-in-picture: the playback menu's "Watch in
+  small window" shrinks playback into a 16:9 PiP window and opens
+  the guide on top, so the channel keeps playing while browsing;
+  the PiP window's "Full screen" action (and picking a channel in
+  the guide) brings playback back fullscreen. The player is built
+  in onStart / released in onStop, and entering PiP pauses without
+  stopping, so the stream plays untouched in the window; the
+  manifest declares supportsPictureInPicture + configChanges so
+  the transition never recreates the activity, and onStop skips
+  the release while in PiP. Devices without the PiP feature never
+  see the menu entry.
+- Final startup-time and memory pass: an audit, not a rewrite —
+  the 9.2.x passes already did the heavy lifting. Verified: every
+  AppSettings key is surfaced in Settings (no dead settings), all
+  nine activities are reachable (BrowseFragment is the
+  load-failure fallback, still live), the preload is capped
+  (9.2.1), TTS init is lazy (9.3.0), the watch-session log is
+  in-memory SharedPreferences ops (cheap on the main thread), and
+  the launch path does its IO in coroutines. The one real fix the
+  audit found is the PiP onStop guard above.
 - After this, the combine with `nova-v10` happens on a combined
   branch — that is a separate step, not part of this ladder.

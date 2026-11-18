@@ -57,9 +57,19 @@
             android:name=".TvHomeActivity"
             android:exported="false" />
 
+        <!-- 10.0.0: picture-in-picture — the playback menu's
+             "Watch in small window" shrinks this activity into a
+             PiP window while the guide opens on top. configChanges
+             keeps entering PiP from recreating the activity (a
+             recreate would release + rebuild the player
+             mid-transition); the single playback layout is
+             orientation-free, so rotation without a recreate is
+             fine — the player just keeps playing through it. -->
         <activity
             android:name=".PlaybackActivity"
             android:exported="false"
+            android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:theme="@style/Theme.OpenTV.Playback" />
 
         <activity
