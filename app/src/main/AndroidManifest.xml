@@ -69,6 +69,10 @@
             android:name=".StatsActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".WhatsNewActivity"
+            android:exported="false" />
+
         <service
             android:name=".RecordingService"
             android:exported="false"

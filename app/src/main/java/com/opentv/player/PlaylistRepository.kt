@@ -1089,6 +1089,70 @@ object PlaylistRepository {
         epgOverridesCache = null
     }
 
+    // ---- Backup restore (10.0.0, Nova) --------------------------------
+    //
+    // Wholesale replacements for NovaBackup.applyBackup. Each one
+    // writes exactly the store's own format and drops the same
+    // caches the store's other writers drop, so a restore is
+    // indistinguishable from the user having set the data by hand.
+
+    /** Replace the favorites set wholesale (backup restore). */
+    fun setFavorites(context: Context, ids: Set<String>) {
+        prefs(context).edit().putStringSet(KEY_FAVORITES, ids).apply()
+    }
+
+    /** Replace the hidden-channels set wholesale (backup restore). */
+    fun setHiddenChannels(context: Context, ids: Set<String>) {
+        prefs(context).edit().putStringSet(KEY_HIDDEN, ids).apply()
+    }
+
+    /** Replace all reminders wholesale (backup restore). The
+     * past-reminder pruning happens on the next read, as usual. */
+    fun replaceReminders(context: Context, reminders: List<Reminder>) {
+        saveReminders(context, reminders)
+    }
+
+    /** Replace all scheduled recordings wholesale (backup
+     * restore). Alarms are the caller's job — see
+     * NovaBackup.applyBackup, which re-arms the start alarms. */
+    fun replaceScheduledRecordings(
+        context: Context,
+        scheduled: List<ScheduledRecording>
+    ) {
+        saveScheduledRecordings(context, scheduled)
+    }
+
+    /** Replace the EPG overrides wholesale (backup restore). */
+    fun replaceEpgOverrides(context: Context, overrides: Map<String, String>) {
+        val raw = overrides.entries.joinToString("\n") { "${it.key}=${it.value}" }
+        prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
+        epgOverridesCache = null
+    }
+
+    /** Replace the playlist list and the active marker wholesale
+     * (backup restore). Names are cleaned like every other
+     * writer's; the active URL is honoured when it names an
+     * enabled entry, else the first enabled entry becomes active
+     * — the same rule [activePlaylist] applies on read. The
+     * parsed playlist/EPG caches are dropped so the next load
+     * reads the restored sources. */
+    fun replacePlaylists(
+        context: Context,
+        list: List<Playlist>,
+        activeUrl: String?
+    ) {
+        val cleaned = list.map {
+            Playlist(cleanPlaylistName(it.name), it.url, it.enabled)
+        }
+        savePlaylists(context, cleaned)
+        val active = cleaned.firstOrNull { it.url == activeUrl && it.enabled }
+            ?: cleaned.firstOrNull { it.enabled }
+            ?: cleaned.first()
+        prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, active.url).apply()
+        playlistCache = null
+        epgCache = null
+    }
+
     /**
      * Fetch the playlist from the network; fall back to the cached copy on
      * failure. The parsed list is kept in memory (6h TTL) and the raw M3U

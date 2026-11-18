@@ -4,7 +4,12 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.leanback.app.BrowseSupportFragment
 import androidx.leanback.widget.ArrayObjectAdapter
@@ -13,6 +18,9 @@ import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.ListRowPresenter
 import androidx.leanback.widget.OnItemViewClickedListener
 import androidx.lifecycle.lifecycleScope
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 /**
@@ -55,6 +63,19 @@ class BrowseFragment : BrowseSupportFragment() {
     // same pattern again.
     private var moreRow: ListRow? = null
     private var moreSignature: String = ""
+
+    // 10.0.0 (Nova): the home clock — a time + date label pinned
+    // to the top end of the home screen, opposite the "OpenTV"
+    // title. Its ticker re-arms to the next minute boundary, so
+    // the minute flips when the wall clock does.
+    private var homeClockView: TextView? = null
+    private val clockHandler = Handler(Looper.getMainLooper())
+    private val clockTicker = object : Runnable {
+        override fun run() {
+            updateHomeClock()
+            clockHandler.postDelayed(this, millisToNextMinute())
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,19 +126,70 @@ class BrowseFragment : BrowseSupportFragment() {
         refreshMoreRow()
         onNowHandler.removeCallbacks(onNowTicker)
         onNowHandler.postDelayed(onNowTicker, ON_NOW_TICK_MS)
+        // 10.0.0 (Nova): the home clock refreshes on resume and
+        // then at every minute boundary while the screen is up.
+        updateHomeClock()
+        clockHandler.removeCallbacks(clockTicker)
+        clockHandler.postDelayed(clockTicker, millisToNextMinute())
     }
 
     override fun onPause() {
         onNowHandler.removeCallbacks(onNowTicker)
+        clockHandler.removeCallbacks(clockTicker)
         super.onPause()
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        setupHomeClock(view)
         if (rowsAdapter.size() == 0) {
             loadPlaylist()
         }
     }
+
+    /** 10.0.0 (Nova): pin the home clock to the top end of the
+     * browse root (a frame, so the label rides on top of it),
+     * opposite the title. Not focusable — the D-pad never lands
+     * on it — and invisible to accessibility, since the time is
+     * decoration here, not content. */
+    private fun setupHomeClock(root: View) {
+        val parent = root as? ViewGroup ?: return
+        val density = resources.displayMetrics.density
+        val clock = TextView(requireContext()).apply {
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            isFocusable = false
+            isFocusableInTouchMode = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.END
+            ).apply {
+                topMargin = (26 * density).toInt()
+                marginEnd = (48 * density).toInt()
+            }
+        }
+        parent.addView(clock)
+        homeClockView = clock
+        updateHomeClock()
+    }
+
+    /** The clock's text: the time in the device's own 12/24-hour
+     * preference, then the day and date. */
+    private fun updateHomeClock() {
+        val clock = homeClockView ?: return
+        if (!isAdded) return
+        val now = Date()
+        val time = android.text.format.DateFormat
+            .getTimeFormat(requireContext()).format(now)
+        val date = SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(now)
+        clock.text = "$time  •  $date"
+    }
+
+    /** Milliseconds until just past the next minute boundary. */
+    private fun millisToNextMinute(): Long =
+        60_000L - (System.currentTimeMillis() % 60_000L) + 200L
 
     private fun openChannel(channel: Channel) {
         val intent = Intent(requireContext(), PlaybackActivity::class.java)

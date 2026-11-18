@@ -378,4 +378,20 @@
     <string name="pin_removed">Settings PIN removed</string>
     <!-- 9.3.1 (Nova): starts-in countdown in the guide details header. -->
     <string name="guide_starts_in">Starts in %1$s</string>
+    <!-- 10.0.0 (Nova): What's new screen, backup & restore, home clock. -->
+    <string name="nova_section_title">OpenTV Nova</string>
+    <string name="nova_section_caption">Release notes for the Nova line, and a backup of your Nova data — playlists, favorites, reminders, keywords and settings — in a single file you can keep.</string>
+    <string name="whats_new_button">What\'s new in Nova</string>
+    <string name="whats_new_title">What\'s new in Nova</string>
+    <string name="whats_new_caption">Every Nova release from 7.0.0 to 10.0.0, one line each — newest first.</string>
+    <string name="backup_export">Export backup</string>
+    <string name="backup_import">Import backup</string>
+    <string name="backup_export_done_title">Backup saved</string>
+    <string name="backup_export_done_message">Your Nova backup is in:\n\n%1$s\n\nKeep the file somewhere safe — importing it brings your playlists, favorites, reminders, keywords and settings back.</string>
+    <string name="backup_export_failed">Couldn\'t save the backup file</string>
+    <string name="backup_import_title">Import backup</string>
+    <string name="backup_import_confirm">This replaces your current playlists, favorites, hidden channels, reminders, scheduled recordings, keywords and Nova settings with the ones in the backup file. Anything the backup doesn\'t cover stays as it is.</string>
+    <string name="backup_import_action">Import</string>
+    <string name="backup_import_done">Backup imported</string>
+    <string name="backup_import_invalid">No readable Nova backup found — nothing was changed</string>
 </resources>

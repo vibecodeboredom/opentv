@@ -252,6 +252,17 @@ class SettingsActivity : FragmentActivity() {
             showPinManageDialog()
         }
 
+        // 10.0.0 (Nova): What's new + backup & restore.
+        findViewById<Button>(R.id.whats_new_button).setOnClickListener {
+            startActivity(Intent(this, WhatsNewActivity::class.java))
+        }
+        findViewById<Button>(R.id.backup_export_button).setOnClickListener {
+            exportBackup()
+        }
+        findViewById<Button>(R.id.backup_import_button).setOnClickListener {
+            confirmImportBackup()
+        }
+
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)
 
@@ -734,6 +745,86 @@ class SettingsActivity : FragmentActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    // ---- Backup & restore (10.0.0, Nova) --------------------------------
+
+    /** Export the Nova backup: collect every covered store,
+     * serialise it and write the one fixed file, then tell the
+     * user exactly where it landed — the path is the whole point
+     * (they may want to copy it off the TV). */
+    private fun exportBackup() {
+        lifecycleScope.launch {
+            val file = NovaBackup.backupFile(this@SettingsActivity)
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val text = NovaBackup.encode(
+                        NovaBackup.collect(this@SettingsActivity)
+                    )
+                    file.writeText(text, Charsets.UTF_8)
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            if (ok) {
+                AlertDialog.Builder(this@SettingsActivity)
+                    .setTitle(R.string.backup_export_done_title)
+                    .setMessage(
+                        getString(R.string.backup_export_done_message, file.absolutePath)
+                    )
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+            } else {
+                Toast.makeText(
+                    this@SettingsActivity, R.string.backup_export_failed,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    /** Import asks first: it replaces the covered stores with
+     * the backup's, and that should never happen on a stray tap. */
+    private fun confirmImportBackup() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.backup_import_title)
+            .setMessage(R.string.backup_import_confirm)
+            .setPositiveButton(R.string.backup_import_action) { _, _ -> importBackup() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Import: read + fully validate the file BEFORE anything is
+     * written (NovaBackup.parseBackup) — a missing or malformed
+     * file is one error toast and no changes. A good backup is
+     * applied whole, then the app restarts into the loading flow
+     * so the restored playlists and settings are what runs. */
+    private fun importBackup() {
+        lifecycleScope.launch {
+            val data = withContext(Dispatchers.IO) {
+                val file = NovaBackup.backupFile(this@SettingsActivity)
+                val text = try {
+                    if (file.exists()) file.readText(Charsets.UTF_8) else null
+                } catch (e: Exception) {
+                    null
+                }
+                text?.let { NovaBackup.parseBackup(it) }
+            }
+            if (data == null) {
+                Toast.makeText(
+                    this@SettingsActivity, R.string.backup_import_invalid,
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            NovaBackup.applyBackup(this@SettingsActivity, data)
+            Toast.makeText(
+                this@SettingsActivity, R.string.backup_import_done,
+                Toast.LENGTH_LONG
+            ).show()
+            restartToMain()
+        }
     }
 
     // ---- Share (4.7.1, 4.8.0) ----------------------------------------------
