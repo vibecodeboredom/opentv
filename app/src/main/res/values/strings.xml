@@ -261,6 +261,11 @@
     <string name="unhide_channels_none">No hidden channels.</string>
     <string name="channels_hidden">%1$d channels hidden</string>
     <string name="channels_unhidden">%1$d channels shown again</string>
+    <!-- Bulk-hide confirmation (8.1.1). -->
+    <string name="bulk_hide_confirm">Hide %1$d channels?</string>
+    <string name="bulk_hide_confirm_one">Hide “%1$s”?</string>
+    <string name="bulk_unhide_confirm">Show %1$d channels again?</string>
+    <string name="bulk_unhide_confirm_one">Show “%1$s” again?</string>
     <string name="move_to_group_title">Move %1$s to…</string>
     <string name="channel_moved_to_group">Moved to %1$s</string>
     <!-- Mobile (6.0.0-rc1): touch home screen + playback. -->

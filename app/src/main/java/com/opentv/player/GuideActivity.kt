@@ -2196,16 +2196,31 @@ class GuideActivity : FragmentActivity() {
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val picked = candidates.filterIndexed { i, _ -> checked[i] }
                 if (picked.isEmpty()) return@setPositiveButton
-                PlaylistRepository.hideChannels(this, picked.map { it.id })
-                Toast.makeText(
-                    this,
-                    getString(R.string.channels_hidden, picked.size),
-                    Toast.LENGTH_SHORT
-                ).show()
-                lifecycleScope.launch {
-                    rebuildRows()
-                    buildGuide(allRows)
+                // 8.1.1: confirm before hiding — a mistaken
+                // multi-select used to hide a bunch of channels
+                // silently. One channel is named; several are counted.
+                val message = if (picked.size == 1) {
+                    getString(R.string.bulk_hide_confirm_one, picked[0].name)
+                } else {
+                    getString(R.string.bulk_hide_confirm, picked.size)
                 }
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.hide_channels_title)
+                    .setMessage(message)
+                    .setPositiveButton(android.R.string.ok) { _, _ ->
+                        PlaylistRepository.hideChannels(this, picked.map { it.id })
+                        Toast.makeText(
+                            this,
+                            getString(R.string.channels_hidden, picked.size),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        lifecycleScope.launch {
+                            rebuildRows()
+                            buildGuide(allRows)
+                        }
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -2238,16 +2253,30 @@ class GuideActivity : FragmentActivity() {
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val picked = candidates.filterIndexed { i, _ -> checked[i] }
                 if (picked.isEmpty()) return@setPositiveButton
-                PlaylistRepository.unhideChannels(this, picked.map { it.id })
-                Toast.makeText(
-                    this,
-                    getString(R.string.channels_unhidden, picked.size),
-                    Toast.LENGTH_SHORT
-                ).show()
-                lifecycleScope.launch {
-                    rebuildRows()
-                    buildGuide(allRows)
+                // 8.1.1: confirm before showing, like bulk hide —
+                // the tick list is easy to fat-finger on a remote.
+                val message = if (picked.size == 1) {
+                    getString(R.string.bulk_unhide_confirm_one, picked[0].name)
+                } else {
+                    getString(R.string.bulk_unhide_confirm, picked.size)
                 }
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.unhide_channels_title)
+                    .setMessage(message)
+                    .setPositiveButton(android.R.string.ok) { _, _ ->
+                        PlaylistRepository.unhideChannels(this, picked.map { it.id })
+                        Toast.makeText(
+                            this,
+                            getString(R.string.channels_unhidden, picked.size),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        lifecycleScope.launch {
+                            rebuildRows()
+                            buildGuide(allRows)
+                        }
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

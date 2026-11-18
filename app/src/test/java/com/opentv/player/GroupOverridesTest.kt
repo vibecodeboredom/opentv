@@ -173,4 +173,74 @@ class GroupOverridesTest {
             GroupOverrides.decodeOrder("Sports\nNews\nSports\nMovies\nNews")
         )
     }
+
+    /** 8.1.1: sanitize keeps good entries and drops / cleans the bad ones. */
+    @Test
+    fun sanitizeDropsBlankEntriesAndCleansNames() {
+        val cleaned = GroupOverrides.sanitize(
+            GroupOverrides(
+                renames = mapOf(
+                    "News" to "My\nNews",
+                    "Sports" to "  ",
+                    "" to "No Key",
+                    "Movies" to "Movies"
+                ),
+                order = listOf("Movies", "News", "Movies", "  ", "Sports"),
+                moves = mapOf(
+                    "c1" to "Sports",
+                    "c2" to "  ",
+                    "" to "News"
+                )
+            )
+        )
+        assertEquals(mapOf("News" to "My News", "Movies" to "Movies"), cleaned.renames)
+        assertEquals(listOf("Movies", "News", "Sports"), cleaned.order)
+        assertEquals(mapOf("c1" to "Sports"), cleaned.moves)
+    }
+
+    @Test
+    fun sanitizeKeepsEntriesForGroupsThatNoLongerExist() {
+        // Overrides are global across playlists — an entry for a
+        // group that is not in the active playlist must survive a
+        // sanitize, or switching playlists would destroy it.
+        val cleaned = GroupOverrides.sanitize(
+            GroupOverrides(
+                renames = mapOf("Old Group" to "Renamed"),
+                order = listOf("Old Group"),
+                moves = mapOf("gone-channel" to "Old Group")
+            )
+        )
+        assertEquals(mapOf("Old Group" to "Renamed"), cleaned.renames)
+        assertEquals(listOf("Old Group"), cleaned.order)
+        assertEquals(mapOf("gone-channel" to "Old Group"), cleaned.moves)
+    }
+
+    @Test
+    fun sanitizeOfEmptyIsEmpty() {
+        assertEquals(GroupOverrides(), GroupOverrides.sanitize(GroupOverrides()))
+    }
+
+    /** 8.1.1: sanitize cleans whitespace inside group names — but
+     * a move's KEY is a channel id, not a group name, so it is left
+     * alone (cleaning it would break the id lookup); only the
+     * target group is cleaned. */
+    @Test
+    fun sanitizeCleansWhitespaceInGroupNamesOnly() {
+        val cleaned = GroupOverrides.sanitize(
+            GroupOverrides(
+                renames = mapOf(
+                    "Group\nOne" to "Group\rTwo",
+                    "Group\u0001Three" to "Group\tFour"
+                ),
+                order = listOf("Group\tOne", "Group\u0001Two"),
+                moves = mapOf("c1" to "Target\rTwo")
+            )
+        )
+        assertEquals(
+            mapOf("Group One" to "Group Two", "Group Three" to "Group Four"),
+            cleaned.renames
+        )
+        assertEquals(listOf("Group One", "Group Two"), cleaned.order)
+        assertEquals(mapOf("c1" to "Target Two"), cleaned.moves)
+    }
 }

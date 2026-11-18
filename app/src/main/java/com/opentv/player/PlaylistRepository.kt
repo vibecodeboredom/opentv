@@ -510,13 +510,18 @@ object PlaylistRepository {
         return parsed
     }
 
-    /** 8.1.0 — Replace the group overrides wholesale (backup restore). */
+    /** 8.1.0 — Replace the group overrides wholesale (backup restore).
+     * 8.1.1: the set is sanitized first, so a foreign backup can
+     * never store a value that breaks the line format (a rename
+     * with a newline in it would split into two stored lines and
+     * corrupt the entry on the next read). */
     fun setGroupOverrides(context: Context, overrides: GroupOverrides) {
+        val clean = GroupOverrides.sanitize(overrides)
         groupOverridesCache = null
         prefs(context).edit()
-            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(overrides.renames))
-            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(overrides.order))
-            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(overrides.moves))
+            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(clean.renames))
+            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(clean.order))
+            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(clean.moves))
             .apply()
     }
 

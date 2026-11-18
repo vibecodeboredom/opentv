@@ -100,6 +100,33 @@ data class GroupOverrides(
             name.replace("\n", " ").replace("\r", " ")
                 .replace("\u0001", " ").replace("\t", " ").trim()
 
+        /**
+         * 8.1.1 — Clean a whole overrides set so it can never break
+         * the line format when stored: renames and moves are cleaned
+         * (names, like the write paths do), blank keys / values and
+         * blank move targets are dropped, and the order is deduped.
+         * Applied on wholesale set (backup restore), where the data
+         * comes from another device's file instead of this app's own
+         * cleaned write paths. Entries for groups or channels that
+         * no longer exist are KEPT, not pruned: overrides are global
+         * across playlists, so an entry for another playlist's group
+         * would be destroyed by pruning against the active one.
+         */
+        fun sanitize(overrides: GroupOverrides): GroupOverrides {
+            val renames = overrides.renames.entries.mapNotNull { (k, v) ->
+                val key = cleanGroupName(k)
+                val value = cleanGroupName(v)
+                if (key.isBlank() || value.isBlank()) null else key to value
+            }.toMap()
+            val order = overrides.order.map { cleanGroupName(it) }
+                .filter { it.isNotEmpty() }.distinct()
+            val moves = overrides.moves.entries.mapNotNull { (k, v) ->
+                val target = cleanGroupName(v)
+                if (k.isBlank() || target.isBlank()) null else k to target
+            }.toMap()
+            return GroupOverrides(renames, order, moves)
+        }
+
         private const val SEP = "\u0001"
 
         /** Encode a string map as one entry per line, "key\u0001value". */

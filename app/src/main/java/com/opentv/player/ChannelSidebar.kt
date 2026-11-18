@@ -64,6 +64,24 @@ class ChannelSidebar(
         /** 4.8.0: pseudo-group that opens the playlist picker instead
          * of a channel list. */
         private const val GROUP_PLAYLISTS = "PLAYLISTS"
+
+        /**
+         * 8.1.1 — the History count: only recents that are still in
+         * the playlist and not hidden, matching what the History
+         * list actually shows. The old count was the raw recents
+         * size, so hiding a recent channel (or a playlist change)
+         * left the sidebar saying e.g. 3 while the list showed 2.
+         * Pure, so it is unit-testable.
+         */
+        fun historyCount(
+            channels: List<Channel>,
+            recents: List<String>,
+            hidden: Set<String>
+        ): Int {
+            val visibleIds = channels.filter { it.id !in hidden }
+                .map { it.id }.toSet()
+            return recents.count { it in visibleIds }
+        }
     }
 
     /** Are we showing the groups list, and which group
@@ -313,7 +331,11 @@ class ChannelSidebar(
         )
         items += SidebarAdapter.Item.GroupItem(
             SidebarGroup(
-                GROUP_HISTORY, activity.getString(R.string.sidebar_history), recents.size
+                // 8.1.1: the count is the recents that are actually
+                // shown — a hidden or removed recent must not be
+                // counted, or the number disagrees with the list.
+                GROUP_HISTORY, activity.getString(R.string.sidebar_history),
+                historyCount(channels, recents, hidden)
             )
         )
         for (view in effectiveGroups) {

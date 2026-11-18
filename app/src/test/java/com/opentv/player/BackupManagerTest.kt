@@ -56,6 +56,26 @@ class BackupManagerTest {
         val text = """{"format":"opentv-backup","version":1,"playlists":[],"epgUrls":[],"uploadUrl":"","favorites":[],"hiddenChannels":[],"epgOverrides":{},"trackPrefs":{},"settings":{}}"""
         val decoded = BackupManager.decode(text).getOrThrow()
         assertEquals(GroupOverrides(), decoded.groupOverrides)
+        // 8.1.1: the missing key is remembered, so a restore of
+        // this old backup does not wipe the overrides on the device.
+        assertFalse(decoded.hasGroupOverrides)
+    }
+
+    @Test
+    fun roundTripBackupCarriesGroupOverrides() {
+        val decoded = BackupManager.decode(BackupManager.encode(sampleData())).getOrThrow()
+        assertTrue(decoded.hasGroupOverrides)
+    }
+
+    /** 8.1.1: a backup with an (empty) groupOverrides object still
+     * counts as carrying overrides — only a missing key means
+     * "this backup predates them". */
+    @Test
+    fun emptyGroupOverridesObjectCountsAsPresent() {
+        val text = """{"format":"opentv-backup","version":1,"playlists":[],"groupOverrides":{},"settings":{}}"""
+        val decoded = BackupManager.decode(text).getOrThrow()
+        assertTrue(decoded.hasGroupOverrides)
+        assertEquals(GroupOverrides(), decoded.groupOverrides)
     }
 
     @Test

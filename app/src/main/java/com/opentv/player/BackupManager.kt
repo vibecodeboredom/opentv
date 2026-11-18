@@ -45,6 +45,15 @@ object BackupManager {
         val trackPrefs: Map<String, String>,
         /** 8.1.0 — custom channel groups (renames, order, moves). */
         val groupOverrides: GroupOverrides = GroupOverrides(),
+        /**
+         * 8.1.1 — whether the backup actually carried group
+         * overrides. A backup from before 8.1.0 has no
+         * "groupOverrides" key and decodes to empty overrides — but
+         * "absent" is not "empty": restoring one must NOT wipe the
+         * overrides the user has now. Restore only applies them
+         * when this is true.
+         */
+        val hasGroupOverrides: Boolean = true,
         val guideOpensOnCurrentChannel: Boolean,
         val tvInfoFade: Boolean,
         val guideShowsPast: Boolean,
@@ -128,7 +137,11 @@ object BackupManager {
         val settings = root["settings"] as? Map<*, *>
         // 8.1.0: group overrides are optional — a backup from an
         // older 8.x has no "groupOverrides" key and decodes to empty.
+        // 8.1.1: remember whether the key was there at all, so a
+        // restore can tell "no overrides in this backup" from "the
+        // backup says overrides are empty".
         val groupOverridesRaw = root["groupOverrides"] as? Map<*, *>
+        val hasGroupOverrides = root.containsKey("groupOverrides")
         val groupOverrides = GroupOverrides(
             renames = stringMap(groupOverridesRaw?.get("renames")),
             order = stringList(groupOverridesRaw?.get("order")),
@@ -156,6 +169,7 @@ object BackupManager {
                 epgOverrides = stringMap(root["epgOverrides"]),
                 trackPrefs = stringMap(root["trackPrefs"]),
                 groupOverrides = groupOverrides,
+                hasGroupOverrides = hasGroupOverrides,
                 guideOpensOnCurrentChannel = settings?.get("guideOpensOnCurrentChannel") as? Boolean ?: true,
                 tvInfoFade = settings?.get("tvInfoFade") as? Boolean ?: true,
                 guideShowsPast = settings?.get("guideShowsPast") as? Boolean ?: true,
@@ -264,7 +278,13 @@ object BackupManager {
         PlaylistRepository.setFavorites(context, data.favorites)
         PlaylistRepository.setHiddenChannels(context, data.hiddenChannels)
         PlaylistRepository.setEpgOverrides(context, data.epgOverrides)
-        PlaylistRepository.setGroupOverrides(context, data.groupOverrides)
+        // 8.1.1: only replace the group overrides when the backup
+        // actually carried them — a pre-8.1.0 backup has no
+        // groupOverrides key, and applying its empty decode would
+        // wipe the renames, order and moves the user has now.
+        if (data.hasGroupOverrides) {
+            PlaylistRepository.setGroupOverrides(context, data.groupOverrides)
+        }
         TrackPrefs.restoreAll(context, data.trackPrefs)
         AppSettings.setGuideOpensOnCurrentChannel(context, data.guideOpensOnCurrentChannel)
         AppSettings.setTvInfoFade(context, data.tvInfoFade)

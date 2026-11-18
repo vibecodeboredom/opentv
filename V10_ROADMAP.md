@@ -133,10 +133,21 @@ Rules (from Chuni, 2026-11-17):
   EFFECTIVE groups (renames, moves, custom order applied), so a
   moved channel counts under its new group.
 
-### 8.1.1 (planned) — Patch
+### 8.1.1 ✅ (this release) — Patch
 
-- Fixes + polish from 8.1.0 testing on the TV: group-override
-  migration, bulk-hide confirmation, and sidebar counts.
+- Group-override migration: a backup now records whether it
+  actually carried group overrides, so restoring a pre-8.1.0 backup
+  no longer wipes the renames, order and moves on the device; a
+  wholesale override set is sanitized first, so a foreign backup
+  can never store a line-breaking value (entries for groups that
+  no longer exist are kept, not pruned — overrides are global
+  across playlists).
+- Bulk-hide confirmation: the tick-several hide / unhide dialogs
+  now ask first ("Hide 3 channels?" / "Hide 'CNN'?") before
+  applying, and the toast still reports what was hidden/shown.
+- Sidebar counts: the History count is now the recents still in
+  the playlist and not hidden, matching the History list (the old
+  raw recents size counted hidden or removed channels too).
 
 ### 8.2.0 (planned) — EPG quality
 
