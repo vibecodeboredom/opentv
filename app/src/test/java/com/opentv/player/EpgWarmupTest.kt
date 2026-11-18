@@ -28,7 +28,10 @@ class EpgWarmupTest {
 
     @Test
     fun warmupStartsAtCapWhenPlaylistStalls() = runBlocking {
-        val playlist = async<Result<List<Channel>>> { delay(60_000) }
+        val playlist = async<Result<List<Channel>>> {
+            delay(60_000)
+            Result.success(emptyList())
+        }
         var startedAt = -1L
         val start = System.currentTimeMillis()
         PlaylistRepository.startEpgWarmupWhenReady(playlist, delayMs = 200L) {
