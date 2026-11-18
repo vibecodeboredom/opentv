@@ -206,6 +206,8 @@ class GuideActivity : FragmentActivity() {
      * a change in Settings applies the next time the guide opens. */
     private var guideDensity: Appearance.GuideDensity = Appearance.GuideDensity.COMFORTABLE
     private var guideFontSize: Appearance.FontSize = Appearance.FontSize.MEDIUM
+    /** 9.3.0: larger-text mode, read with the font size above. */
+    private var guideLargerText: Boolean = false
     private var highContrastFocus: Boolean = false
 
     /** 7.0.0: channel-number entry — digits typed on the remote,
@@ -326,11 +328,13 @@ class GuideActivity : FragmentActivity() {
         val guideSizing = AppSettings.sidebarSizing(this)
         guideDensity = AppSettings.guideDensity(this)
         guideFontSize = AppSettings.fontSize(this)
+        guideLargerText = AppSettings.largerText(this)
         highContrastFocus = AppSettings.highContrastFocus(this)
         pxCellHeight = dpToPx(
             if (isMobileDevice) CELL_HEIGHT_DP
             else Appearance.guideRowHeightDp(
-                guideSizing.guideRowHeightDp, guideDensity, guideFontSize
+                guideSizing.guideRowHeightDp, guideDensity, guideFontSize,
+                guideLargerText
             )
         )
         guideLogoDp = if (isMobileDevice) 40 else guideSizing.logoDp
@@ -362,31 +366,31 @@ class GuideActivity : FragmentActivity() {
         // it, and on mobile it clipped even at Medium.
         detailTitle.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
-            Appearance.scaledTextSp(22f, guideFontSize)
+            Appearance.scaledTextSp(22f, guideFontSize, guideLargerText)
         )
         detailChannel.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
-            Appearance.scaledTextSp(14f, guideFontSize)
+            Appearance.scaledTextSp(14f, guideFontSize, guideLargerText)
         )
         detailStar.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
-            Appearance.scaledTextSp(26f, guideFontSize)
+            Appearance.scaledTextSp(26f, guideFontSize, guideLargerText)
         )
         detailTime.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
-            Appearance.scaledTextSp(15f, guideFontSize)
+            Appearance.scaledTextSp(15f, guideFontSize, guideLargerText)
         )
         detailRemaining.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
-            Appearance.scaledTextSp(15f, guideFontSize)
+            Appearance.scaledTextSp(15f, guideFontSize, guideLargerText)
         )
         detailCategory.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
-            Appearance.scaledTextSp(15f, guideFontSize)
+            Appearance.scaledTextSp(15f, guideFontSize, guideLargerText)
         )
         epgFreshness.setTextSize(
             TypedValue.COMPLEX_UNIT_SP,
-            Appearance.scaledTextSp(13f, guideFontSize)
+            Appearance.scaledTextSp(13f, guideFontSize, guideLargerText)
         )
         guideHeader.layoutParams.height =
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1341,7 +1345,7 @@ class GuideActivity : FragmentActivity() {
             // 9.1.0: the header labels scale with the font-size setting.
             setTextSize(
                 TypedValue.COMPLEX_UNIT_SP,
-                Appearance.scaledTextSp(16f, guideFontSize)
+                Appearance.scaledTextSp(16f, guideFontSize, guideLargerText)
             )
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
@@ -1368,7 +1372,7 @@ class GuideActivity : FragmentActivity() {
                 // 9.1.0: the header labels scale with the font-size setting.
                 setTextSize(
                     TypedValue.COMPLEX_UNIT_SP,
-                    Appearance.scaledTextSp(16f, guideFontSize)
+                    Appearance.scaledTextSp(16f, guideFontSize, guideLargerText)
                 )
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
@@ -1435,7 +1439,7 @@ class GuideActivity : FragmentActivity() {
                 // 9.1.0: the channel number scales with the font-size setting.
                 setTextSize(
                     TypedValue.COMPLEX_UNIT_SP,
-                    Appearance.scaledTextSp(18f, guideFontSize)
+                    Appearance.scaledTextSp(18f, guideFontSize, guideLargerText)
                 )
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
@@ -1462,7 +1466,7 @@ class GuideActivity : FragmentActivity() {
             // 9.1.0: the channel name scales with the font-size setting.
             setTextSize(
                 TypedValue.COMPLEX_UNIT_SP,
-                Appearance.scaledTextSp(16f, guideFontSize)
+                Appearance.scaledTextSp(16f, guideFontSize, guideLargerText)
             )
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
@@ -1608,7 +1612,7 @@ class GuideActivity : FragmentActivity() {
                 // 9.1.0: the programme title scales with the font-size setting.
                 setTextSize(
                     TypedValue.COMPLEX_UNIT_SP,
-                    Appearance.scaledTextSp(15f, guideFontSize)
+                    Appearance.scaledTextSp(15f, guideFontSize, guideLargerText)
                 )
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1

@@ -109,8 +109,9 @@ class ChannelSidebar(
         sizing = sizing,
         // 9.1.0: the font-size + high-contrast settings, read when
         // the sidebar is built (a fresh sidebar picks up a change,
-        // like the channel-list size).
+        // like the channel-list size). 9.3.0: larger-text mode too.
         fontSize = AppSettings.fontSize(activity),
+        largerText = AppSettings.largerText(activity),
         highContrast = AppSettings.highContrastFocus(activity)
     )
 

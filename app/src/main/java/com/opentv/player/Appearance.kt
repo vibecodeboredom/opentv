@@ -20,6 +20,13 @@ import kotlin.math.roundToInt
  * The high-contrast focus style and the reduced-animations toggle
  * are plain booleans in AppSettings — they pick drawables / skip
  * animations at the call site, so they need no math here.
+ *
+ * 9.3.0 — larger-text mode: a toggle (on top of the font-size
+ * setting) that makes the guide + sidebar text larger still, for
+ * readability from the couch. It is a multiplier on the font-size
+ * scale, so Small + larger text lands between Medium and Large,
+ * and Large + larger text is the biggest the guide gets. The
+ * row-height floor grows with it, so a larger title never clips.
  */
 object Appearance {
 
@@ -35,6 +42,14 @@ object Appearance {
         MEDIUM(1.0f),
         LARGE(1.15f)
     }
+
+    /** Extra multiplier when larger-text mode (9.3.0) is on. */
+    const val LARGER_TEXT_SCALE = 1.25f
+
+    /** The effective text scale for a font size with larger-text
+     * mode on or off. */
+    fun effectiveFontScale(fontSize: FontSize, largerText: Boolean): Float =
+        fontSize.scale * if (largerText) LARGER_TEXT_SCALE else 1f
 
     /** Thinnest a guide row is allowed to get (dp) — below this the
      * single-line programme title would clip vertically. 9.1.1: the
@@ -61,9 +76,19 @@ object Appearance {
      * never below the absolute floor. At Medium that is 28dp (the
      * old floor); at Large it is 29dp — a Compact row that ignored
      * the font size would clip the title's top and bottom. */
-    fun minGuideRowHeightDp(fontSize: FontSize): Int = max(
+    fun minGuideRowHeightDp(fontSize: FontSize): Int =
+        minGuideRowHeightDp(fontSize.scale)
+
+    /** 9.3.0 — the same floor with larger-text mode on or off: the
+     * title's line box grows with the effective scale (Large +
+     * larger text needs 34dp), so a Compact row can never clip a
+     * larger title either. */
+    fun minGuideRowHeightDp(fontSize: FontSize, largerText: Boolean): Int =
+        minGuideRowHeightDp(effectiveFontScale(fontSize, largerText))
+
+    private fun minGuideRowHeightDp(scale: Float): Int = max(
         MIN_GUIDE_ROW_HEIGHT_DP,
-        ceil(PROGRAMME_TITLE_SP * fontSize.scale * TITLE_LINE_HEIGHT_FACTOR).toInt() +
+        ceil(PROGRAMME_TITLE_SP * scale * TITLE_LINE_HEIGHT_FACTOR).toInt() +
             CARD_VERTICAL_PADDING_DP
     )
 
@@ -79,6 +104,17 @@ object Appearance {
         (baseHeightDp * density.rowHeightScale).roundToInt()
     )
 
+    /** 9.3.0 — the same row height with larger-text mode on or off. */
+    fun guideRowHeightDp(
+        baseHeightDp: Int,
+        density: GuideDensity,
+        fontSize: FontSize,
+        largerText: Boolean
+    ): Int = max(
+        minGuideRowHeightDp(fontSize, largerText),
+        (baseHeightDp * density.rowHeightScale).roundToInt()
+    )
+
     /** The guide row height for a channel-list-size base height and a
      * density, at the default (Medium) font size. */
     fun guideRowHeightDp(baseHeightDp: Int, density: GuideDensity): Int =
@@ -87,6 +123,11 @@ object Appearance {
     /** A text size (sp) scaled by the font-size setting. */
     fun scaledTextSp(baseSp: Float, fontSize: FontSize): Float =
         baseSp * fontSize.scale
+
+    /** 9.3.0 — a text size scaled by the font-size setting and the
+     * larger-text mode. */
+    fun scaledTextSp(baseSp: Float, fontSize: FontSize, largerText: Boolean): Float =
+        baseSp * effectiveFontScale(fontSize, largerText)
 
     /** Parse a stored density key; anything unknown (or null, from an
      * older install) is Comfortable — today's rows. */

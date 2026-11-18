@@ -52,20 +52,27 @@ class BackupManagerTest {
     }
 
     /** 9.1.0: the appearance settings ride in the backup, and an
-     * old backup without them decodes to the defaults. */
+     * old backup without them decodes to the defaults. 9.3.0: the
+     * larger-text mode, spoken names and held-OK action ride too. */
     @Test
     fun appearanceSettingsSurviveTheRoundTrip() {
         val data = sampleData().copy(
             guideDensity = "compact",
             fontSize = "large",
             highContrastFocus = true,
-            reducedAnimations = true
+            reducedAnimations = true,
+            largerText = true,
+            speakChannelNames = true,
+            longPressOkAction = "guide"
         )
         val decoded = BackupManager.decode(BackupManager.encode(data)).getOrThrow()
         assertEquals("compact", decoded.guideDensity)
         assertEquals("large", decoded.fontSize)
         assertTrue(decoded.highContrastFocus)
         assertTrue(decoded.reducedAnimations)
+        assertTrue(decoded.largerText)
+        assertTrue(decoded.speakChannelNames)
+        assertEquals("guide", decoded.longPressOkAction)
     }
 
     @Test
@@ -76,6 +83,9 @@ class BackupManagerTest {
         assertEquals("medium", decoded.fontSize)
         assertFalse(decoded.highContrastFocus)
         assertFalse(decoded.reducedAnimations)
+        assertFalse(decoded.largerText)
+        assertFalse(decoded.speakChannelNames)
+        assertEquals("menu", decoded.longPressOkAction)
     }
 
     @Test

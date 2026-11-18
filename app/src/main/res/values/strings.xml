@@ -331,7 +331,13 @@
     <string name="prefs_density_compact">Compact</string>
     <string name="prefs_density_comfortable">Comfortable</string>
     <string name="prefs_font_size">Font size (guide &amp; sidebar)</string>
+    <string name="prefs_larger_text">Larger text (guide &amp; sidebar)</string>
     <string name="prefs_high_contrast_focus">High-contrast focus</string>
     <string name="prefs_reduced_animations">Reduce animations</string>
+    <string name="prefs_speak_channel_names">Spoken channel names</string>
+    <string name="prefs_long_press_ok">Long-press OK in playback</string>
+    <string name="prefs_long_press_menu">Menu</string>
+    <string name="prefs_long_press_guide">Guide</string>
+    <string name="prefs_long_press_nothing">Nothing</string>
     <string name="home_recent_channels">Recent channels</string>
 </resources>

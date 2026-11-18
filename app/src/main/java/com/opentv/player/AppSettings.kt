@@ -36,6 +36,11 @@ object AppSettings {
     private const val KEY_FONT_SIZE = "font_size"
     private const val KEY_HIGH_CONTRAST_FOCUS = "high_contrast_focus"
     private const val KEY_REDUCED_ANIMATIONS = "reduced_animations"
+    /** 9.3.0: accessibility & remote — spoken channel names (TTS),
+     * larger-text mode, and what a held OK does in playback. */
+    private const val KEY_SPEAK_CHANNEL_NAMES = "speak_channel_names"
+    private const val KEY_LARGER_TEXT = "larger_text"
+    private const val KEY_LONG_PRESS_OK_ACTION = "long_press_ok_action"
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -235,12 +240,67 @@ object AppSettings {
         prefs(context).edit().putBoolean(KEY_REDUCED_ANIMATIONS, value).apply()
     }
 
+    /** 9.3.0 — Spoken channel names: the channel name is announced
+     * (TTS) whenever playback switches to a channel. Default OFF —
+     * a TV that talks uninvited is a surprise nobody asked for. */
+    fun speakChannelNames(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SPEAK_CHANNEL_NAMES, false)
+
+    fun setSpeakChannelNames(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SPEAK_CHANNEL_NAMES, value).apply()
+    }
+
+    /** 9.3.0 — Larger-text mode: guide + sidebar text get an extra
+     * 1.25x on top of the font-size setting, for readability from
+     * the couch. Default OFF. Applies the next time the guide or a
+     * fresh sidebar opens, like the font size. */
+    fun largerText(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_LARGER_TEXT, false)
+
+    fun setLargerText(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_LARGER_TEXT, value).apply()
+    }
+
+    /** 9.3.0 — What a held OK does in playback (nothing up): MENU
+     * opens the playback menu (today's behaviour, the default),
+     * GUIDE opens the guide, NOTHING does nothing at all — the
+     * hold is swallowed so the short-press action doesn't fire
+     * on key-up either. */
+    enum class LongPressOkAction { MENU, GUIDE, NOTHING }
+
+    fun longPressOkAction(context: Context): LongPressOkAction =
+        parseLongPressOkAction(prefs(context).getString(KEY_LONG_PRESS_OK_ACTION, "menu"))
+
+    fun setLongPressOkAction(context: Context, action: LongPressOkAction) {
+        prefs(context).edit().putString(KEY_LONG_PRESS_OK_ACTION, longPressOkActionKey(action)).apply()
+    }
+
+    /** Parse a stored long-press-OK key; anything unknown (or null,
+     * from an older install) is MENU — today's behaviour. Pure, so
+     * it is unit-testable. */
+    fun parseLongPressOkAction(raw: String?): LongPressOkAction = when (raw) {
+        "guide" -> LongPressOkAction.GUIDE
+        "nothing" -> LongPressOkAction.NOTHING
+        else -> LongPressOkAction.MENU
+    }
+
+    /** The stored key for a long-press-OK action (round-trips
+     * through [parseLongPressOkAction]). */
+    fun longPressOkActionKey(action: LongPressOkAction): String = when (action) {
+        LongPressOkAction.MENU -> "menu"
+        LongPressOkAction.GUIDE -> "guide"
+        LongPressOkAction.NOTHING -> "nothing"
+    }
+
     /** Dimensions for the current channel-list size. 9.1.0: the font
      * size setting scales the text sizes here, so the sidebar's
      * channel rows grow/shrink with it; the guide scales its own
-     * text at the call site (same helper). */
+     * text at the call site (same helper). 9.3.0: larger-text mode
+     * folds in too, through the effective scale. */
     fun sidebarSizing(context: Context): SidebarSizing {
-        val fontScale = fontSize(context).scale
+        val fontScale = Appearance.effectiveFontScale(
+            fontSize(context), largerText(context)
+        )
         return when (channelListSize(context)) {
             ChannelListSize.SMALL -> SidebarSizing(
                 panelDp = 220, rowMinHeightDp = 48, rowPaddingDp = 8, groupPaddingDp = 10,

@@ -652,6 +652,16 @@
         </RadioGroup>
 
         <Switch
+            android:id="@+id/pref_larger_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_larger_text"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <Switch
             android:id="@+id/pref_high_contrast_focus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -670,6 +680,62 @@
             android:text="@string/prefs_reduced_animations"
             android:textColor="@android:color/white"
             android:textSize="16sp" />
+
+        <Switch
+            android:id="@+id/pref_speak_channel_names"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_speak_channel_names"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_long_press_ok"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/pref_long_press_ok"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/pref_long_press_menu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/prefs_long_press_menu"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_long_press_guide"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_long_press_guide"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_long_press_nothing"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_long_press_nothing"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+        </RadioGroup>
 
     </LinearLayout>
 

@@ -268,6 +268,12 @@ class SettingsActivity : FragmentActivity() {
                 )
             }
         }
+        findViewById<Switch>(R.id.pref_larger_text).apply {
+            isChecked = AppSettings.largerText(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setLargerText(this@SettingsActivity, checked)
+            }
+        }
         findViewById<Switch>(R.id.pref_high_contrast_focus).apply {
             isChecked = AppSettings.highContrastFocus(this@SettingsActivity)
             setOnCheckedChangeListener { _, checked ->
@@ -278,6 +284,35 @@ class SettingsActivity : FragmentActivity() {
             isChecked = AppSettings.reducedAnimations(this@SettingsActivity)
             setOnCheckedChangeListener { _, checked ->
                 AppSettings.setReducedAnimations(this@SettingsActivity, checked)
+            }
+        }
+
+        // 9.3.0: accessibility & remote — spoken channel names and
+        // what a held OK does in playback. The long-press choice
+        // takes effect immediately (it is read on every hold).
+        findViewById<Switch>(R.id.pref_speak_channel_names).apply {
+            isChecked = AppSettings.speakChannelNames(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setSpeakChannelNames(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<RadioGroup>(R.id.pref_long_press_ok).apply {
+            check(
+                when (AppSettings.longPressOkAction(this@SettingsActivity)) {
+                    AppSettings.LongPressOkAction.GUIDE -> R.id.pref_long_press_guide
+                    AppSettings.LongPressOkAction.NOTHING -> R.id.pref_long_press_nothing
+                    else -> R.id.pref_long_press_menu
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setLongPressOkAction(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_long_press_guide -> AppSettings.LongPressOkAction.GUIDE
+                        R.id.pref_long_press_nothing -> AppSettings.LongPressOkAction.NOTHING
+                        else -> AppSettings.LongPressOkAction.MENU
+                    }
+                )
             }
         }
 

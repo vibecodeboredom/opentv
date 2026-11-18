@@ -72,7 +72,14 @@ object BackupManager {
         val guideDensity: String = "comfortable",
         val fontSize: String = "medium",
         val highContrastFocus: Boolean = false,
-        val reducedAnimations: Boolean = false
+        val reducedAnimations: Boolean = false,
+        /** 9.3.0 — accessibility & remote: larger-text mode,
+         * spoken channel names, and the held-OK action ("menu",
+         * "guide" or "nothing"). Older backups have no keys and
+         * decode to the defaults. */
+        val largerText: Boolean = false,
+        val speakChannelNames: Boolean = false,
+        val longPressOkAction: String = "menu"
     )
 
     /** What a restore did, for the toast. */
@@ -125,7 +132,10 @@ object BackupManager {
                 "guideDensity" to data.guideDensity,
                 "fontSize" to data.fontSize,
                 "highContrastFocus" to data.highContrastFocus,
-                "reducedAnimations" to data.reducedAnimations
+                "reducedAnimations" to data.reducedAnimations,
+                "largerText" to data.largerText,
+                "speakChannelNames" to data.speakChannelNames,
+                "longPressOkAction" to data.longPressOkAction
             )
         )
         return Json.stringify(root)
@@ -201,7 +211,10 @@ object BackupManager {
                 guideDensity = settings?.get("guideDensity") as? String ?: "comfortable",
                 fontSize = settings?.get("fontSize") as? String ?: "medium",
                 highContrastFocus = settings?.get("highContrastFocus") as? Boolean ?: false,
-                reducedAnimations = settings?.get("reducedAnimations") as? Boolean ?: false
+                reducedAnimations = settings?.get("reducedAnimations") as? Boolean ?: false,
+                largerText = settings?.get("largerText") as? Boolean ?: false,
+                speakChannelNames = settings?.get("speakChannelNames") as? Boolean ?: false,
+                longPressOkAction = settings?.get("longPressOkAction") as? String ?: "menu"
             )
         )
     }
@@ -258,7 +271,12 @@ object BackupManager {
             guideDensity = Appearance.guideDensityKey(AppSettings.guideDensity(context)),
             fontSize = Appearance.fontSizeKey(AppSettings.fontSize(context)),
             highContrastFocus = AppSettings.highContrastFocus(context),
-            reducedAnimations = AppSettings.reducedAnimations(context)
+            reducedAnimations = AppSettings.reducedAnimations(context),
+            largerText = AppSettings.largerText(context),
+            speakChannelNames = AppSettings.speakChannelNames(context),
+            longPressOkAction = AppSettings.longPressOkActionKey(
+                AppSettings.longPressOkAction(context)
+            )
         )
     }
 
@@ -356,6 +374,11 @@ object BackupManager {
         AppSettings.setFontSize(context, Appearance.parseFontSize(data.fontSize))
         AppSettings.setHighContrastFocus(context, data.highContrastFocus)
         AppSettings.setReducedAnimations(context, data.reducedAnimations)
+        AppSettings.setLargerText(context, data.largerText)
+        AppSettings.setSpeakChannelNames(context, data.speakChannelNames)
+        AppSettings.setLongPressOkAction(
+            context, AppSettings.parseLongPressOkAction(data.longPressOkAction)
+        )
         return RestoreReport(
             playlists = playlistCount,
             favorites = data.favorites.size,

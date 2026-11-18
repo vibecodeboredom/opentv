@@ -46,6 +46,8 @@ class SidebarAdapter(
     private val currentChannelId: () -> String?,
     private val sizing: AppSettings.SidebarSizing,
     private val fontSize: Appearance.FontSize = Appearance.FontSize.MEDIUM,
+    /** 9.3.0: larger-text mode, on top of the font size. */
+    private val largerText: Boolean = false,
     private val highContrast: Boolean = false
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -159,7 +161,7 @@ class SidebarAdapter(
             setTextColor(0xFFFFFFFF.toInt())
             setTextSize(
                 TypedValue.COMPLEX_UNIT_SP,
-                Appearance.scaledTextSp(16f, fontSize)
+                Appearance.scaledTextSp(16f, fontSize, largerText)
             )
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
@@ -170,7 +172,7 @@ class SidebarAdapter(
             setTextColor(0xB3FFFFFF.toInt())
             setTextSize(
                 TypedValue.COMPLEX_UNIT_SP,
-                Appearance.scaledTextSp(14f, fontSize)
+                Appearance.scaledTextSp(14f, fontSize, largerText)
             )
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,

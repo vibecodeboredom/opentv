@@ -231,10 +231,19 @@ class PlaybackActivity : FragmentActivity() {
      * timeout); the first Left/Right press upgrades it to the normal
      * Left/Right timeout instead. */
     private var overlayBrief = false
-    /** Long-press OK: opens the context menu. */
+    /** Long-press OK: what it does is a setting (9.3.0) — the
+     * playback menu, the guide, or nothing at all. */
     private val longPressRunnable = Runnable {
         longPressFired = true
-        showOptions()
+        // 9.3.0: the held-OK action. MENU is today's behaviour;
+        // NOTHING swallows the hold (the key-UP still does nothing
+        // because longPressFired is set — the short-press action
+        // must not fire after a hold that did nothing).
+        when (AppSettings.longPressOkAction(this)) {
+            AppSettings.LongPressOkAction.GUIDE -> openGuide()
+            AppSettings.LongPressOkAction.NOTHING -> Unit
+            AppSettings.LongPressOkAction.MENU -> showOptions()
+        }
     }
     private var longPressFired = false
     /** The recents the strip was last built with, so an unchanged list
@@ -387,6 +396,10 @@ class PlaybackActivity : FragmentActivity() {
             return
         }
         channel = ch
+        // 9.3.0: spoken channel names — a channel change restarts
+        // this activity, so onCreate is the announce point.
+        // Recordings have no channel to name.
+        ch?.let { ChannelAnnouncer.announce(this, it.name) }
         // 7.3.1: per-channel persistence — a stored choice for this
         // channel wins over the carried session choice; a channel
         // with nothing stored keeps the carried choice (or Auto /
@@ -814,7 +827,8 @@ class PlaybackActivity : FragmentActivity() {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
                     okDownSidebarUp = sidebarUp
                     okDownOverlayUp = overlayUp
-                    // Long-press OK (nothing up) opens the context menu.
+                    // Long-press OK (nothing up) runs the held-OK
+                    // action (9.3.0: menu, guide, or nothing).
                     if (!sidebarUp && !overlayUp) {
                         longPressFired = false
                         infoHandler.postDelayed(longPressRunnable, LONG_PRESS_MS)
