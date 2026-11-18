@@ -250,14 +250,24 @@ Rules (from Chuni, 2026-11-17):
 
 ## 9.x — Experience
 
-### 9.0.0 (planned) — TV home screen
+### 9.0.0 ✅ (this release) — TV home screen
 
 - A real browse-first home on TV: favorites rail, recent channels
   rail, and groups rail — instead of always auto-playing on launch.
-- Setting to choose the launch behaviour: home screen or auto-play
-  the last channel.
-- The home screen reuses the mobile home's rails so the two stay
-  in sync.
+  Recent history grew from 3 to 12 so the rail means something
+  (the playback strip still caps itself at 3).
+- Setting to choose the launch behaviour: home screen (default) or
+  auto-play the last channel (Settings → Guide & playback, TV
+  only). The setting rides in backups.
+- The home screen reuses the mobile home's rails: one shared
+  `HomeRails` builder (favorites first, then recents, then the
+  effective groups) feeds both, so the two stay in sync. The
+  mobile home now uses the effective groups too, instead of the
+  raw playlist groups.
+- Gemini reviewed the diff (2 real issues — an empty-title rail
+  hazard, and the home never retrying after a failed load — both
+  fixed) and wrote 8 extra unit tests (7 added as-is, 1 fixed);
+  GLM 429'd and sat this one out.
 
 ### 9.1.0 (planned) — Appearance
 

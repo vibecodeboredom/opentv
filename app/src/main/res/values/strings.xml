@@ -324,4 +324,8 @@
     <string name="prefs_window_6h">6 hours</string>
     <string name="prefs_window_12h">12 hours</string>
     <string name="prefs_window_24h">24 hours</string>
+    <string name="prefs_launch_behaviour">On launch (TV)</string>
+    <string name="prefs_launch_home">Home screen</string>
+    <string name="prefs_launch_autoplay">Auto-play last channel</string>
+    <string name="home_recent_channels">Recent channels</string>
 </resources>

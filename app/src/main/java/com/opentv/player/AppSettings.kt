@@ -26,6 +26,10 @@ object AppSettings {
     /** 8.3.0: recordings list sort + filter (persist across opens). */
     private const val KEY_RECORDINGS_SORT = "recordings_sort"
     private const val KEY_RECORDINGS_FILTER = "recordings_filter"
+    /** 9.0.0: what the TV opens on — the home screen, or straight
+     * into the last channel. Mobile ignores it (it always opens
+     * the touch home screen). */
+    private const val KEY_LAUNCH_BEHAVIOUR = "launch_behaviour"
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -156,6 +160,29 @@ object AppSettings {
 
     fun setRecordingsFilter(context: Context, filter: RecordingLibrary.Filter) {
         prefs(context).edit().putString(KEY_RECORDINGS_FILTER, filter.name).apply()
+    }
+
+    /** 9.0.0 — What the TV opens on (default Home screen, the
+     * browse-first launch). AUTOPLAY restores the old behaviour:
+     * straight into the last channel that actually played. Takes
+     * effect on the next launch. */
+    enum class LaunchBehaviour { HOME, AUTOPLAY }
+
+    fun launchBehaviour(context: Context): LaunchBehaviour {
+        return when (prefs(context).getString(KEY_LAUNCH_BEHAVIOUR, "home")) {
+            "autoplay" -> LaunchBehaviour.AUTOPLAY
+            else -> LaunchBehaviour.HOME
+        }
+    }
+
+    fun setLaunchBehaviour(context: Context, behaviour: LaunchBehaviour) {
+        prefs(context).edit().putString(
+            KEY_LAUNCH_BEHAVIOUR,
+            when (behaviour) {
+                LaunchBehaviour.AUTOPLAY -> "autoplay"
+                LaunchBehaviour.HOME -> "home"
+            }
+        ).apply()
     }
 
     /** Dimensions for the current channel-list size. */

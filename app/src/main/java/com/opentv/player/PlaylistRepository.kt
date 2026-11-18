@@ -69,8 +69,12 @@ object PlaylistRepository {
     private const val KEY_RECENT_SEARCHES = "recent_searches"
     /** Id of the last channel that actually played (4.6.0: resume it on launch). */
     private const val KEY_LAST_CHANNEL = "last_channel"
-    /** The overlay's channel strip shows this many most recent channels. */
-    private const val MAX_RECENT = 3
+    /** 9.0.0: how many most recent channels are kept (most recent
+     * first). The TV home's Recent rail and the sidebar History
+     * list show up to this many; the playback overlay strip still
+     * caps itself at 3 (its own take(3)), so it is unchanged. Was
+     * 3 — too thin for a rail. */
+    private const val MAX_RECENT = 12
     /** Guide search remembers this many past queries. */
     private const val MAX_RECENT_SEARCHES = 8
     private const val CACHE_FILE = "playlist.m3u"

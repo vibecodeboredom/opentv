@@ -175,28 +175,29 @@ class MobileHomeActivity : FragmentActivity() {
     }
 
     /** Build the sectioned list for the current query: Favorites
-     * first, then one section per group in playlist order (the
-     * LinkedHashMap keeps first-occurrence order, like the TV
-     * browse menu). A non-empty query shows a single "Results"
-     * section of name/group matches instead. */
+     * first, then one section per group (9.0.0: built by the shared
+     * HomeRails builder, so the mobile home and the TV home show
+     * the same sections — favorites first, then the effective
+     * groups with renames, moves and custom order applied. The
+     * mobile home passes no recents: it keeps its Continue card
+     * instead of a Recent rail). A non-empty query shows a single
+     * "Results" section of name/group matches instead. */
     private fun renderList() {
         val query = currentQuery.trim()
         val items = mutableListOf<MobileChannelAdapter.Item>()
         if (query.isEmpty()) {
-            val favoriteChannels = allChannels.filter { it.id in favorites }
-            if (favoriteChannels.isNotEmpty()) {
-                items += MobileChannelAdapter.Item.Header(getString(R.string.favorites))
-                favoriteChannels.forEach {
-                    items += MobileChannelAdapter.Item.ChannelItem(it, true)
-                }
-            }
-            val grouped = linkedMapOf<String, MutableList<Channel>>()
-            for (ch in allChannels) {
-                (grouped.getOrPut(ch.group) { mutableListOf() }) += ch
-            }
-            for ((group, groupChannels) in grouped) {
-                items += MobileChannelAdapter.Item.Header(group)
-                groupChannels.forEach {
+            val rails = HomeRails.buildRails(
+                channels = allChannels,
+                favorites = favorites,
+                recentIds = emptyList(),
+                hidden = emptySet(),
+                overrides = PlaylistRepository.groupOverrides(this),
+                favoritesTitle = getString(R.string.favorites),
+                recentsTitle = ""
+            )
+            for (rail in rails) {
+                items += MobileChannelAdapter.Item.Header(rail.title)
+                rail.channels.forEach {
                     items += MobileChannelAdapter.Item.ChannelItem(it, it.id in favorites)
                 }
             }

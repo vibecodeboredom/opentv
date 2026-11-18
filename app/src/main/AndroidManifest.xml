@@ -50,6 +50,13 @@
             android:name=".MobileHomeActivity"
             android:exported="false" />
 
+        <!-- 9.0.0: browse-first TV home screen. MainActivity routes
+             the TV here instead of auto-playing, unless the
+             launch-behaviour setting says auto-play. -->
+        <activity
+            android:name=".TvHomeActivity"
+            android:exported="false" />
+
         <activity
             android:name=".PlaybackActivity"
             android:exported="false"

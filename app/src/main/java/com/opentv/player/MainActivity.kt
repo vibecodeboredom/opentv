@@ -97,6 +97,18 @@ class MainActivity : FragmentActivity() {
                     finish()
                     return@onSuccess
                 }
+                // 9.0.0: the TV opens on the browse-first home screen
+                // by default — favorites, recents and group rails
+                // instead of straight into a channel. The EPG
+                // warm-up is skipped like on mobile (the guide loads
+                // it on demand); AUTOPLAY below keeps the old flow.
+                if (AppSettings.launchBehaviour(this@MainActivity) ==
+                    AppSettings.LaunchBehaviour.HOME
+                ) {
+                    startActivity(Intent(this@MainActivity, TvHomeActivity::class.java))
+                    finish()
+                    return@onSuccess
+                }
                 // Warm the guide cache, briefly — never stall launch on it.
                 status.setText(R.string.loading_guide)
                 withTimeoutOrNull(EPG_WARMUP_TIMEOUT_MS) { epgDeferred.await() }

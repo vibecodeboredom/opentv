@@ -515,6 +515,54 @@
                 android:textSize="16sp" />
         </RadioGroup>
 
+        <!-- 9.0.0: what the TV opens on — the home screen, or
+             straight into the last channel. TV only (mobile always
+             opens the touch home screen), so the container is hidden
+             on mobile in SettingsActivity. Applies on the next
+             launch. -->
+        <LinearLayout
+            android:id="@+id/pref_launch_behaviour_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/prefs_launch_behaviour"
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <RadioGroup
+                android:id="@+id/pref_launch_behaviour"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/pref_launch_home"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/prefs_launch_home"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp" />
+
+                <RadioButton
+                    android:id="@+id/pref_launch_autoplay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="24dp"
+                    android:minHeight="48dp"
+                    android:text="@string/prefs_launch_autoplay"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp" />
+            </RadioGroup>
+        </LinearLayout>
+
     </LinearLayout>
 
     <!-- Share playlist (4.7.1): temporarily host a playlist on this

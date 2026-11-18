@@ -61,7 +61,10 @@ object BackupManager {
         val channelListSize: String,
         val guideWindowSize: String,
         /** 8.3.0 — auto-delete old recordings, days to keep (0 = off). */
-        val autoDeleteRecordingsDays: Int = 0
+        val autoDeleteRecordingsDays: Int = 0,
+        /** 9.0.0 — what the TV opens on ("home" or "autoplay").
+         * Older backups have no key and decode to "home". */
+        val launchBehaviour: String = "home"
     )
 
     /** What a restore did, for the toast. */
@@ -109,7 +112,8 @@ object BackupManager {
                 "guideFavoritesOnly" to data.guideFavoritesOnly,
                 "channelListSize" to data.channelListSize,
                 "guideWindowSize" to data.guideWindowSize,
-                "autoDeleteRecordingsDays" to data.autoDeleteRecordingsDays
+                "autoDeleteRecordingsDays" to data.autoDeleteRecordingsDays,
+                "launchBehaviour" to data.launchBehaviour
             )
         )
         return Json.stringify(root)
@@ -180,7 +184,8 @@ object BackupManager {
                 channelListSize = settings?.get("channelListSize") as? String ?: "small",
                 guideWindowSize = settings?.get("guideWindowSize") as? String ?: "6",
                 autoDeleteRecordingsDays = (settings?.get("autoDeleteRecordingsDays") as? Number)
-                    ?.toInt()?.coerceAtLeast(0) ?: 0
+                    ?.toInt()?.coerceAtLeast(0) ?: 0,
+                launchBehaviour = settings?.get("launchBehaviour") as? String ?: "home"
             )
         )
     }
@@ -229,7 +234,11 @@ object BackupManager {
             guideFavoritesOnly = AppSettings.guideFavoritesOnly(context),
             channelListSize = AppSettings.channelListSize(context).name.lowercase(),
             guideWindowSize = AppSettings.guideWindowSize(context).hours.toString(),
-            autoDeleteRecordingsDays = AppSettings.autoDeleteRecordingsDays(context)
+            autoDeleteRecordingsDays = AppSettings.autoDeleteRecordingsDays(context),
+            launchBehaviour = when (AppSettings.launchBehaviour(context)) {
+                AppSettings.LaunchBehaviour.AUTOPLAY -> "autoplay"
+                AppSettings.LaunchBehaviour.HOME -> "home"
+            }
         )
     }
 
@@ -313,6 +322,14 @@ object BackupManager {
             }
         )
         AppSettings.setAutoDeleteRecordingsDays(context, data.autoDeleteRecordingsDays)
+        AppSettings.setLaunchBehaviour(
+            context,
+            if (data.launchBehaviour == "autoplay") {
+                AppSettings.LaunchBehaviour.AUTOPLAY
+            } else {
+                AppSettings.LaunchBehaviour.HOME
+            }
+        )
         return RestoreReport(
             playlists = playlistCount,
             favorites = data.favorites.size,

@@ -196,6 +196,35 @@ class SettingsActivity : FragmentActivity() {
                 )
             }
         }
+        // 9.0.0: what the TV opens on — home screen or auto-play
+        // the last channel. TV only: mobile always opens the touch
+        // home screen, so the row hides there. Applies on the next
+        // launch.
+        findViewById<LinearLayout>(R.id.pref_launch_behaviour_container).apply {
+            visibility = if (DeviceType.isMobile(this@SettingsActivity)) {
+                android.view.View.GONE
+            } else {
+                android.view.View.VISIBLE
+            }
+        }
+        findViewById<RadioGroup>(R.id.pref_launch_behaviour).apply {
+            check(
+                when (AppSettings.launchBehaviour(this@SettingsActivity)) {
+                    AppSettings.LaunchBehaviour.AUTOPLAY -> R.id.pref_launch_autoplay
+                    else -> R.id.pref_launch_home
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setLaunchBehaviour(
+                    this@SettingsActivity,
+                    if (checkedId == R.id.pref_launch_autoplay) {
+                        AppSettings.LaunchBehaviour.AUTOPLAY
+                    } else {
+                        AppSettings.LaunchBehaviour.HOME
+                    }
+                )
+            }
+        }
 
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)
