@@ -98,17 +98,21 @@ object EpgQuality {
 
     /** Drop a trailing ".us" / "-hd" / "_uk" style suffix from a
      * lowercased id, so "cnn.us" compares as "cnn". The separator is
-     * required — "funk" must not lose its "uk". */
+     * required — "funk" must not lose its "uk". Strips repeatedly,
+     * so stacked suffixes ("cnn.us.hd") compare as "cnn" too. */
     private fun stripIdSuffix(lowercased: String): String {
-        for (suffix in ID_SUFFIXES) {
-            for (sep in listOf('.', '-', '_')) {
-                val tail = "$sep$suffix"
-                if (lowercased.endsWith(tail) && lowercased.length > tail.length) {
-                    return lowercased.dropLast(tail.length)
+        var result = lowercased
+        while (true) {
+            val stripped = ID_SUFFIXES.firstNotNullOfOrNull { suffix ->
+                listOf('.', '-', '_').firstNotNullOfOrNull { sep ->
+                    val tail = "$sep$suffix"
+                    if (result.endsWith(tail) && result.length > tail.length) {
+                        result.dropLast(tail.length)
+                    } else null
                 }
-            }
+            } ?: return result
+            result = stripped
         }
-        return lowercased
     }
 
     /** The canonical form of an id or name for matching: suffix
@@ -158,18 +162,80 @@ object EpgQuality {
         for (key in epgKeys) {
             if (normalizeId(key) == normName || matchKey(key) == keyName) found += key
         }
-        // 4: containment, either way round (short side at least 3
-        // characters, so "tv" does not match everything).
+        // 4: containment, either way round, on the channel name or
+        // its tvg-id (each is an identity: its match-key + its
+        // words). The shorter side must be a whole-word prefix of
+        // the longer one ("CNN" suggests "CNN International"), or a
+        // normalized prefix whose remainder has a letter in it
+        // ("Discovery" suggests "DiscoveryChannel"). A bare number
+        // remainder is a different channel, not the same one, so
+        // "CNN" never suggests "CNN2" — and "Fox News" never
+        // suggests "BBC News" (no shared word-prefix).
+        val identities = buildList {
+            if (keyName.length >= 3) add(keyName to wordsOf(channel.name))
+            if (keyTvg != null && keyTvg.length >= 3 && tvg != null) {
+                add(keyTvg to wordsOf(tvg))
+            }
+        }
         for (key in epgKeys) {
             val k = matchKey(key)
-            if (k.length >= 3 && keyName.length >= 3 &&
-                (k.startsWith(keyName) || keyName.startsWith(k))
-            ) found += key
+            if (k.length < 3) continue
+            val keyWords = wordsOf(key)
+            for ((identity, words) in identities) {
+                if (isWordPrefix(words, keyWords) || isWordPrefix(keyWords, words) ||
+                    isLoosePrefix(identity, k) || isLoosePrefix(k, identity)
+                ) {
+                    found += key
+                    break
+                }
+            }
         }
-        return found.take(max)
+        // One suggestion per normalized id: two sources spelling the
+        // same channel differently ("CNN.us" vs "cnn_us") resolve to
+        // the same programmes, so showing both just burns a slot.
+        // The first (best-ranked) spelling wins.
+        val seen = HashSet<String>()
+        return found.filter { seen.add(normalizeId(it)) }.take(max)
     }
 
+    /** Words of an id or name: lowercase, split on anything that is
+     * not a letter or digit. "CNN International" -> ["cnn",
+     * "international"]; "cnn.us" -> ["cnn", "us"]. */
+    private fun wordsOf(value: String): List<String> =
+        value.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
+
+    /** True when [short] is a word-prefix of [long]: every word of
+     * [short], in order, starts [long]. "cnn" is a word-prefix of
+     * ["cnn", "international"]; "news" is not one of ["bbc",
+     * "news"]. */
+    private fun isWordPrefix(short: List<String>, long: List<String>): Boolean =
+        short.isNotEmpty() && short.size <= long.size &&
+            long.take(short.size) == short
+
+    /** True when [short] is a normalized prefix of [long] and the
+     * leftover has a letter in it: "cnn" matches
+     * "cnninternational" (leftover "international") but not "cnn2"
+     * (leftover "2" — a different channel, not the same one). */
+    private fun isLoosePrefix(short: String, long: String): Boolean =
+        short.length >= 3 && long.length > short.length &&
+            long.startsWith(short) && long.drop(short.length).any { it.isLetter() }
+
     // ---- Per-channel coverage ----------------------------------------
+
+    /** Drop duplicate airings of the same programme (same start,
+     * stop and title) — two EPG sources often carry the same
+     * channel, and without this the guide shows every programme
+     * twice and the coverage count doubles. Keeps the first
+     * occurrence, in order. Within one channel's list, the same
+     * start + stop + title is the same airing. */
+    fun dedupeProgrammes(
+        programmes: List<EpgParser.Programme>
+    ): List<EpgParser.Programme> {
+        val seen = HashSet<Triple<Long, Long, String>>(programmes.size)
+        return programmes.filter { p ->
+            seen.add(Triple(p.startMillis, p.stopMillis, p.title))
+        }
+    }
 
     /** Guide coverage for one channel: how many programmes it has
      * in the next [windowHours] hours, whether one is on now, and
@@ -187,7 +253,11 @@ object EpgQuality {
         nowMillis: Long = System.currentTimeMillis(),
         windowHours: Int = 24
     ): Coverage {
-        val list = GuideData.programmesForChannel(channel, epg, epgOverrides)
+        // Deduped here too, not just at the merge: a snapshot saved
+        // by an older build can still carry duplicates.
+        val list = dedupeProgrammes(
+            GuideData.programmesForChannel(channel, epg, epgOverrides)
+        )
         if (list.isEmpty()) return Coverage(0, false, null)
         val windowEnd = nowMillis + windowHours * 3_600_000L
         var count = 0

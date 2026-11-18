@@ -172,10 +172,34 @@ Rules (from Chuni, 2026-11-17):
   fixed: wrong EPG key; 2 added as-is). GLM 429'd on its review
   call and sat this one out.
 
-### 8.2.1 (planned) — Patch
+### 8.2.1 ✅ (this release) — Patch
 
-- Fixes + polish from 8.2.0 testing on the TV: source-status
-  refresh timing, assign-dialog suggestions, and coverage counts.
+- Source-status refresh timing: a fetch that falls back to the
+  stale disk copy is now recorded as failed ("Fetch failed, using
+  cached data") instead of claiming a fresh load, and a cached read
+  is stamped with the file's real fetch time instead of "Loaded
+  just now". "Refresh now" is single-flight, like loadEpg, so two
+  taps share one in-flight download instead of racing two of them.
+- Assign-dialog suggestions: stacked id suffixes strip ("cnn.us.hd"
+  matches "cnn"), suggestions dedupe by normalized id (two sources
+  spelling the same channel differently no longer burn two slots),
+  and step-4 containment is word-prefix based with the tvg-id as an
+  identity — "CNN" suggests "CNN International" and "Discovery"
+  suggests "DiscoveryChannel", but never "CNN2" / "ESPN2" / "HBO2"
+  and never "BBC News" for "Fox News".
+- Coverage counts: programmes carried by two EPG sources are merged
+  once (same start + stop + title), so the guide no longer shows
+  every programme twice and the coverage count no longer doubles;
+  coverageFor dedupes defensively too, for snapshots saved by older
+  builds.
+- Gemini lite reviewed the diff (3 findings — all wrong on
+  verification: stripIdSuffix does assign the stripped value, the
+  refresh single-flight is the same correct double-checked locking
+  as loadEpg, and the name-key merge loop does not add to the
+  programme count) and wrote extra unit tests — 1 adapted and added
+  (dedupe order + different slots), 1 extended (numbered variants);
+  the rest were wrong or duplicates and were dropped. GLM 429'd on
+  its review call and sat this one out.
 
 ### 8.3.0 (planned) — Recordings
 

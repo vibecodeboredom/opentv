@@ -277,4 +277,138 @@ class EpgQualityTest {
             EpgQuality.coverageLine(coverage, now)
         )
     }
+
+    // ---- 8.2.1: suggestions ------------------------------------------
+
+    @Test
+    fun suggestStackedSuffixes() {
+        // "cnn.us.hd" strips both suffixes and matches "cnn".
+        val keys = linkedSetOf("cnn", "bbc")
+        assertEquals(
+            listOf("cnn"),
+            EpgQuality.suggestEpgIds(channel("c1", "CNN", "cnn.us.hd"), keys)
+        )
+    }
+
+    @Test
+    fun suggestDedupesSameChannelSpellings() {
+        // Two sources spelling the same channel differently resolve
+        // to the same programmes — only the best-ranked spelling is
+        // shown, so the slot is not wasted.
+        val keys = linkedSetOf("cnn.us", "cnn_us", "bbc")
+        assertEquals(
+            listOf("cnn.us"),
+            EpgQuality.suggestEpgIds(channel("c1", "CNN", "cnn"), keys)
+        )
+    }
+
+    @Test
+    fun suggestRejectsNumberedVariant() {
+        // "cnn2" is a different channel, not CNN under another
+        // spelling.
+        assertTrue(
+            EpgQuality.suggestEpgIds(
+                channel("c1", "CNN", "cnn"), linkedSetOf("cnn2", "bbc")
+            ).isEmpty()
+        )
+        assertTrue(
+            EpgQuality.suggestEpgIds(
+                channel("c1", "ESPN", "espn"), linkedSetOf("espn2")
+            ).isEmpty()
+        )
+        assertTrue(
+            EpgQuality.suggestEpgIds(
+                channel("c1", "HBO", "hbo"), linkedSetOf("hbo2")
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun suggestContainmentKeepsWordPrefix() {
+        // The good containment match survives while the numbered
+        // variant next to it is dropped.
+        val keys = linkedSetOf("cnn international", "cnn2")
+        assertEquals(
+            listOf("cnn international"),
+            EpgQuality.suggestEpgIds(channel("c1", "CNN", "cnn"), keys)
+        )
+    }
+
+    @Test
+    fun suggestTvgIdHelpsContainment() {
+        // The name alone ("Cable News Network") matches nothing —
+        // the tvg-id "cnn" is what finds "cnn international".
+        val keys = linkedSetOf("cnn international", "bbc")
+        assertEquals(
+            listOf("cnn international"),
+            EpgQuality.suggestEpgIds(
+                channel("c1", "Cable News Network", "cnn"), keys
+            )
+        )
+    }
+
+    @Test
+    fun suggestDiscoveryCompoundId() {
+        // A compound id with no separator is still the same channel.
+        val keys = linkedSetOf("discoverychannel", "bbc")
+        assertEquals(
+            listOf("discoverychannel"),
+            EpgQuality.suggestEpgIds(channel("c1", "Discovery"), keys)
+        )
+    }
+
+    @Test
+    fun suggestFoxNewsDoesNotSuggestBbcNews() {
+        // "BBC News" shares the word "news" but is not Fox News;
+        // the bare "fox" id is still suggested.
+        val keys = linkedSetOf("bbc news", "fox")
+        assertEquals(
+            listOf("fox"),
+            EpgQuality.suggestEpgIds(channel("c1", "Fox News"), keys)
+        )
+    }
+
+    // ---- 8.2.1: dedupe / coverage ------------------------------------
+
+    @Test
+    fun dedupeProgrammesDropsDuplicates() {
+        val list = listOf(
+            programme("cnn.us", now, now + 1_800_000L),
+            programme("cnn.us", now, now + 1_800_000L),
+            programme("cnn.us", now + 3_600_000L, now + 5_400_000L)
+        )
+        val deduped = EpgQuality.dedupeProgrammes(list)
+        assertEquals(2, deduped.size)
+        assertEquals(now + 3_600_000L, deduped[1].startMillis)
+    }
+
+    @Test
+    fun dedupeProgrammesKeepsOrderAndDifferentSlots() {
+        // Same start but a different stop is a different airing, not
+        // a duplicate; order is preserved.
+        val p1 = programme("cnn.us", now, now + 1_800_000L)
+        val p2 = programme("cnn.us", now, now + 1_800_000L)
+        val p3 = programme("cnn.us", now, now + 3_600_000L)
+        val p4 = programme("cnn.us", now + 3_600_000L, now + 5_400_000L)
+        assertEquals(
+            listOf(p1, p3, p4),
+            EpgQuality.dedupeProgrammes(listOf(p1, p2, p3, p4))
+        )
+    }
+
+    @Test
+    fun coverageDedupesDuplicateAirings() {
+        // The same airing listed twice (two sources carrying the
+        // channel) counts once, not twice.
+        val epg = mapOf(
+            "cnn.us" to listOf(
+                programme("cnn.us", now - 600_000L, now + 600_000L),
+                programme("cnn.us", now - 600_000L, now + 600_000L)
+            )
+        )
+        val coverage = EpgQuality.coverageFor(
+            channel("c1", "CNN", "cnn.us"), epg, nowMillis = now
+        )
+        assertEquals(EpgQuality.Coverage(1, true, null), coverage)
+    }
 }
