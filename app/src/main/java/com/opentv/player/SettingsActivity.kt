@@ -762,7 +762,7 @@ class SettingsActivity : FragmentActivity() {
                     put(MediaStore.Downloads.MIME_TYPE, "application/json")
                     put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 }
-                val uri: Uri? = contentResolver.insert(
+                val uri = contentResolver.insert(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
                 ) ?: return false
                 contentResolver.openOutputStream(uri)?.use {
