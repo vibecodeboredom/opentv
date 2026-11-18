@@ -1260,18 +1260,18 @@ class GuideActivity : FragmentActivity() {
         // first paint was blocked by inflating all 24 rows, and only
         // ~6 fit on screen at once. The rest of the initial rows, plus
         // the details header + focus, follow on the next frame.
-        appendRows(GUIDE_FIRST_PAINT_ROWS)
+        appendRows(GuideScrollTuning.FIRST_PAINT_ROWS)
         val generation = guideBuildGeneration
         container.post {
             if (generation != guideBuildGeneration) return@post
-            appendRows(GUIDE_INITIAL_ROWS - GUIDE_FIRST_PAINT_ROWS)
+            appendRows(GuideScrollTuning.INITIAL_ROWS - GuideScrollTuning.FIRST_PAINT_ROWS)
             finishGuideBuild()
         }
     }
 
     /** Build the next chunk of display rows (one pinned channel cell +
      * one programme row each) and append them. */
-    private fun appendRows(count: Int = GUIDE_APPEND_ROWS) {
+    private fun appendRows(count: Int = GuideScrollTuning.APPEND_ROWS) {
         if (builtRowCount >= displayRows.size) return
         val windowEnd = windowStart + windowHours * 60L * 60 * 1000
         val cellHeight = pxCellHeight
@@ -1630,7 +1630,7 @@ class GuideActivity : FragmentActivity() {
      * rows, so DPAD Down never runs out of grid below (the scroll
      * listener usually appends first; this is the safety net). */
     private fun appendRowsIfNearEnd(rowIndex: Int) {
-        if (rowIndex >= 0 && rowIndex >= builtRowCount - GUIDE_FOCUS_BUFFER) {
+        if (GuideScrollTuning.shouldAppend(builtRowCount, rowIndex)) {
             appendRows()
         }
     }
@@ -2497,22 +2497,10 @@ class GuideActivity : FragmentActivity() {
         /** Thinner rows (was 72) so more channels fit on one TV screen. */
         private const val CELL_HEIGHT_DP = 56
         private const val CELL_MARGIN_DP = 3
-        /** Rows built when the guide first opens (enough for ~3
-         * screens), and rows appended per lazy chunk as the user
-         * scrolls. The grid used to inflate all 400 rows eagerly. */
-        private const val GUIDE_INITIAL_ROWS = 24
-        /** Rows built synchronously for the first paint (4.8.1) — only
-         * ~6 fit on screen at once, so 12 covers ~2 screens; the rest
-         * of the initial rows follow on the next frame. */
-        private const val GUIDE_FIRST_PAINT_ROWS = 12
         /** How long the guide waits for the EPG before painting with
          * placeholders (4.8.1). The EPG is usually in memory, so the
          * wait is ~0ms and the guide builds once with real data. */
         private const val EPG_WAIT_MS = 150L
-        private const val GUIDE_APPEND_ROWS = 24
-        /** Focus reaching this close to the last built row triggers
-         * an append, so DPAD Down never runs out of grid below. */
-        private const val GUIDE_FOCUS_BUFFER = 6
         /** Recent searches shown in the menu (4.9.3) — fewer than the
          * 8 stored, so the full-height menu never overflows the screen. */
         private const val MAX_RECENT_SEARCHES_SHOWN = 5

@@ -8,6 +8,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
@@ -95,6 +96,10 @@ object PlaylistRepository {
     /** Playlist is re-downloaded at most every 6h; EPG at most every 12h. */
     private const val PLAYLIST_TTL_MS = 6L * 60 * 60 * 1000
     private const val EPG_TTL_MS = 12L * 60 * 60 * 1000
+    /** 9.2.0: the EPG warm-up in preload() waits this long after
+     * process start, so the playlist load — the critical path to
+     * the first screen — gets the IO/CPU first on a 1 GB box. */
+    private const val EPG_PRELOAD_DELAY_MS = 2_000L
 
     /** In-memory cache so a playlist / EPG is never re-downloaded or
      * re-parsed twice in one session. @Volatile: replaced atomically,
@@ -215,15 +220,35 @@ object PlaylistRepository {
      * reads them (active playlist, configured EPG URLs). Failures are
      * swallowed: a failed warm-up leaves the caches cold and the next
      * screen load behaves exactly as it did before the preload existed.
+     *
+     * 9.2.0: the playlist load starts at once (it is the critical path
+     * to the first screen); the EPG warm-up waits 2 s so the two heavy
+     * snapshot reads do not contend on a 1 GB box. A screen opening
+     * the guide in the meantime starts the EPG load immediately
+     * (single-flight), so the delay only ever reorders background
+     * work, never the user's wait.
      */
     fun preload(context: Context) {
         try {
             val appContext = context.applicationContext
             playlistLoadDeferred(appContext)
-            epgLoadDeferred(appContext)
+            refreshScope.launch {
+                delay(EPG_PRELOAD_DELAY_MS)
+                epgLoadDeferred(appContext)
+            }
         } catch (ignored: Exception) {
             // Best-effort: the warm-up must never break app startup.
         }
+    }
+
+    /** 9.2.0: drop the in-memory playlist + EPG caches (memory
+     * pressure, or the app backgrounded — see MemoryPressure). Both
+     * rebuild from the SQLite snapshot on the next load, so this
+     * costs the user nothing. An in-flight load is unaffected: its
+     * Deferred re-sets the cache when it completes. */
+    fun releaseMemoryCaches() {
+        playlistCache = null
+        epgCache = null
     }
 
     /** The in-memory playlist when it is already loaded and fresh, else

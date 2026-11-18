@@ -583,14 +583,17 @@ class PlaybackActivity : FragmentActivity() {
         }
         // Start playback after a short buffer (0.5s) instead of the
         // default 2.5s, so switching channels feels instant instead of
-        // sitting on a black screen. The min/max buffers stay generous
-        // so a slow stream doesn't rebuffer right after starting.
+        // sitting on a black screen. The min buffer stays generous so
+        // a slow stream doesn't rebuffer right after starting; the
+        // max buffer is capped (PlaybackBuffers, 9.2.0) so a live
+        // stream does not hold 30 s of segments in memory on long
+        // viewing sessions.
         val fastStartLoadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs */ 10_000,
-                /* maxBufferMs */ 30_000,
-                /* bufferForPlaybackMs */ 500,
-                /* bufferForPlaybackAfterRebufferMs */ 1_500
+                PlaybackBuffers.MIN_BUFFER_MS,
+                PlaybackBuffers.MAX_BUFFER_MS,
+                PlaybackBuffers.BUFFER_FOR_PLAYBACK_MS,
+                PlaybackBuffers.BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
             )
             .build()
         val player = if (recordingUri != null) {
