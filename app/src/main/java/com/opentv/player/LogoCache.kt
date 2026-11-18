@@ -1,5 +1,7 @@
 package com.opentv.player
 
+import java.io.File
+
 /**
  * 9.2.0 — Performance: the channel-logo disk cache, made explicit.
  *
@@ -33,5 +35,28 @@ object LogoCache {
         if (usableSpaceBytes <= 0) return MIN_CACHE_BYTES
         val twoPercent = usableSpaceBytes * SIZE_PERCENT / 100
         return twoPercent.coerceIn(MIN_CACHE_BYTES, MAX_CACHE_BYTES)
+    }
+
+    /**
+     * 9.2.1 — Coil 2's implicit default disk-cache directory
+     * (pre-9.2.0). Before 9.2.0 the loader used Coil's default, which
+     * lives in `image_cache` with a 2%-of-disk cap — hundreds of MB
+     * on a big stick. 9.2.0 moved the cache to [DIRECTORY_NAME] and
+     * nothing ever reads, trims or deletes the old directory again,
+     * so it sits there as dead weight on every device that ran an
+     * older build. The old entries are logos only (nothing else in
+     * this app used Coil's disk cache), so deleting the directory
+     * just means those logos re-download once on demand.
+     */
+    const val LEGACY_DIRECTORY_NAME = "image_cache"
+
+    /** Delete the legacy [LEGACY_DIRECTORY_NAME] under [cacheDir].
+     * Returns true when a legacy directory was removed, false when
+     * there was nothing to delete (or the delete failed). The
+     * current [DIRECTORY_NAME] cache is never touched. */
+    fun deleteLegacyCache(cacheDir: File): Boolean {
+        val legacy = File(cacheDir, LEGACY_DIRECTORY_NAME)
+        if (!legacy.exists()) return false
+        return legacy.deleteRecursively()
     }
 }

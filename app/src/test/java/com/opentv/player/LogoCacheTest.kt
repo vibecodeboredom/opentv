@@ -1,8 +1,10 @@
 package com.opentv.player
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /** 9.2.0: logo disk-cache sizing — 2% of usable space, 16–64 MB. */
 class LogoCacheTest {
@@ -56,5 +58,35 @@ class LogoCacheTest {
         // 800 MB usable -> 2% is exactly 16 MB.
         val bytesForMin = 16L * 1024 * 1024 * 100 / 2
         assertEquals(LogoCache.MIN_CACHE_BYTES, LogoCache.cacheSizeBytes(bytesForMin))
+    }
+
+    // ---- 9.2.1: legacy image_cache cleanup ---------------------------
+
+    @Test
+    fun deleteLegacyCacheRemovesOldDirAndLeavesCurrentCacheAlone() {
+        val dir = createTempDir("opentv-cache")
+        try {
+            val legacy = File(dir, LogoCache.LEGACY_DIRECTORY_NAME).apply { mkdirs() }
+            File(legacy, "dead-entry").writeText("stale logo")
+            val current = File(dir, LogoCache.DIRECTORY_NAME).apply { mkdirs() }
+            File(current, "keep").writeText("live logo")
+            assertTrue(LogoCache.deleteLegacyCache(dir))
+            assertFalse(legacy.exists())
+            assertTrue(File(current, "keep").exists())
+            // Second call: nothing left to delete.
+            assertFalse(LogoCache.deleteLegacyCache(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun deleteLegacyCacheIsNoopWithoutLegacyDir() {
+        val dir = createTempDir("opentv-cache")
+        try {
+            assertFalse(LogoCache.deleteLegacyCache(dir))
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 }

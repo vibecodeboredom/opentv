@@ -336,11 +336,32 @@ Rules (from Chuni, 2026-11-17):
   one out. First CI run failed on my own test arithmetic (2% of
   1 GiB is 21,474,836 bytes, not 20 MiB) — fixed, re-run green.
 
-### 9.2.1 (planned) — Patch
+### 9.2.1 ✅ (this release) — Patch
 
-- Fixes + polish from 9.2.0 testing on the TV: regressions from
-  the startup pass, cache eviction, and scroll jank on the oldest
-  TV.
+- Startup-pass regression: the EPG warm-up no longer sits out the
+  full 2 s delay when the playlist load finished earlier — the delay
+  is now a cap (startEpgWarmupWhenReady), so a cold start that
+  reaches the guide fast gets its EPG head start back instead of
+  painting "No information" placeholders; a stalled playlist load
+  can never starve the warm-up past the cap, and a failed load still
+  starts it at once.
+- Cache eviction: the pre-9.2.0 Coil disk cache (`image_cache`,
+  up to 2% of disk) is deleted once at app start — 9.2.0 moved the
+  loader to `logo_cache` and nothing ever read, trimmed or deleted
+  the old directory again. Best-effort, on the IO scope.
+- Scroll jank on the oldest TV: the stay-ahead guide appends
+  (focus-near-end + scroll listener) are now posted to the next
+  frame, single-flight (appendRowsSoon) instead of building 8 rows
+  synchronously inside the focus-change callback — and the scroll
+  listener could fire a second append in the same frame off its
+  stale pre-layout content height. Explicit jumps still append
+  synchronously. The 12-row focus buffer means the one-frame delay
+  can never let focus outrun the built rows.
+- Gemini lite reviewed the diff (no findings) and wrote 5 extra
+  unit tests — 1 adapted (failure-Result warm-up, rewritten from
+  runTest to runBlocking) and added, the rest dropped (duplicates
+  and wrong expectations); GLM 429'd on its review call and sat
+  this one out.
 
 ### 9.3.0 (planned) — Accessibility & remote
 

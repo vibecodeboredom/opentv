@@ -41,6 +41,18 @@ class OpenTvApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         PlaylistRepository.preload(this)
+        // 9.2.1: drop the pre-9.2.0 Coil disk cache (image_cache) —
+        // the 9.2.0 loader moved to logo_cache and the old directory
+        // is never read or trimmed again. Best-effort, on the IO
+        // scope: a leftover cache dir is harmless, and the delete
+        // must never break startup.
+        appScope.launch {
+            try {
+                LogoCache.deleteLegacyCache(this@OpenTvApp.cacheDir)
+            } catch (ignored: Exception) {
+                // Best-effort only.
+            }
+        }
         // 7.3.0: refresh stale channel logos in the background (at
         // most 25 per launch) so a provider's new art shows up
         // without a reinstall. 9.2.0: the run waits 10 s after

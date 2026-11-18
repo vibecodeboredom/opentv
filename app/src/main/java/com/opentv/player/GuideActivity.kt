@@ -157,6 +157,9 @@ class GuideActivity : FragmentActivity() {
      * screen plus a buffer — the grid used to inflate all 400 rows
      * eagerly, which was the open delay and the scroll lag. */
     private var builtRowCount = 0
+    /** 9.2.1: a stay-ahead append is already queued for the next
+     * frame (appendRowsSoon) — see below. */
+    private var appendSoonPending = false
     /** Programme-row layouts by display index, parallel to channelCells. */
     private val programmeRowLayouts = mutableListOf<LinearLayout>()
     /** Pinned channel-cell views by display index. */
@@ -1287,6 +1290,34 @@ class GuideActivity : FragmentActivity() {
         refreshNowLine()
     }
 
+    /**
+     * 9.2.1 — queue the next chunk for the next frame instead of
+     * building it synchronously inside the focus-change / scroll
+     * callbacks. Building 8 rows (~70 views) on the main thread
+     * inside onFocusChange delayed the focus move itself on a slow
+     * box, and the scroll listener could fire a second append in the
+     * same frame: its content-height check reads the pre-layout
+     * height, so after a focus-triggered append it still saw the
+     * old end and built another 8 rows on top — the exact hitch the
+     * smaller 9.2.0 chunks were meant to remove. One pending post
+     * coalesces both triggers. Explicit jumps (focusNowCard, the
+     * open landing row) still append synchronously — their target
+     * row has to exist now. The post is generation-guarded like the
+     * initial build's, so a rebuild drops a stale queued append;
+     * the 12-row focus buffer means the one-frame delay can never
+     * let focus outrun the built rows.
+     */
+    private fun appendRowsSoon() {
+        if (appendSoonPending || builtRowCount >= displayRows.size) return
+        appendSoonPending = true
+        val generation = guideBuildGeneration
+        container.post {
+            appendSoonPending = false
+            if (generation != guideBuildGeneration) return@post
+            appendRows()
+        }
+    }
+
     /** Append more rows when the user scrolls near the bottom of what's
      * built, so focus never runs out of rows below. */
     private fun maybeAppendRows() {
@@ -1294,7 +1325,7 @@ class GuideActivity : FragmentActivity() {
         val contentHeight = scroll.getChildAt(0)?.height ?: return
         if (contentHeight <= 0) return
         if (scroll.scrollY + scroll.height >= contentHeight - 2 * scroll.height) {
-            appendRows()
+            appendRowsSoon()
         }
     }
 
@@ -1631,7 +1662,7 @@ class GuideActivity : FragmentActivity() {
      * listener usually appends first; this is the safety net). */
     private fun appendRowsIfNearEnd(rowIndex: Int) {
         if (GuideScrollTuning.shouldAppend(builtRowCount, rowIndex)) {
-            appendRows()
+            appendRowsSoon()
         }
     }
 

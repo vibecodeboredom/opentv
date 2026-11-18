@@ -11,6 +11,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
@@ -227,18 +228,42 @@ object PlaylistRepository {
      * the guide in the meantime starts the EPG load immediately
      * (single-flight), so the delay only ever reorders background
      * work, never the user's wait.
+     *
+     * 9.2.1: the 2 s is a cap, not a fixed wait — the delay only
+     * exists to let the playlist win the IO race, so once the
+     * playlist load finishes there is nothing left to protect and
+     * the EPG warm-up starts at once (startEpgWarmupWhenReady). On
+     * a fast box that hands the guide its EPG head start back: before,
+     * a cold start that reached the guide inside the 2 s window
+     * found the EPG still unwarm and painted "No information"
+     * placeholders until the fill-in landed.
      */
     fun preload(context: Context) {
         try {
             val appContext = context.applicationContext
-            playlistLoadDeferred(appContext)
+            val playlist = playlistLoadDeferred(appContext)
             refreshScope.launch {
-                delay(EPG_PRELOAD_DELAY_MS)
-                epgLoadDeferred(appContext)
+                startEpgWarmupWhenReady(playlist) { epgLoadDeferred(appContext) }
             }
         } catch (ignored: Exception) {
             // Best-effort: the warm-up must never break app startup.
         }
+    }
+
+    /**
+     * 9.2.1: start the EPG warm-up as soon as the playlist load
+     * finishes, or when [delayMs] elapses — whichever comes first.
+     * A stalled playlist load can never starve the EPG warm-up past
+     * the cap. The playlist Deferred is only awaited, never
+     * cancelled, so a slow load keeps running for its own awaiters.
+     */
+    internal suspend fun startEpgWarmupWhenReady(
+        playlistLoad: Deferred<Result<List<Channel>>>,
+        delayMs: Long = EPG_PRELOAD_DELAY_MS,
+        startEpg: () -> Unit
+    ) {
+        withTimeoutOrNull(delayMs) { playlistLoad.await() }
+        startEpg()
     }
 
     /** 9.2.0: drop the in-memory playlist + EPG caches (memory
