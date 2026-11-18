@@ -361,7 +361,9 @@ Rules (from Chuni, 2026-11-17):
   unit tests — 1 adapted (failure-Result warm-up, rewritten from
   runTest to runBlocking) and added, the rest dropped (duplicates
   and wrong expectations); GLM 429'd on its review call and sat
-  this one out.
+  this one out. First CI run failed on a test compile error (the
+  stalled-playlist async returned Unit, not a Result) — fixed,
+  re-run 44224931219 green.
 
 ### 9.3.0 (planned) — Accessibility & remote
 
