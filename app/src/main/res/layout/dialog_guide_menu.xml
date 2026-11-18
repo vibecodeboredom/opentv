@@ -279,6 +279,22 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.2.1 (Nova): set the reminder and the scheduled
+         recording for this programme in one tap. Same visibility
+         rule as the two rows above; the label shows as set in
+         code when both are set. -->
+    <TextView
+        android:id="@+id/menu_remind_record"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_remind_and_record"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <TextView
         android:id="@+id/menu_channel_name"
         android:layout_width="match_parent"

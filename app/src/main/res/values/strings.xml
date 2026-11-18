@@ -257,6 +257,21 @@
     <string name="menu_next_day">Next day</string>
     <string name="menu_prev_day">Previous day</string>
     <string name="guide_showing_day">Showing %1$s</string>
+    <!-- Nova 8.2.1: recording overlap warning, combined remind +
+         record guide action, On now ends label. The overlap texts
+         are honest about the recorder: downloads are one stream
+         per channel (same-channel overlaps merge, earlier finish
+         wins) but different channels genuinely record at once. -->
+    <string name="recording_overlap_title">Recording overlap</string>
+    <string name="recording_overlap_same_channel">%1$s on %2$s (%3$s) is already scheduled to record. Recordings are one stream per channel, so these merge into a single recording — and the earlier finish wins, cutting the other short.</string>
+    <string name="recording_overlap_other_channel">%1$s on %2$s (%3$s) is already scheduled to record at the same time. Recordings are downloads, so both can record at once — they will share your connection and storage.</string>
+    <string name="recording_overlap_keep">Keep both</string>
+    <string name="menu_remind_and_record">Remind + record</string>
+    <string name="menu_remind_and_record_set">Remind + record — set</string>
+    <string name="remind_and_record_set_toast">Reminder + recording set — %1$s at %2$s. The recording starts automatically while OpenTV is running.</string>
+    <string name="remind_and_record_removed_toast">Reminder + recording removed</string>
+    <string name="remind_only_set_toast">Reminder set — recording not scheduled</string>
+    <string name="on_now_ends">ends %1$s</string>
     <string name="track_label_sdh">%1$s (SDH)</string>
     <string name="track_label_dub">%1$s (Dub)</string>
     <string name="track_label_descriptive">%1$s (Descriptive)</string>

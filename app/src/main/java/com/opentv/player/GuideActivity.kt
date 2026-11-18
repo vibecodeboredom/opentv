@@ -1771,17 +1771,115 @@ class GuideActivity : FragmentActivity() {
                         stopMillis = programme.stopMillis,
                         title = programme.title
                     )
-                    PlaylistRepository.addScheduledRecording(this, scheduled)
-                    RecordingManager.scheduleRecordingStart(this, scheduled)
+                    // 8.2.1 (Nova): an overlapping already-scheduled
+                    // recording earns a warning naming the clash
+                    // before anything is stored (see
+                    // scheduleRecordingChecked); no clash keeps the
+                    // old one-tap behaviour.
+                    scheduleRecordingChecked(scheduled) { done ->
+                        if (done) {
+                            Toast.makeText(
+                                this,
+                                getString(
+                                    R.string.scheduled_recording_set_toast,
+                                    programme.title,
+                                    GuideData.formatClock(programme.startMillis)
+                                ),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                }
+            }
+        }
+
+        // 8.2.1 (Nova): remind + record — the two rows above in a
+        // single tap, for the common "don't let me miss this AND
+        // keep it" case. It reuses the two existing stores (no
+        // third store): the reminder half is set straight away,
+        // the recording half goes through the same overlap check
+        // as the record row, so declining the overlap leaves the
+        // reminder standing and says so. When both are already
+        // set the row shows as set and tapping removes both.
+        val remindRecordRow = view.findViewById<TextView>(R.id.menu_remind_record)
+        if (!reminderEligible) {
+            remindRecordRow.visibility = View.GONE
+        } else {
+            val hasRem = PlaylistRepository.hasReminder(
+                this, channel.id, programme.startMillis
+            )
+            val recEntry = PlaylistRepository.scheduledRecordings(this)
+                .firstOrNull {
+                    it.channelId == channel.id && it.startMillis == programme.startMillis
+                }
+            val bothSet = hasRem && recEntry != null
+            remindRecordRow.text = getString(
+                if (bothSet) R.string.menu_remind_and_record_set
+                else R.string.menu_remind_and_record
+            )
+            remindRecordRow.setOnClickListener {
+                dialog.dismiss()
+                if (bothSet) {
+                    PlaylistRepository.removeReminder(
+                        this, channel.id, programme.startMillis
+                    )
+                    PlaylistRepository.removeScheduledRecording(
+                        this, channel.id, programme.startMillis
+                    )
+                    RecordingManager.cancelRecordingStart(this, recEntry!!)
                     Toast.makeText(
-                        this,
-                        getString(
-                            R.string.scheduled_recording_set_toast,
-                            programme.title,
-                            GuideData.formatClock(programme.startMillis)
-                        ),
-                        Toast.LENGTH_LONG
+                        this, R.string.remind_and_record_removed_toast,
+                        Toast.LENGTH_SHORT
                     ).show()
+                } else {
+                    if (!hasRem) {
+                        PlaylistRepository.addReminder(
+                            this,
+                            PlaylistRepository.Reminder(
+                                channelId = channel.id,
+                                channelName = channel.name,
+                                startMillis = programme.startMillis,
+                                stopMillis = programme.stopMillis,
+                                title = programme.title
+                            )
+                        )
+                    }
+                    if (recEntry != null) {
+                        // Only the reminder was missing; it is set now.
+                        Toast.makeText(
+                            this,
+                            getString(
+                                R.string.remind_and_record_set_toast,
+                                programme.title,
+                                GuideData.formatClock(programme.startMillis)
+                            ),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        val scheduled = PlaylistRepository.ScheduledRecording(
+                            channelId = channel.id,
+                            channelName = channel.name,
+                            channelUrl = channel.url,
+                            startMillis = programme.startMillis,
+                            stopMillis = programme.stopMillis,
+                            title = programme.title
+                        )
+                        scheduleRecordingChecked(scheduled) { recorded ->
+                            Toast.makeText(
+                                this,
+                                if (recorded) {
+                                    getString(
+                                        R.string.remind_and_record_set_toast,
+                                        programme.title,
+                                        GuideData.formatClock(programme.startMillis)
+                                    )
+                                } else {
+                                    getString(R.string.remind_only_set_toast)
+                                },
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                 }
             }
         }
@@ -1878,6 +1976,60 @@ class GuideActivity : FragmentActivity() {
             })
         }
         updateRecentVisibility()
+    }
+
+    /**
+     * 8.2.1 (Nova): store + arm a scheduled recording, warning
+     * first when its slot overlaps an already-scheduled one. The
+     * warning names the clashing programme and offers keep-both
+     * or cancel-the-new-one; [onResult] hears which way it went
+     * (no clash counts as kept, immediately). The consequence
+     * text follows the recorder as it actually is (see
+     * RecordingManager): downloads are one stream per channel,
+     * so a same-channel overlap merges into a single recording
+     * whose stop alarm is the last one armed — the earlier
+     * finish wins — while different channels genuinely record
+     * side by side and only share connection and storage.
+     */
+    private fun scheduleRecordingChecked(
+        scheduled: PlaylistRepository.ScheduledRecording,
+        onResult: (Boolean) -> Unit
+    ) {
+        val clash = PlaylistRepository.scheduledRecordings(this).firstOrNull { other ->
+            !(other.channelId == scheduled.channelId &&
+                other.startMillis == scheduled.startMillis) &&
+                scheduled.startMillis < other.stopMillis &&
+                other.startMillis < scheduled.stopMillis
+        }
+        if (clash == null) {
+            PlaylistRepository.addScheduledRecording(this, scheduled)
+            RecordingManager.scheduleRecordingStart(this, scheduled)
+            onResult(true)
+            return
+        }
+        val whenText = GuideData.formatDate(clash.startMillis) + ", " +
+            GuideData.formatClock(clash.startMillis)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.recording_overlap_title)
+            .setMessage(
+                getString(
+                    if (clash.channelId == scheduled.channelId) {
+                        R.string.recording_overlap_same_channel
+                    } else {
+                        R.string.recording_overlap_other_channel
+                    },
+                    clash.title, clash.channelName, whenText
+                )
+            )
+            .setPositiveButton(R.string.recording_overlap_keep) { _, _ ->
+                PlaylistRepository.addScheduledRecording(this, scheduled)
+                RecordingManager.scheduleRecordingStart(this, scheduled)
+                onResult(true)
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                onResult(false)
+            }
+            .show()
     }
 
     /**

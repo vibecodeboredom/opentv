@@ -245,10 +245,10 @@ class BrowseFragment : BrowseSupportFragment() {
      * 8.2.0 (Nova): insert, update or hide the "On now" row at the
      * top of the home screen. Called when the EPG lands, when the
      * screen regains focus, and once a minute while it sits open.
-     * An unchanged programme set leaves the row untouched — the
-     * ticker must never rebuild a row out from under the focus;
-     * the minutes-left text refreshes at programme boundaries and
-     * on resume instead.
+     * An unchanged programme set never rebuilds the row out from
+     * under the focus — instead the visible cards rebind in place
+     * (8.2.1), so the progress bar and minutes-left text advance
+     * with the ticker while focus stays put.
      */
     private fun refreshOnNowRow() {
         if (!isAdded || homeEpg == null) return
@@ -262,7 +262,17 @@ class BrowseFragment : BrowseSupportFragment() {
             onNowSignature = ""
             return
         }
-        if (signature == onNowSignature && onNowRow != null) return
+        if (signature == onNowSignature && onNowRow != null) {
+            // 8.2.1 (Nova): same programmes, but the minute hand
+            // moved — rebind the row's cards in place so their
+            // progress bars and ends/remaining labels track the
+            // existing 60s ticker. No row rebuild, no new timer.
+            val rowAdapter = onNowRow?.adapter as? ArrayObjectAdapter
+            if (rowAdapter != null && rowAdapter.size() > 0) {
+                rowAdapter.notifyArrayItemRangeChanged(0, rowAdapter.size())
+            }
+            return
+        }
         val adapter = ArrayObjectAdapter(OnNowPresenter())
         entries.forEach { adapter.add(it) }
         val row = ListRow(HeaderItem(getString(R.string.on_now)), adapter)
