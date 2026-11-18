@@ -116,13 +116,22 @@ Rules (from Chuni, 2026-11-17):
 - EPG source manager: the EPG URL list is now editable in Settings as a list — add or remove sources one by one (long-press a row to remove) instead of one comma-separated field. Old comma-separated values read back as their sources with no migration; removing the last source is refused.
 - Gemini lite reviewed the diff (2 findings — both wrong on verification: malformed JSON numbers already throw and are caught by decode, and the all-playlists-disabled guard is intentional) and wrote 3 extra unit tests — 2 verified correct and added as-is, 1 fixed (wrong playlist entry fields) and added. GLM 429'd on its review call and sat this one out.
 
-### 8.1.0 (planned) — Channel library
+### 8.1.0 ✅ (this release) — Channel library
 
 - Custom channel groups: rename and reorder groups, move channels
-  between groups (stored as overrides, playlist untouched).
-- Bulk hide / unhide: select several channels in the guide and hide
-  them at once.
-- Channel count per group, shown in the sidebar group list.
+  between groups (stored as overrides in GroupOverrides +
+  PlaylistRepository, playlist untouched). Managed in Settings →
+  Channel groups (tap a row for Rename / Move up / Move down /
+  Reset); moves happen from the guide long-press menu ("Move to
+  group…"). Group overrides also ride along in backup export/import.
+- Bulk hide / unhide: guide menu → "Hide channels…" (pick a group,
+  tick several channels) and "Show hidden channels…" (tick hidden
+  ones to bring them back). Single hide from the long-press menu
+  still works as before.
+- Channel count per group, shown in the sidebar group list: counts
+  were already shown for raw playlist groups — now they count the
+  EFFECTIVE groups (renames, moves, custom order applied), so a
+  moved channel counts under its new group.
 
 ### 8.1.1 (planned) — Patch
 
