@@ -1,11 +1,17 @@
 package com.opentv.player
 
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.text.InputFilter
 import android.text.InputType
 import android.util.TypedValue
@@ -18,11 +24,13 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /** Lets the user manage M3U playlists (4.8.0: several playlists, one
  * active at a time), change the (optional) XMLTV EPG URL and the
@@ -72,6 +80,42 @@ class SettingsActivity : FragmentActivity() {
      * prompt can be seen or reached. */
     private var pinUnlocked = false
 
+    /** Backup file picker (8.0.0): pick an opentv-backup.json to
+     * restore from. */
+    private val pickBackupFile =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch {
+                val text = withContext(Dispatchers.IO) {
+                    try {
+                        contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (text.isNullOrBlank()) {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_import_failed, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val data = BackupManager.decode(text).getOrElse {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_import_failed, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val report = withContext(Dispatchers.IO) {
+                    BackupManager.restore(this@SettingsActivity, data)
+                }
+                Toast.makeText(
+                    this@SettingsActivity,
+                    getString(
+                        R.string.backup_imported,
+                        report.playlists, report.favorites, report.epgSources
+                    ),
+                    Toast.LENGTH_LONG
+                ).show()
+                restartToMain()
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
@@ -108,12 +152,14 @@ class SettingsActivity : FragmentActivity() {
         findViewById<TextView>(R.id.about_version).text =
             getString(R.string.about_version, BuildConfig.VERSION_NAME)
 
-        val epgUrl = findViewById<EditText>(R.id.epg_url)
         val uploadUrl = findViewById<EditText>(R.id.upload_url)
-        epgUrl.setText(PlaylistRepository.epgUrl(this))
         uploadUrl.setText(PlaylistRepository.uploadUrl(this))
 
         buildPlaylistsUi()
+        buildEpgSourcesUi()
+        buildMissingGuideUi()
+        buildChannelGroupsUi()
+        buildRecordingsUi()
 
         // 6.1.2: guide & playback preferences — toggles save
         // immediately; the channel-list size applies the next time
@@ -138,6 +184,10 @@ class SettingsActivity : FragmentActivity() {
                 AppSettings.setGuideShowsPast(this@SettingsActivity, checked)
             }
         }
+        findViewById<Switch>(R.id.pref_guide_favorites_only).apply {
+            isChecked = AppSettings.guideFavoritesOnly(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setGuideFavoritesOnly(this@SettingsActivity, checked)
         // 8.3.0 (Nova): the idle-pause screensaver toggle, with
         // the other guide & playback preferences.
         findViewById<Switch>(R.id.pref_idle_saver).apply {
@@ -161,6 +211,56 @@ class SettingsActivity : FragmentActivity() {
                         R.id.pref_size_medium -> AppSettings.ChannelListSize.MEDIUM
                         R.id.pref_size_large -> AppSettings.ChannelListSize.LARGE
                         else -> AppSettings.ChannelListSize.SMALL
+                    }
+                )
+            }
+        }
+        // 7.2.0: guide window size (6/12/24 h forward). The guide
+        // picks it up when it opens, or on return when it is open.
+        findViewById<RadioGroup>(R.id.pref_guide_window_size).apply {
+            check(
+                when (AppSettings.guideWindowSize(this@SettingsActivity)) {
+                    AppSettings.GuideWindowSize.TWELVE -> R.id.pref_window_12h
+                    AppSettings.GuideWindowSize.TWENTY_FOUR -> R.id.pref_window_24h
+                    else -> R.id.pref_window_6h
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setGuideWindowSize(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_window_12h -> AppSettings.GuideWindowSize.TWELVE
+                        R.id.pref_window_24h -> AppSettings.GuideWindowSize.TWENTY_FOUR
+                        else -> AppSettings.GuideWindowSize.SIX
+                    }
+                )
+            }
+        }
+        // 9.0.0: what the TV opens on — home screen or auto-play
+        // the last channel. TV only: mobile always opens the touch
+        // home screen, so the row hides there. Applies on the next
+        // launch.
+        findViewById<LinearLayout>(R.id.pref_launch_behaviour_container).apply {
+            visibility = if (DeviceType.isMobile(this@SettingsActivity)) {
+                android.view.View.GONE
+            } else {
+                android.view.View.VISIBLE
+            }
+        }
+        findViewById<RadioGroup>(R.id.pref_launch_behaviour).apply {
+            check(
+                when (AppSettings.launchBehaviour(this@SettingsActivity)) {
+                    AppSettings.LaunchBehaviour.AUTOPLAY -> R.id.pref_launch_autoplay
+                    else -> R.id.pref_launch_home
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setLaunchBehaviour(
+                    this@SettingsActivity,
+                    if (checkedId == R.id.pref_launch_autoplay) {
+                        AppSettings.LaunchBehaviour.AUTOPLAY
+                    } else {
+                        AppSettings.LaunchBehaviour.HOME
                     }
                 )
             }
@@ -245,22 +345,101 @@ class SettingsActivity : FragmentActivity() {
         findViewById<Button>(R.id.pref_keywords_button).setOnClickListener {
             showKeywordsDialog()
         }
-
         // 9.3.0 (Nova): the Settings PIN — set / change / remove.
         updatePinButton()
         findViewById<Button>(R.id.pref_pin_button).setOnClickListener {
             showPinManageDialog()
         }
-
-        // 10.0.0 (Nova): What's new + backup & restore.
+        // 9.1.0: appearance — guide row density, font size, and the
+        // two toggles. Density + font size apply the next time the
+        // guide opens (like the channel-list size); the focus style
+        // applies the next time the guide or a fresh sidebar opens;
+        // reduced animations takes effect immediately.
+        findViewById<RadioGroup>(R.id.pref_guide_density).apply {
+            check(
+                when (AppSettings.guideDensity(this@SettingsActivity)) {
+                    Appearance.GuideDensity.COMPACT -> R.id.pref_density_compact
+                    else -> R.id.pref_density_comfortable
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setGuideDensity(
+                    this@SettingsActivity,
+                    if (checkedId == R.id.pref_density_compact) {
+                        Appearance.GuideDensity.COMPACT
+                    } else {
+                        Appearance.GuideDensity.COMFORTABLE
+                    }
+                )
+            }
+        }
+        findViewById<RadioGroup>(R.id.pref_font_size).apply {
+            check(
+                when (AppSettings.fontSize(this@SettingsActivity)) {
+                    Appearance.FontSize.SMALL -> R.id.pref_font_small
+                    Appearance.FontSize.LARGE -> R.id.pref_font_large
+                    else -> R.id.pref_font_medium
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setFontSize(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_font_small -> Appearance.FontSize.SMALL
+                        R.id.pref_font_large -> Appearance.FontSize.LARGE
+                        else -> Appearance.FontSize.MEDIUM
+                    }
+                )
+            }
+        }
+        findViewById<Switch>(R.id.pref_larger_text).apply {
+            isChecked = AppSettings.largerText(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setLargerText(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<Switch>(R.id.pref_high_contrast_focus).apply {
+            isChecked = AppSettings.highContrastFocus(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setHighContrastFocus(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<Switch>(R.id.pref_reduced_animations).apply {
+            isChecked = AppSettings.reducedAnimations(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setReducedAnimations(this@SettingsActivity, checked)
+            }
+        }
+        // 9.3.0: accessibility & remote — spoken channel names and
+        // what a held OK does in playback. The long-press choice
+        // takes effect immediately (it is read on every hold).
+        findViewById<Switch>(R.id.pref_speak_channel_names).apply {
+            isChecked = AppSettings.speakChannelNames(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setSpeakChannelNames(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<RadioGroup>(R.id.pref_long_press_ok).apply {
+            check(
+                when (AppSettings.longPressOkAction(this@SettingsActivity)) {
+                    AppSettings.LongPressOkAction.GUIDE -> R.id.pref_long_press_guide
+                    AppSettings.LongPressOkAction.NOTHING -> R.id.pref_long_press_nothing
+                    else -> R.id.pref_long_press_menu
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setLongPressOkAction(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_long_press_guide -> AppSettings.LongPressOkAction.GUIDE
+                        R.id.pref_long_press_nothing -> AppSettings.LongPressOkAction.NOTHING
+                        else -> AppSettings.LongPressOkAction.MENU
+                    }
+                )
+            }
+        // 10.0.0 (Nova): What's new.
         findViewById<Button>(R.id.whats_new_button).setOnClickListener {
             startActivity(Intent(this, WhatsNewActivity::class.java))
-        }
-        findViewById<Button>(R.id.backup_export_button).setOnClickListener {
-            exportBackup()
-        }
-        findViewById<Button>(R.id.backup_import_button).setOnClickListener {
-            confirmImportBackup()
         }
 
         shareStatusView = findViewById(R.id.share_status)
@@ -270,17 +449,51 @@ class SettingsActivity : FragmentActivity() {
             showAddPlaylistDialog()
         }
 
+        findViewById<Button>(R.id.add_epg_source_button).setOnClickListener {
+            showAddEpgSourceDialog()
+        }
+
+        // 8.2.0: re-download + re-parse every EPG source now, then
+        // show the fresh per-source status and the missing list.
+        findViewById<Button>(R.id.refresh_epg_button).setOnClickListener {
+            Toast.makeText(this, R.string.epg_source_refreshing, Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch {
+                PlaylistRepository.refreshEpg(this@SettingsActivity)
+                buildEpgSourcesUi()
+                buildMissingGuideUi()
+                Toast.makeText(this@SettingsActivity, R.string.epg_source_refreshed, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        findViewById<Button>(R.id.export_backup_button).setOnClickListener {
+            exportBackup()
+        }
+
+        findViewById<Button>(R.id.import_backup_button).setOnClickListener {
+            try {
+                pickBackupFile.launch("*/*")
+            } catch (e: Exception) {
+                // Some TVs have no document picker at all.
+                Toast.makeText(this, R.string.backup_no_picker, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 8.0.0: the EPG sources save immediately when added or
+        // removed (like the playlists), so Save only writes the
+        // recording upload URL now.
         findViewById<Button>(R.id.save_button).setOnClickListener {
-            PlaylistRepository.setEpgUrl(this, epgUrl.text.toString().trim())
             PlaylistRepository.setUploadUrl(this, uploadUrl.text.toString().trim())
             finish()
         }
 
         findViewById<Button>(R.id.reset_button).setOnClickListener {
             PlaylistRepository.resetUrls(this)
-            epgUrl.setText(PlaylistRepository.DEFAULT_EPG_URL)
             uploadUrl.setText("")
             buildPlaylistsUi()
+            buildEpgSourcesUi()
+            buildMissingGuideUi()
+            buildChannelGroupsUi()
+            buildRecordingsUi()
         }
 
         findViewById<Button>(R.id.unhide_button).setOnClickListener {
@@ -305,6 +518,9 @@ class SettingsActivity : FragmentActivity() {
         if (!pinUnlocked) return
         updateShareUi()
         startShareTicker()
+        // 8.3.0: a schedule may have been added or cancelled from
+        // the guide while Settings was open.
+        buildRecordingsUi()
     }
 
     override fun onPause() {
@@ -747,86 +963,6 @@ class SettingsActivity : FragmentActivity() {
             .show()
     }
 
-    // ---- Backup & restore (10.0.0, Nova) --------------------------------
-
-    /** Export the Nova backup: collect every covered store,
-     * serialise it and write the one fixed file, then tell the
-     * user exactly where it landed — the path is the whole point
-     * (they may want to copy it off the TV). */
-    private fun exportBackup() {
-        lifecycleScope.launch {
-            val file = NovaBackup.backupFile(this@SettingsActivity)
-            val ok = withContext(Dispatchers.IO) {
-                try {
-                    val text = NovaBackup.encode(
-                        NovaBackup.collect(this@SettingsActivity)
-                    )
-                    file.writeText(text, Charsets.UTF_8)
-                    true
-                } catch (e: Exception) {
-                    false
-                }
-            }
-            if (ok) {
-                AlertDialog.Builder(this@SettingsActivity)
-                    .setTitle(R.string.backup_export_done_title)
-                    .setMessage(
-                        getString(R.string.backup_export_done_message, file.absolutePath)
-                    )
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show()
-            } else {
-                Toast.makeText(
-                    this@SettingsActivity, R.string.backup_export_failed,
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-    }
-
-    /** Import asks first: it replaces the covered stores with
-     * the backup's, and that should never happen on a stray tap. */
-    private fun confirmImportBackup() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.backup_import_title)
-            .setMessage(R.string.backup_import_confirm)
-            .setPositiveButton(R.string.backup_import_action) { _, _ -> importBackup() }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    /** Import: read + fully validate the file BEFORE anything is
-     * written (NovaBackup.parseBackup) — a missing or malformed
-     * file is one error toast and no changes. A good backup is
-     * applied whole, then the app restarts into the loading flow
-     * so the restored playlists and settings are what runs. */
-    private fun importBackup() {
-        lifecycleScope.launch {
-            val data = withContext(Dispatchers.IO) {
-                val file = NovaBackup.backupFile(this@SettingsActivity)
-                val text = try {
-                    if (file.exists()) file.readText(Charsets.UTF_8) else null
-                } catch (e: Exception) {
-                    null
-                }
-                text?.let { NovaBackup.parseBackup(it) }
-            }
-            if (data == null) {
-                Toast.makeText(
-                    this@SettingsActivity, R.string.backup_import_invalid,
-                    Toast.LENGTH_LONG
-                ).show()
-                return@launch
-            }
-            NovaBackup.applyBackup(this@SettingsActivity, data)
-            Toast.makeText(
-                this@SettingsActivity, R.string.backup_import_done,
-                Toast.LENGTH_LONG
-            ).show()
-            restartToMain()
-        }
-    }
-
     // ---- Share (4.7.1, 4.8.0) ----------------------------------------------
 
     /** Refresh the countdown once a second while the server is running. */
@@ -948,5 +1084,601 @@ class SettingsActivity : FragmentActivity() {
         }
         updateShareUi()
         startShareTicker()
+    }
+
+    // ---- EPG sources (8.0.0) --------------------------------------------
+
+    /** One row per EPG source URL, with its last fetch status
+     * underneath (8.2.0: which source loaded, which failed, and
+     * when). Long-press to remove it (the last source can't be
+     * removed — the app always needs one). Sources save
+     * immediately, like the playlists. */
+    private fun buildEpgSourcesUi() {
+        val container = findViewById<LinearLayout>(R.id.epg_sources_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val statuses = PlaylistRepository.epgSourceStatuses(this)
+            .associateBy { it.url }
+        val now = System.currentTimeMillis()
+        for (url in PlaylistRepository.epgUrls(this)) {
+            val status = statuses[url]
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            val urlView = TextView(this).apply {
+                text = url
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            row.addView(urlView)
+            val statusView = TextView(this).apply {
+                text = EpgQuality.statusLine(status, now)
+                // A failed source reads red; anything else is muted.
+                setTextColor(
+                    if (status != null && !status.lastOk) 0xFFFF9E80.toInt()
+                    else 0xB3FFFFFF.toInt()
+                )
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(2) }
+            }
+            row.addView(statusView)
+            row.setOnLongClickListener {
+                showRemoveEpgSourceDialog(url)
+                true
+            }
+            container.addView(row)
+        }
+    }
+
+    /** Add an EPG source: one http/https XMLTV URL. */
+    private fun showAddEpgSourceDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            hint = getString(R.string.epg_source_url_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.epg_source_add_title)
+            .setView(input)
+            .setPositiveButton(R.string.epg_source_add) { _, _ ->
+                val url = input.text.toString().trim()
+                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                    Toast.makeText(this, R.string.epg_source_invalid_url, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val current = PlaylistRepository.epgUrls(this)
+                if (current.contains(url)) {
+                    Toast.makeText(this, R.string.epg_source_added, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                PlaylistRepository.setEpgUrls(this, current + url)
+                Toast.makeText(this, R.string.epg_source_added, Toast.LENGTH_SHORT).show()
+                buildEpgSourcesUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showRemoveEpgSourceDialog(url: String) {
+        val current = PlaylistRepository.epgUrls(this)
+        if (current.size <= 1) {
+            Toast.makeText(this, R.string.epg_source_cannot_remove_last, Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setMessage(R.string.epg_source_remove_confirm)
+            .setPositiveButton(R.string.epg_source_remove) { _, _ ->
+                PlaylistRepository.setEpgUrls(this, current - url)
+                Toast.makeText(this, R.string.epg_source_removed, Toast.LENGTH_SHORT).show()
+                buildEpgSourcesUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---- Channels without guide data (8.2.0) -------------------------
+    //
+    // Channels with no programmes in the merged guide. Tap one to
+    // pick a suggested EPG id (the common mismatches: case,
+    // punctuation, country/HD suffix, display-name spelling) or
+    // type one in. Assigning sets the per-channel EPG override, so
+    // the channel drops off this list on the next build. The list
+    // builds asynchronously once the playlist + guide have loaded.
+
+    private fun buildMissingGuideUi() {
+        val container = findViewById<LinearLayout>(R.id.missing_guide_list)
+        container.removeAllViews()
+        lifecycleScope.launch {
+            val channels = PlaylistRepository.loadPlaylist(this@SettingsActivity)
+                .getOrNull() ?: emptyList()
+            val epg = PlaylistRepository.loadEpg(this@SettingsActivity)
+            renderMissingGuide(channels, epg)
+        }
+    }
+
+    private fun renderMissingGuide(
+        channels: List<Channel>,
+        epg: Map<String, List<EpgParser.Programme>>
+    ) {
+        val container = findViewById<LinearLayout>(R.id.missing_guide_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val missing = EpgQuality.channelsWithoutGuide(
+            channels, epg,
+            PlaylistRepository.epgOverrides(this),
+            PlaylistRepository.hiddenChannels(this)
+        )
+        if (missing.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.missing_guide_none)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+            })
+            return
+        }
+        for (channel in missing) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            row.addView(TextView(this).apply {
+                text = channel.name
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            row.addView(TextView(this).apply {
+                text = getString(R.string.missing_guide_no_data)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            })
+            // Tap (not long-press): a remote's OK button opens the
+            // assign dialog — long-press-only rows are dead on TV.
+            row.setOnClickListener {
+                showAssignMissingEpgDialog(channel, epg)
+            }
+            container.addView(row)
+        }
+    }
+
+    /** One-tap EPG assign: the suggested ids first, then "Enter
+     * manually…" for the rest. With no suggestions at all, go
+     * straight to the manual field. */
+    private fun showAssignMissingEpgDialog(
+        channel: Channel,
+        epg: Map<String, List<EpgParser.Programme>>
+    ) {
+        val suggestions = EpgQuality.suggestEpgIds(channel, epg.keys)
+        if (suggestions.isEmpty()) {
+            showManualAssignDialog(channel)
+            return
+        }
+        val items = (suggestions + getString(R.string.missing_guide_enter_manually))
+            .toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.missing_guide_assign_title, channel.name))
+            .setItems(items) { _, which ->
+                if (which == suggestions.size) {
+                    showManualAssignDialog(channel)
+                } else {
+                    PlaylistRepository.setEpgOverride(this, channel.id, suggestions[which])
+                    Toast.makeText(this, R.string.menu_epg_assigned, Toast.LENGTH_SHORT).show()
+                    buildMissingGuideUi()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Type an EPG id in by hand (prefilled with the current
+     * override or the playlist's tvg-id, blank to clear). */
+    private fun showManualAssignDialog(channel: Channel) {
+        val input = EditText(this).apply {
+            setText(
+                PlaylistRepository.epgOverrides(this@SettingsActivity)[channel.id]
+                    ?: channel.tvgId.orEmpty()
+            )
+            hint = getString(R.string.menu_assign_epg_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.menu_assign_epg_title, channel.name))
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                PlaylistRepository.setEpgOverride(this, channel.id, input.text.toString())
+                Toast.makeText(this, R.string.menu_epg_assigned, Toast.LENGTH_SHORT).show()
+                buildMissingGuideUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---- Channel groups (8.1.0) ------------------------------------------
+    //
+    // One row per playlist group: display name + visible channel
+    // count. Long-press a row for Rename / Move up / Move down /
+    // Reset. Channels are moved between groups from the guide's
+    // long-press menu, not here — this screen manages the groups
+    // themselves. The rows build synchronously when the playlist is
+    // already in memory, else once the load lands.
+
+    /** All playlist groups (raw names, playlist order) with their
+     * effective visible counts — including groups whose channels
+     * were all moved away (0 channels), so they can still be
+     * renamed, reordered, or moved back into. */
+    private fun groupSummaries(
+        channels: List<Channel>
+    ): List<Triple<String, String, Int>> {
+        val overrides = PlaylistRepository.groupOverrides(this)
+        val hidden = PlaylistRepository.hiddenChannels(this)
+        val visible = channels.filter { it.id !in hidden }
+        val counts = GroupOverrides.effectiveGroups(visible, overrides)
+            .associate { it.key to it.channels.size }
+        return channels.map { it.group }.distinct().map { key ->
+            Triple(key, GroupOverrides.displayGroup(key, overrides), counts[key] ?: 0)
+        }
+    }
+
+    private fun buildChannelGroupsUi() {
+        val container = findViewById<LinearLayout>(R.id.channel_groups_list)
+        container.removeAllViews()
+        val cached = PlaylistRepository.cachedPlaylist()
+        if (cached != null) {
+            renderChannelGroups(cached)
+            return
+        }
+        lifecycleScope.launch {
+            val channels = PlaylistRepository.loadPlaylist(this@SettingsActivity)
+                .getOrNull() ?: emptyList()
+            renderChannelGroups(channels)
+        }
+    }
+
+    private fun renderChannelGroups(channels: List<Channel>) {
+        val container = findViewById<LinearLayout>(R.id.channel_groups_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val summaries = groupSummaries(channels)
+        if (summaries.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.channel_groups_empty)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+            })
+            return
+        }
+        for ((key, displayName, count) in summaries) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            val nameView = TextView(this).apply {
+                text = displayName
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val countView = TextView(this).apply {
+                text = getString(R.string.channel_groups_count, count)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            }
+            row.addView(nameView)
+            row.addView(countView)
+            // Tap opens the options too — on a TV remote OK fires a
+            // click, not a long-press, so long-press alone would
+            // leave the row dead for remote users.
+            row.setOnClickListener {
+                showGroupOptionsDialog(key, displayName)
+            }
+            row.setOnLongClickListener {
+                showGroupOptionsDialog(key, displayName)
+                true
+            }
+            container.addView(row)
+        }
+    }
+
+    /** Long-press options for one group: rename, move up/down in
+     * the sidebar order, or reset it to its playlist name + order. */
+    private fun showGroupOptionsDialog(groupKey: String, displayName: String) {
+        val labels = arrayOf(
+            getString(R.string.group_rename),
+            getString(R.string.group_move_up),
+            getString(R.string.group_move_down),
+            getString(R.string.group_reset)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.group_options_title, displayName))
+            .setItems(labels) { _, which ->
+                when (which) {
+                    0 -> showRenameGroupDialog(groupKey, displayName)
+                    1 -> moveGroup(groupKey, up = true)
+                    2 -> moveGroup(groupKey, up = false)
+                    3 -> resetGroup(groupKey)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showRenameGroupDialog(groupKey: String, displayName: String) {
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val input = EditText(this).apply {
+            setText(displayName)
+            hint = getString(R.string.group_rename_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.group_rename_title)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                PlaylistRepository.setGroupRename(this, groupKey, input.text.toString())
+                Toast.makeText(this, R.string.group_renamed, Toast.LENGTH_SHORT).show()
+                buildChannelGroupsUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Move a group one step up or down in the custom order. */
+    private fun moveGroup(groupKey: String, up: Boolean) {
+        val channels = PlaylistRepository.cachedPlaylist() ?: return
+        val allGroups = channels.map { it.group }.distinct()
+        val order = PlaylistRepository.groupOverrides(this).order
+        val full = order.filter { it in allGroups } +
+            allGroups.filter { it !in order }
+        val updated = GroupOverrides.reorderedOrder(order, allGroups, groupKey, up)
+        // No-op when the group is already first (up) or last (down).
+        if (updated == full) return
+        PlaylistRepository.setGroupOrder(this, updated)
+        Toast.makeText(this, R.string.group_moved, Toast.LENGTH_SHORT).show()
+        buildChannelGroupsUi()
+    }
+
+    /** Clear a group's rename and drop it from the custom order —
+     * it goes back to its playlist name and playlist position.
+     * Channels moved into it stay moved. */
+    private fun resetGroup(groupKey: String) {
+        PlaylistRepository.setGroupRename(this, groupKey, "")
+        val order = PlaylistRepository.groupOverrides(this).order - groupKey
+        PlaylistRepository.setGroupOrder(this, order)
+        Toast.makeText(this, R.string.group_reset_done, Toast.LENGTH_SHORT).show()
+        buildChannelGroupsUi()
+    }
+
+    // ---- Recordings (8.3.0) ----------------------------------------------
+    //
+    // Auto-delete setting (a row that opens a picker) and the
+    // scheduled recordings picked in the guide (tap one to cancel
+    // it — the alarm is cancelled too).
+
+    private fun buildRecordingsUi() {
+        val keepDays = AppSettings.autoDeleteRecordingsDays(this)
+        findViewById<TextView>(R.id.recordings_auto_delete_row).apply {
+            text = getString(R.string.recordings_auto_delete_title) + ": " +
+                if (keepDays <= 0) getString(R.string.auto_delete_off)
+                else getString(R.string.auto_delete_days, keepDays)
+            setOnClickListener { showAutoDeleteDialog(keepDays) }
+        }
+        val container = findViewById<LinearLayout>(R.id.scheduled_recordings_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        val scheduled = PlaylistRepository.scheduledRecordings(this)
+        if (scheduled.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.scheduled_recordings_empty)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+            })
+            return
+        }
+        for (rec in scheduled) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            val nameView = TextView(this).apply {
+                text = rec.title
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val timeView = TextView(this).apply {
+                text = "${rec.channelName} • ${GuideData.formatDate(rec.startMillis)}, " +
+                    GuideData.formatClock(rec.startMillis)
+                setTextColor(0xB3FFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            }
+            row.addView(nameView)
+            row.addView(timeView)
+            row.setOnClickListener { showCancelScheduledDialog(rec) }
+            row.setOnLongClickListener {
+                showCancelScheduledDialog(rec)
+                true
+            }
+            container.addView(row)
+        }
+    }
+
+    /** Pick how many days of finished recordings to keep (0 = off). */
+    private fun showAutoDeleteDialog(currentDays: Int) {
+        val options = intArrayOf(0, 7, 14, 30, 90)
+        val labels = options.map { days ->
+            if (days <= 0) getString(R.string.auto_delete_off)
+            else getString(R.string.auto_delete_days, days)
+        }.toTypedArray()
+        val checked = options.indexOf(currentDays).takeIf { it >= 0 } ?: 0
+        AlertDialog.Builder(this)
+            .setTitle(R.string.auto_delete_choose_title)
+            .setSingleChoiceItems(labels, checked) { dialog, which ->
+                AppSettings.setAutoDeleteRecordingsDays(this, options[which])
+                dialog.dismiss()
+                buildRecordingsUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Confirm, then cancel the alarm and drop the schedule. */
+    private fun showCancelScheduledDialog(rec: PlaylistRepository.ScheduledRecording) {
+        AlertDialog.Builder(this)
+            .setTitle(rec.title)
+            .setMessage(
+                "${rec.channelName} • ${GuideData.formatDate(rec.startMillis)}, " +
+                    GuideData.formatTimeRange(rec.startMillis, rec.stopMillis)
+            )
+            .setPositiveButton(R.string.delete) { _, _ ->
+                RecordingManager.cancelRecordingStart(this, rec)
+                PlaylistRepository.removeScheduledRecording(this, rec.channelId, rec.startMillis)
+                Toast.makeText(
+                    this, R.string.recording_schedule_cancelled, Toast.LENGTH_SHORT
+                ).show()
+                buildRecordingsUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---- Backup & restore (8.0.0) ----------------------------------------
+
+    /** Export the backup: write opentv-backup.json to the cache dir
+     * and to Downloads (so it can be pulled off the TV), then offer
+     * the Android share sheet. On a TV there may be no app to share
+     * with — the Downloads copy is the fallback, and the toast says
+     * so. */
+    private fun exportBackup() {
+        lifecycleScope.launch {
+            val json = withContext(Dispatchers.IO) {
+                BackupManager.encode(BackupManager.export(this@SettingsActivity))
+            }
+            val file = withContext(Dispatchers.IO) {
+                try {
+                    File(cacheDir, "opentv-backup.json").apply {
+                        writeText(json, Charsets.UTF_8)
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (file == null) {
+                Toast.makeText(this@SettingsActivity, R.string.backup_export_failed, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val inDownloads = withContext(Dispatchers.IO) { saveBackupToDownloads(json) }
+            if (inDownloads) {
+                Toast.makeText(this@SettingsActivity, R.string.backup_exported, Toast.LENGTH_SHORT).show()
+            }
+            val uri = FileProvider.getUriForFile(
+                this@SettingsActivity, "${packageName}.fileprovider", file
+            )
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "OpenTV backup")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                startActivity(Intent.createChooser(send, getString(R.string.backup_export)))
+            } catch (e: ActivityNotFoundException) {
+                if (inDownloads) {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_share_failed, Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_export_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /** Copy the backup JSON into the public Downloads folder. Best
+     * effort — returns false when the platform refuses (e.g. no
+     * storage permission on an old Android), and the cache-dir file
+     * + share sheet still work. */
+    private fun saveBackupToDownloads(json: String): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, "opentv-backup.json")
+                    put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri = contentResolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                ) ?: return false
+                contentResolver.openOutputStream(uri)?.use {
+                    it.write(json.toByteArray(Charsets.UTF_8))
+                } ?: return false
+                true
+            } else {
+                val downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+                File(downloads, "opentv-backup.json").apply {
+                    parentFile?.mkdirs()
+                    writeText(json, Charsets.UTF_8)
+                }
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 }

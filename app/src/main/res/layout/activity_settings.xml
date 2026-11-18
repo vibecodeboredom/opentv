@@ -67,6 +67,11 @@
 
     </LinearLayout>
 
+    <!-- EPG sources (8.0.0, Juniper): the URLs are a list now — add
+         or remove them one by one instead of editing one
+         comma-separated field. Long-press a row to remove it.
+         The per-source status (programme count, last refresh)
+         comes from EpgQuality (see SettingsActivity). -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -78,23 +83,195 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/epg_url_label"
+            android:text="@string/epg_sources_title"
             android:textColor="@android:color/white"
             android:textSize="18sp"
             android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/epg_url"
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/epg_sources_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/epg_sources_list"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:background="@drawable/settings_input_bg"
-            android:padding="14dp"
+            android:orientation="vertical" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/add_epg_source_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/epg_source_add"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/refresh_epg_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/epg_source_refresh"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- 8.2.0 (Juniper): channels without guide data — one-tap
+         EPG assign. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/missing_guide_title"
             android:textColor="@android:color/white"
-            android:textColorHint="#FF7A7A85"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/missing_guide_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/missing_guide_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
+
+    </LinearLayout>
+
+    <!-- 8.1.0 (Juniper): custom channel groups — rename, reorder,
+         move channels. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/channel_groups_title"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/channel_groups_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/channel_groups_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
+
+    </LinearLayout>
+
+    <!-- 8.3.0 (Juniper): recordings — auto-delete old recordings,
+         and the scheduled recordings picked in the guide (tap one
+         to cancel it). -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/recordings"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/recordings_auto_delete_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/recordings_auto_delete_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/settings_row_bg"
+            android:textColor="#FFFFFF"
             android:textSize="16sp"
-            android:inputType="textUri"
-            android:singleLine="true" />
+            android:padding="16dp"
+            android:focusable="true"
+            android:clickable="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/scheduled_recordings_title"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/scheduled_recordings_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/scheduled_recordings_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
 
     </LinearLayout>
 
@@ -238,6 +415,16 @@
             android:textSize="16sp" />
 
         <Switch
+            android:id="@+id/pref_guide_favorites_only"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_favorites_only"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <Switch
             android:id="@+id/pref_idle_saver"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -292,6 +479,103 @@
                 android:textColor="@android:color/white"
                 android:textSize="16sp" />
         </RadioGroup>
+
+        <!-- 7.2.0 (Juniper): guide window size — how many hours
+             forward the guide shows. Applies the next time the
+             guide opens, or when returning to an open guide. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_guide_window_size"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/pref_guide_window_size"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/pref_window_6h"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/prefs_window_6h"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_window_12h"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_window_12h"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_window_24h"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_window_24h"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+        </RadioGroup>
+
+        <!-- 9.0.0 (Juniper): what the TV opens on — the home
+             screen, or straight into the last channel. TV only
+             (mobile always opens the touch home screen), so the
+             container is hidden on mobile in SettingsActivity.
+             Applies on the next launch. -->
+        <LinearLayout
+            android:id="@+id/pref_launch_behaviour_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/prefs_launch_behaviour"
+                android:textColor="@android:color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <RadioGroup
+                android:id="@+id/pref_launch_behaviour"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/pref_launch_home"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/prefs_launch_home"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp" />
+
+                <RadioButton
+                    android:id="@+id/pref_launch_autoplay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="24dp"
+                    android:minHeight="48dp"
+                    android:text="@string/prefs_launch_autoplay"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp" />
+            </RadioGroup>
+        </LinearLayout>
 
         <!-- 9.0.0 (Nova): the accent colour choice. Green is the
              original app accent; the others recolour the guide,
@@ -510,6 +794,185 @@
             android:minHeight="48dp"
             android:text="@string/prefs_pin_set" />
 
+        <!-- 9.1.0 (Juniper): appearance — guide row density
+             (thinner rows fit more channels), font size for the
+             guide + sidebar text, high-contrast focus, and
+             reduced animations. Density and font size apply the
+             next time the guide opens; the focus style applies
+             the next time the guide or a fresh sidebar opens;
+             reduced animations takes effect immediately. -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_guide_density"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/pref_guide_density"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/pref_density_compact"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/prefs_density_compact"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_density_comfortable"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_density_comfortable"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_font_size"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/pref_font_size"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/pref_font_small"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/prefs_size_small"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_font_medium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_size_medium"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_font_large"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_size_large"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+        </RadioGroup>
+
+        <Switch
+            android:id="@+id/pref_larger_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_larger_text"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <Switch
+            android:id="@+id/pref_high_contrast_focus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_high_contrast_focus"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <Switch
+            android:id="@+id/pref_reduced_animations"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_reduced_animations"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <!-- 9.3.0 (Juniper): accessibility & remote — spoken
+             channel names and what a held OK does in playback.
+             The long-press choice takes effect immediately (it
+             is read on every hold). -->
+        <Switch
+            android:id="@+id/pref_speak_channel_names"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="@string/prefs_speak_channel_names"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/prefs_long_press_ok"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/pref_long_press_ok"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/pref_long_press_menu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/prefs_long_press_menu"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_long_press_guide"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_long_press_guide"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/pref_long_press_nothing"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:minHeight="48dp"
+                android:text="@string/prefs_long_press_nothing"
+                android:textColor="@android:color/white"
+                android:textSize="16sp" />
+        </RadioGroup>
+
     </LinearLayout>
 
     <!-- Share playlist (4.7.1): temporarily host a playlist on this
@@ -564,10 +1027,11 @@
 
     </LinearLayout>
 
-    <!-- 10.0.0 (Nova): the Nova card — release notes for the
-         whole Nova line, and backup & restore of the user's
-         Nova data as a single JSON file in the app's external
-         files folder. -->
+    <!-- Backup & restore (8.0.0, Juniper; unified in the combine):
+         one file holds the playlists, favorites, hidden channels,
+         EPG sources and settings — export it to share or save,
+         import it on another device. 10.0.0 (Nova): the release
+         notes for the whole Nova line live behind What's new. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -579,7 +1043,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/nova_section_title"
+            android:text="@string/backup_title"
             android:textColor="@android:color/white"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -588,9 +1052,44 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="@string/nova_section_caption"
+            android:text="@string/backup_hint"
             android:textColor="#B3FFFFFF"
             android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/export_backup_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/backup_export"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/import_backup_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/backup_import"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
 
         <Button
             android:id="@+id/whats_new_button"
@@ -599,22 +1098,6 @@
             android:layout_marginTop="12dp"
             android:minHeight="48dp"
             android:text="@string/whats_new_button" />
-
-        <Button
-            android:id="@+id/backup_export_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:minHeight="48dp"
-            android:text="@string/backup_export" />
-
-        <Button
-            android:id="@+id/backup_import_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:minHeight="48dp"
-            android:text="@string/backup_import" />
 
     </LinearLayout>
 

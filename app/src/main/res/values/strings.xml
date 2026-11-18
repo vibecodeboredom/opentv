@@ -50,6 +50,33 @@
     <string name="play">Play</string>
     <string name="delete">Delete</string>
     <string name="recording_deleted">Recording deleted</string>
+    <!-- 8.3.0: scheduled recordings, list sort/filter, auto-delete. -->
+    <string name="menu_schedule_recording">Record this programme</string>
+    <string name="menu_cancel_scheduled_recording">Cancel scheduled recording</string>
+    <string name="recording_scheduled">Recording scheduled: %1$s at %2$s</string>
+    <string name="recording_schedule_cancelled">Scheduled recording cancelled</string>
+    <string name="scheduled_recordings_title">Scheduled recordings</string>
+    <string name="scheduled_recordings_hint">Future programmes picked in the guide. They record when they start — even if the app is closed.</string>
+    <string name="scheduled_recordings_empty">No recordings scheduled. Long-press a future programme in the guide to schedule one.</string>
+    <string name="scheduled_recording_cancel_title">Cancel this recording?</string>
+    <string name="recordings_sort_filter">Sort &amp; filter</string>
+    <string name="recordings_sort">Sort</string>
+    <string name="recordings_filter">Filter</string>
+    <string name="sort_newest">Newest first</string>
+    <string name="sort_oldest">Oldest first</string>
+    <string name="sort_largest">Largest first</string>
+    <string name="sort_smallest">Smallest first</string>
+    <string name="sort_name">Name A–Z</string>
+    <string name="filter_all">All</string>
+    <string name="filter_in_progress">Recording now</string>
+    <string name="filter_finished">Saved</string>
+    <string name="recordings_auto_delete_title">Auto-delete old recordings</string>
+    <string name="recordings_auto_delete_hint">Finished recordings older than this are deleted when you open Recordings. Off keeps everything.</string>
+    <string name="auto_delete_off">Off</string>
+    <string name="auto_delete_days">Keep %1$d days</string>
+    <string name="auto_delete_choose_title">Delete recordings older than</string>
+    <string name="recordings_old_deleted">Deleted %1$d old recording(s)</string>
+    <string name="scheduled_row_title">Scheduled</string>
     <string name="add_favorite">Add to favorites</string>
     <string name="remove_favorite">Remove from favorites</string>
     <string name="added_favorite">Added to favorites</string>
@@ -93,6 +120,51 @@
     <string name="menu_recent_searches">Recent searches</string>
     <string name="menu_clear_recent">Clear</string>
     <string name="menu_settings">⚙  Settings</string>
+    <string name="menu_jump_to_now">⏱  Jump to now</string>
+    <string name="menu_refresh_epg">⟳  Refresh guide data</string>
+    <string name="menu_favorites_only_on">★  Favorites only: On</string>
+    <string name="menu_favorites_only_off">☆  Favorites only: Off</string>
+    <string name="menu_favorites_only_enabled">Showing favorites only</string>
+    <string name="menu_favorites_only_disabled">Showing all channels</string>
+    <string name="menu_no_favorites">No favorites yet — add some first</string>
+    <string name="guide_empty_no_favorites">No favorites yet. Star a channel from its programme menu, then come back for tonight.</string>
+    <string name="guide_empty_tonight_no_programmes">No programmes tonight for your favorites. The guide has no data for 6 to 11 PM. Try Refresh guide data in the menu.</string>
+    <!-- Guide, day by day (7.2.0). -->
+    <string name="menu_go_to_day">📅  Go to day…</string>
+    <string name="menu_tonight_exit">📺  Full guide</string>
+    <string name="guide_tonight_header">Tonight · %1$s</string>
+    <string name="guide_already_today">Already on today</string>
+    <string name="guide_day_limit">Guide data only goes a week ahead</string>
+    <string name="guide_epg_updated">Guide updated %1$s</string>
+    <string name="guide_epg_unknown">Guide data age unknown</string>
+    <string name="guide_number_entry">Ch %1$s</string>
+    <string name="guide_refreshing">Refreshing guide data…</string>
+    <string name="guide_refreshed">Guide data refreshed</string>
+    <string name="guide_refresh_failed">Refresh failed — showing saved guide</string>
+    <string name="guide_no_channel_number">No channel %1$d</string>
+    <!-- Playback comfort (7.1.0). -->
+    <string name="sleep_timer_menu">Sleep timer: %1$s</string>
+    <!-- Picture-in-picture (10.0.0). -->
+    <string name="pip_menu">Watch in small window</string>
+    <string name="pip_fullscreen">Full screen</string>
+    <string name="pip_unavailable">Picture-in-picture isn\'t available on this device</string>
+    <string name="sleep_timer_title">Sleep timer</string>
+    <string name="sleep_timer_off">Off</string>
+    <string name="sleep_timer_ended">Sleep timer ended</string>
+    <string name="playback_speed_menu">Playback speed: %1$s</string>
+    <string name="playback_speed_title">Playback speed</string>
+    <string name="playback_speed_set">Playback speed: %1$s</string>
+    <string name="recording_seek_position">%1$s / %2$s</string>
+    <!-- Audio & picture (7.3.0). -->
+    <string name="audio_track_menu">Audio: %1$s</string>
+    <string name="audio_track_title">Audio track</string>
+    <string name="audio_track_auto">Auto</string>
+    <string name="audio_track_set">Audio: %1$s</string>
+    <string name="subtitles_menu">Subtitles: %1$s</string>
+    <string name="subtitles_title">Subtitles</string>
+    <string name="subtitles_off">Off</string>
+    <string name="subtitles_set">Subtitles: %1$s</string>
+    <string name="prefs_favorites_only">Guide shows favorites only</string>
     <string name="menu_external_player">Open in external player</string>
     <string name="menu_record">Record</string>
     <string name="menu_stop_recording">Stop recording</string>
@@ -163,6 +235,70 @@
     <string name="playlist_activated">Activated %1$s</string>
     <string name="playlist_cannot_deactivate_last">You need at least one active playlist.</string>
     <string name="playlist_disabled_hint">This playlist is disabled — long-press it to activate it.</string>
+    <!-- EPG source manager (8.0.0): the EPG URLs are a list now. -->
+    <string name="epg_sources_title">EPG sources (XMLTV)</string>
+    <string name="epg_sources_hint">Guide data sources — add or remove them one by one. Several sources are merged into one guide.</string>
+    <string name="epg_source_add">Add EPG source</string>
+    <string name="epg_source_add_title">Add EPG source</string>
+    <string name="epg_source_url_hint">https://example.com/guide.xml</string>
+    <string name="epg_source_added">Added EPG source</string>
+    <string name="epg_source_invalid_url">Enter a valid EPG URL (http:// or https://).</string>
+    <string name="epg_source_remove">Remove</string>
+    <string name="epg_source_remove_confirm">Remove this EPG source?</string>
+    <string name="epg_source_removed">Removed EPG source</string>
+    <string name="epg_source_cannot_remove_last">You need at least one EPG source.</string>
+    <string name="epg_source_refresh">Refresh now</string>
+    <string name="epg_source_refreshing">Refreshing guide data…</string>
+    <string name="epg_source_refreshed">Guide data refreshed</string>
+    <string name="missing_guide_title">Channels without guide data</string>
+    <string name="missing_guide_hint">Channels with no programmes in the guide. Tap one to assign its EPG id — the usual mismatches are suggested, or type it in.</string>
+    <string name="missing_guide_none">All channels have guide data.</string>
+    <string name="missing_guide_no_data">No guide data</string>
+    <string name="missing_guide_assign_title">Assign EPG to %1$s</string>
+    <string name="missing_guide_enter_manually">Enter manually…</string>
+    <!-- Backup &amp; restore (8.0.0). -->
+    <string name="backup_title">Backup &amp; restore</string>
+    <string name="backup_hint">Save your playlists, favorites, hidden channels and settings to one file, and restore it on another device so it starts with the same setup.</string>
+    <string name="backup_export">Export backup</string>
+    <string name="backup_import">Import backup</string>
+    <string name="backup_exported">Backup saved to Downloads</string>
+    <string name="backup_export_failed">Could not create the backup file.</string>
+    <string name="backup_share_failed">No app available to share it — the backup is saved in Downloads.</string>
+    <string name="backup_imported">Backup restored — %1$d playlists, %2$d favorites, %3$d EPG sources</string>
+    <string name="backup_import_failed">That file is not a valid OpenTV backup.</string>
+    <string name="backup_no_picker">No file picker on this TV.</string>
+    <!-- Channel groups (8.1.0): custom groups as overrides. -->
+    <string name="channel_groups_title">Channel groups</string>
+    <string name="channel_groups_hint">Rename groups, reorder them, and move channels between them — the playlist itself is never changed. Tap a group for its options.</string>
+    <string name="channel_groups_empty">No groups yet — load a playlist first.</string>
+    <string name="channel_groups_count">%1$d channels</string>
+    <string name="group_options_title">%1$s</string>
+    <string name="group_rename">Rename</string>
+    <string name="group_rename_title">Rename group</string>
+    <string name="group_rename_hint">New name, blank to use the playlist name</string>
+    <string name="group_renamed">Group renamed</string>
+    <string name="group_move_up">Move up</string>
+    <string name="group_move_down">Move down</string>
+    <string name="group_reset">Reset to playlist group</string>
+    <string name="group_reset_done">Group reset</string>
+    <string name="group_moved">Group moved</string>
+    <!-- Bulk hide / unhide (8.1.0). -->
+    <string name="menu_hide_channels">Hide channels…</string>
+    <string name="menu_unhide_channels">Show hidden channels…</string>
+    <string name="menu_move_to_group">Move to group…</string>
+    <string name="hide_channels_title">Hide channels</string>
+    <string name="unhide_channels_title">Show hidden channels</string>
+    <string name="hide_channels_none">No channels to hide here.</string>
+    <string name="unhide_channels_none">No hidden channels.</string>
+    <string name="channels_hidden">%1$d channels hidden</string>
+    <string name="channels_unhidden">%1$d channels shown again</string>
+    <!-- Bulk-hide confirmation (8.1.1). -->
+    <string name="bulk_hide_confirm">Hide %1$d channels?</string>
+    <string name="bulk_hide_confirm_one">Hide “%1$s”?</string>
+    <string name="bulk_unhide_confirm">Show %1$d channels again?</string>
+    <string name="bulk_unhide_confirm_one">Show “%1$s” again?</string>
+    <string name="move_to_group_title">Move %1$s to…</string>
+    <string name="channel_moved_to_group">Moved to %1$s</string>
     <!-- Mobile (6.0.0-rc1): touch home screen + playback. -->
     <string name="mobile_continue_watching">▶  Continue watching</string>
     <!-- Nova 7.0.0: home-screen recents row + playback sleep timer. -->
@@ -170,7 +306,6 @@
     <string name="sleep_timer">Sleep timer</string>
     <string name="sleep_timer_on">Sleep timer: %1$d min</string>
     <string name="sleep_timer_remaining">Sleep timer: %1$d min left</string>
-    <string name="sleep_timer_off">Off</string>
     <string name="sleep_timer_minutes">%1$d minutes</string>
     <string name="sleep_timer_set">Sleep timer set — playback pauses in %1$d min</string>
     <string name="sleep_timer_off_toast">Sleep timer off</string>
@@ -283,7 +418,6 @@
     <string name="reorder_favorites_title">Reorder favorites</string>
     <string name="reorder_favorites_hint">Select a channel to pick it up, then select where it should go. The order applies wherever favorites are listed — the home rows, the sidebar and favorites zapping.</string>
     <string name="menu_record_programme">Record this programme</string>
-    <string name="menu_cancel_scheduled_recording">Cancel scheduled recording</string>
     <string name="scheduled_recording_set_toast">Recording scheduled — %1$s at %2$s. It starts automatically while OpenTV is running.</string>
     <string name="scheduled_recording_cancelled_toast">Scheduled recording cancelled</string>
     <string name="scheduled_recordings">Scheduled recordings</string>
@@ -335,6 +469,26 @@
     <string name="prefs_size_small">Small</string>
     <string name="prefs_size_medium">Medium</string>
     <string name="prefs_size_large">Large</string>
+    <string name="prefs_guide_window_size">Guide window size</string>
+    <string name="prefs_window_6h">6 hours</string>
+    <string name="prefs_window_12h">12 hours</string>
+    <string name="prefs_window_24h">24 hours</string>
+    <string name="prefs_launch_behaviour">On launch (TV)</string>
+    <string name="prefs_launch_home">Home screen</string>
+    <string name="prefs_launch_autoplay">Auto-play last channel</string>
+    <string name="prefs_guide_density">Guide row density</string>
+    <string name="prefs_density_compact">Compact</string>
+    <string name="prefs_density_comfortable">Comfortable</string>
+    <string name="prefs_font_size">Font size (guide &amp; sidebar)</string>
+    <string name="prefs_larger_text">Larger text (guide &amp; sidebar)</string>
+    <string name="prefs_high_contrast_focus">High-contrast focus</string>
+    <string name="prefs_reduced_animations">Reduce animations</string>
+    <string name="prefs_speak_channel_names">Spoken channel names</string>
+    <string name="prefs_long_press_ok">Long-press OK in playback</string>
+    <string name="prefs_long_press_menu">Menu</string>
+    <string name="prefs_long_press_guide">Guide</string>
+    <string name="prefs_long_press_nothing">Nothing</string>
+    <string name="home_recent_channels">Recent channels</string>
     <!-- 9.2.0 (Nova): discovery row, recordings storage guard, keyword markers. -->
     <string name="more_of_what_you_watch">More of what you watch</string>
     <string name="recordings_auto_freed">Freed %1$s by auto-delete</string>
@@ -384,11 +538,8 @@
     <string name="whats_new_button">What\'s new in Nova</string>
     <string name="whats_new_title">What\'s new in Nova</string>
     <string name="whats_new_caption">Every Nova release from 7.0.0 to 10.0.0, one line each — newest first.</string>
-    <string name="backup_export">Export backup</string>
-    <string name="backup_import">Import backup</string>
     <string name="backup_export_done_title">Backup saved</string>
     <string name="backup_export_done_message">Your Nova backup is in:\n\n%1$s\n\nKeep the file somewhere safe — importing it brings your playlists, favorites, reminders, keywords and settings back.</string>
-    <string name="backup_export_failed">Couldn\'t save the backup file</string>
     <string name="backup_import_title">Import backup</string>
     <string name="backup_import_confirm">This replaces your current playlists, favorites, hidden channels, reminders, scheduled recordings, keywords and Nova settings with the ones in the backup file. Anything the backup doesn\'t cover stays as it is.</string>
     <string name="backup_import_action">Import</string>
@@ -396,35 +547,12 @@
     <string name="backup_import_invalid">No readable Nova backup found — nothing was changed</string>
 
     <!-- Combined (from juniper-v10): picture-in-picture, playback speed, recording seek -->
-    <string name="pip_menu">Watch in small window</string>
-    <string name="pip_fullscreen">Full screen</string>
-    <string name="pip_unavailable">Picture-in-picture isn\'t available on this device</string>
-    <string name="playback_speed_menu">Playback speed: %1$s</string>
-    <string name="playback_speed_title">Playback speed</string>
-    <string name="playback_speed_set">Playback speed: %1$s</string>
-    <string name="recording_seek_position">%1$s / %2$s</string>
 
     <!-- Combined (from juniper-v10): guide merge — channel-number
          jump, favorites-only view, EPG freshness + refresh, Tonight
          quick view, EPG quality -->
-    <string name="guide_number_entry">Ch %1$s</string>
-    <string name="guide_no_channel_number">No channel %1$d</string>
-    <string name="guide_epg_updated">Guide updated %1$s</string>
-    <string name="guide_epg_unknown">Guide data age unknown</string>
-    <string name="guide_refreshing">Refreshing guide data…</string>
-    <string name="guide_refreshed">Guide data refreshed</string>
-    <string name="guide_refresh_failed">Refresh failed — showing saved guide</string>
-    <string name="menu_refresh_epg">⟳  Refresh guide data</string>
-    <string name="menu_favorites_only_on">★  Favorites only: On</string>
-    <string name="menu_favorites_only_off">☆  Favorites only: Off</string>
-    <string name="menu_favorites_only_enabled">Showing favorites only</string>
-    <string name="menu_favorites_only_disabled">Showing all channels</string>
-    <string name="menu_no_favorites">No favorites yet — add some first</string>
-    <string name="guide_empty_no_favorites">No favorites yet. Star a channel from its programme menu, then come back for tonight.</string>
-    <string name="guide_empty_tonight_no_programmes">No programmes tonight for your favorites. The guide has no data for 6 to 11 PM. Try Refresh guide data in the menu.</string>
     <string name="menu_tonight_view">🌙  Tonight quick view</string>
     <string name="menu_tonight_view_exit">📺  Full guide</string>
-    <string name="guide_tonight_header">Tonight · %1$s</string>
     <string name="menu_epg_quality">Guide data quality</string>
     <string name="epg_quality_title">Guide data</string>
     <string name="epg_quality_no_status">No EPG source has been fetched yet.\n\n</string>
@@ -434,4 +562,5 @@
     <string name="epg_quality_without_title">Channels without guide data</string>
     <string name="epg_quality_suggest_title">Use this EPG ID for %1$s?</string>
     <string name="epg_quality_no_suggestions">No likely EPG ID found for this channel</string>
+
 </resources>
