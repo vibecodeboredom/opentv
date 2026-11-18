@@ -101,6 +101,69 @@ class RecordingLibraryTest {
     }
 
     @Test
+    fun oldestSortPutsDatelessRecordingsLast() {
+        val dateless = rec("r-nostart", started = 0L)
+        val out = RecordingLibrary.sortAndFilter(
+            listOf(dateless, newest, oldest), RecordingLibrary.Sort.OLDEST, RecordingLibrary.Filter.ALL
+        )
+        // A recording with no start time recorded has an unknown
+        // date — it is not the "oldest", it goes last.
+        assertEquals(listOf(oldest, newest, dateless), out)
+    }
+
+    @Test
+    fun newestSortPutsDatelessRecordingsLast() {
+        val dateless = rec("r-nostart", started = 0L)
+        val out = RecordingLibrary.sortAndFilter(
+            listOf(dateless, newest, oldest), RecordingLibrary.Sort.NEWEST, RecordingLibrary.Filter.ALL
+        )
+        assertEquals(listOf(newest, oldest, dateless), out)
+    }
+
+    @Test
+    fun newestSortMultipleDatelessRecordingsStayIdOrderedAtEnd() {
+        val r1 = rec("a", started = 0L)
+        val r2 = rec("b", started = 0L)
+        val r3 = rec("c", started = 500L)
+        val out = RecordingLibrary.sortAndFilter(
+            listOf(r1, r2, r3), RecordingLibrary.Sort.NEWEST, RecordingLibrary.Filter.ALL
+        )
+        assertEquals(listOf(r3, r1, r2), out)
+    }
+
+    @Test
+    fun largestSortDatelessRecordingDoesNotAffectByteSort() {
+        val r1 = rec("a", started = 0L, bytes = 50L)
+        val r2 = rec("b", started = 1000L, bytes = 10L)
+        val r3 = rec("c", started = 2000L, bytes = 100L)
+        val out = RecordingLibrary.sortAndFilter(
+            listOf(r1, r2, r3), RecordingLibrary.Sort.LARGEST, RecordingLibrary.Filter.ALL
+        )
+        assertEquals(listOf(r3, r1, r2), out)
+    }
+
+    @Test
+    fun smallestSortDatelessRecordingDoesNotAffectByteSort() {
+        val r1 = rec("a", started = 0L, bytes = 50L)
+        val r2 = rec("b", started = 1000L, bytes = 10L)
+        val r3 = rec("c", started = 2000L, bytes = 100L)
+        val out = RecordingLibrary.sortAndFilter(
+            listOf(r1, r2, r3), RecordingLibrary.Sort.SMALLEST, RecordingLibrary.Filter.ALL
+        )
+        assertEquals(listOf(r2, r1, r3), out)
+    }
+
+    @Test
+    fun nameSortNamesDifferingOnlyByCaseFallBackToId() {
+        val r1 = rec("b", name = "CNN")
+        val r2 = rec("a", name = "cnn")
+        val out = RecordingLibrary.sortAndFilter(
+            listOf(r1, r2), RecordingLibrary.Sort.NAME, RecordingLibrary.Filter.ALL
+        )
+        assertEquals(listOf(r2, r1), out)
+    }
+
+    @Test
     fun sortTiesFallBackToIdSoOrderIsStable() {
         val a = rec("r-a", started = 1_000_000L)
         val b = rec("r-b", started = 1_000_000L)

@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 8.3.1: re-arm scheduled-recording alarms after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -83,6 +85,16 @@
         <receiver
             android:name=".RecordStartReceiver"
             android:exported="false" />
+
+        <!-- 8.3.1: alarms do not survive a reboot — re-arm the
+             scheduled-recording start alarms after one. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- 8.0.0: share the backup file (written to the cache dir)
              with other apps — the share sheet gets a content:// URI,

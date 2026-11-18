@@ -224,10 +224,29 @@ Rules (from Chuni, 2026-11-17):
   unit tests (1 fixed: wrong expected spacing in cleanField);
   GLM 429'd and sat this one out.
 
-### 8.3.1 (planned) — Patch
+### 8.3.1 ✅ (this release) — Patch
 
-- Fixes + polish from 8.3.0 testing on the TV: scheduled-record
-  firing while the app is closed, list sorting, and storage math.
+- Scheduled-record firing while the app is closed: the start
+  alarm is now `setAlarmClock` instead of `setAndAllowWhileIdle`
+  — an alarm-clock alarm is exact (recording starts on time) and
+  grants the Android 12+ exemption to start the foreground
+  RecordingService from the background, which the inexact alarm
+  did not, so a scheduled recording silently never started when
+  the app was closed. A new BOOT_COMPLETED receiver re-arms the
+  start alarms after a reboot (alarms don't survive one), and the
+  stop receiver no longer crashes if the service isn't running.
+- List sorting: recordings with no start time recorded (unknown
+  date) sort last in both NEWEST and OLDEST instead of first as
+  the "oldest"; name sort uses Locale.ROOT so device locale
+  can't reorder names.
+- Storage math: the totals on the recordings screen and in Stats
+  now use the cache's true on-disk size instead of summing the
+  DownloadIndex's claimed bytes, which can overstate after the
+  LRU evictor drops old segments. Per-recording card sizes still
+  come from the index.
+- Gemini lite reviewed the diff (no findings) and wrote 4 extra
+  unit tests, all verified correct and added; GLM 429'd and sat
+  this one out.
 
 ## 9.x — Experience
 

@@ -1,5 +1,7 @@
 package com.opentv.player
 
+import java.util.Locale
+
 /**
  * 8.3.0 — Pure helpers for the recordings list: sorting +
  * filtering for the recordings screen, and picking which finished
@@ -29,11 +31,20 @@ object RecordingLibrary {
             Filter.FINISHED -> recordings.filter { !it.inProgress }
         }
         return when (sort) {
+            // 8.3.1: a recording with no start time recorded
+            // (startedAtMillis <= 0, old metadata) has an unknown
+            // date — it sorts last in BOTH date orders. Before, it
+            // sorted first as the "oldest", ahead of every real
+            // recording.
             Sort.NEWEST -> filtered.sortedWith(
-                compareByDescending<Recording> { it.startedAtMillis }.thenBy { it.id }
+                compareByDescending<Recording> {
+                    if (it.startedAtMillis <= 0) Long.MIN_VALUE else it.startedAtMillis
+                }.thenBy { it.id }
             )
             Sort.OLDEST -> filtered.sortedWith(
-                compareBy<Recording> { it.startedAtMillis }.thenBy { it.id }
+                compareBy<Recording> {
+                    if (it.startedAtMillis <= 0) Long.MAX_VALUE else it.startedAtMillis
+                }.thenBy { it.id }
             )
             Sort.LARGEST -> filtered.sortedWith(
                 compareByDescending<Recording> { it.bytesDownloaded }.thenBy { it.id }
@@ -41,8 +52,11 @@ object RecordingLibrary {
             Sort.SMALLEST -> filtered.sortedWith(
                 compareBy<Recording> { it.bytesDownloaded }.thenBy { it.id }
             )
+            // 8.3.1: lowercase with an explicit locale — the
+            // default locale's case rules (Turkish 'I') could order
+            // names differently per device.
             Sort.NAME -> filtered.sortedWith(
-                compareBy<Recording> { it.channelName.lowercase() }.thenBy { it.id }
+                compareBy<Recording> { it.channelName.lowercase(Locale.ROOT) }.thenBy { it.id }
             )
         }
     }

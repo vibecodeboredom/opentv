@@ -146,13 +146,21 @@ object RecordingManager {
     }
 
     /**
-     * 8.3.0 — Schedule a recording to START at a future programme's
+     * 8.3.1 — Schedule a recording to START at a future programme's
      * start time. Fires [RecordStartReceiver] at
      * [recording.startMillis]; the receiver starts the recording and
-     * schedules its stop. Inexact like the stop alarm (no exact-alarm
-     * permission needed), so it may land a few minutes late. The
-     * request code comes from the schedule's id, so two programmes
-     * on one channel never share an alarm.
+     * schedules its stop. Uses setAlarmClock, not
+     * setAndAllowWhileIdle: an alarm-clock alarm is exact (the
+     * recording starts on time instead of a few minutes late) AND
+     * it grants the app a temporary exemption from Android 12's
+     * background foreground-service restriction. The receiver has
+     * to start the foreground RecordingService while the app is
+     * closed, and a plain inexact alarm does not grant that — the
+     * start threw ForegroundServiceStartNotAllowedException and the
+     * recording silently never happened. setAlarmClock needs no
+     * SCHEDULE_EXACT_ALARM permission. The request code comes from
+     * the schedule's id, so two programmes on one channel never
+     * share an alarm.
      */
     fun scheduleRecording(context: Context, recording: ScheduledRecordings.ScheduledRecording) {
         val intent = Intent(context, RecordStartReceiver::class.java).apply {
@@ -165,7 +173,23 @@ object RecordingManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, recording.startMillis, pending)
+        alarm.setAlarmClock(
+            AlarmManager.AlarmClockInfo(recording.startMillis, null),
+            pending
+        )
+    }
+
+    /**
+     * 8.3.1 — Re-arm the start alarms for every upcoming scheduled
+     * recording. Alarms do not survive a reboot, so the boot
+     * receiver calls this — without it a schedule made before a
+     * reboot would sit in the list looking scheduled and never
+     * fire. Returns how many alarms were re-armed.
+     */
+    fun rearmScheduledRecordingAlarms(context: Context): Int {
+        val upcoming = PlaylistRepository.scheduledRecordings(context)
+        for (recording in upcoming) scheduleRecording(context, recording)
+        return upcoming.size
     }
 
     /** 8.3.0 — Cancel a scheduled recording's start alarm. The
@@ -280,9 +304,18 @@ object RecordingManager {
         return out.sortedByDescending { it.startedAtMillis }
     }
 
-    /** Total bytes used by recordings on disk. */
-    fun totalBytesUsed(context: Context): Long =
-        listRecordings(context).sumOf { it.bytesDownloaded }
+    /**
+     * 8.3.1 — Actual bytes the recordings occupy on disk. The
+     * DownloadIndex's bytesDownloaded can overstate it: the cache's
+     * LRU evictor may drop segments of old recordings once the
+     * cache passes its cap, and the index never learns. The cache
+     * holds only recording downloads (playback never writes to
+     * it), so its on-disk size is the true total — use this for
+     * the totals the user sees. Per-recording sizes still come
+     * from the index; after eviction a single card can claim
+     * slightly more than its share on disk.
+     */
+    fun diskBytesUsed(context: Context): Long = getCache(context).cacheSpace
 
     fun formatBytes(bytes: Long): String = when {
         bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)

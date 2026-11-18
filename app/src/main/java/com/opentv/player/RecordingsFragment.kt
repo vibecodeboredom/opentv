@@ -73,10 +73,11 @@ class RecordingsFragment : BrowseSupportFragment() {
                 recordings = all.filter { it.id !in deletedIds }
             }
         }
-        // Total bytes from the list already fetched — the old code
-        // called totalBytesUsed, which re-ran the whole DownloadIndex
-        // query just to sum the same rows.
-        val used = recordings.sumOf { it.bytesDownloaded }
+        // 8.3.1: the total is the true on-disk figure
+        // (diskBytesUsed), not the sum of the index's claimed
+        // bytes — the cache's LRU evictor may have dropped segments
+        // of old recordings, which the index never learns.
+        val used = RecordingManager.diskBytesUsed(requireContext())
         title = if (recordings.isEmpty()) {
             getString(R.string.recordings)
         } else {
