@@ -33,6 +33,25 @@ object BackupManager {
         val localText: String? = null
     )
 
+    /** One programme reminder in a backup (Nova 8.0.0 store). */
+    data class BackupReminder(
+        val channelId: String,
+        val channelName: String,
+        val startMillis: Long,
+        val stopMillis: Long,
+        val title: String
+    )
+
+    /** One scheduled recording in a backup (Nova 8.2.0 store). */
+    data class BackupScheduled(
+        val channelId: String,
+        val channelName: String,
+        val channelUrl: String,
+        val startMillis: Long,
+        val stopMillis: Long,
+        val title: String
+    )
+
     /** Everything a backup carries. */
     data class BackupData(
         val playlists: List<BackupPlaylist>,
@@ -86,7 +105,36 @@ object BackupManager {
          * defaults wipe the user's current choices (same fix as
          * 8.1.1's group overrides). Defaults true: data built in
          * code is a current-version backup. */
-        val hasAccessibilitySettings: Boolean = true
+        val hasAccessibilitySettings: Boolean = true,
+        /** Combine — Nova's data: the custom favorites order,
+         * programme reminders, scheduled recordings and guide
+         * keywords, plus Nova's preferences (accent, guide text
+         * size, favorites zap, night dim, quality mode, guide
+         * zoom, idle saver, surf interval, recordings size-cap).
+         * A pre-combine Juniper backup has none of these keys. */
+        val favoriteOrder: List<String> = emptyList(),
+        val reminders: List<BackupReminder> = emptyList(),
+        val scheduledRecordings: List<BackupScheduled> = emptyList(),
+        val keywords: List<String> = emptyList(),
+        val accentChoice: Int = 0,
+        val guideTextSize: Int = 0,
+        val favoritesZap: Boolean = false,
+        val nightDimPercent: Int = 0,
+        val qualityMode: Int = 0,
+        val guideZoomHours: Int = 3,
+        val idleSaverEnabled: Boolean = true,
+        val surfIntervalSeconds: Int = 12,
+        val autoDeleteCapBytes: Long = 0L,
+        /**
+         * Whether this backup actually carried the Nova-side data
+         * above. A pre-combine Juniper backup has no such keys and
+         * decodes to the defaults; restore must not let those
+         * defaults wipe the user's current Nova data (same fix as
+         * 8.1.1's group overrides). Defaults true: data built in
+         * code is a current-version backup. A backup in Nova's own
+         * "opentv-nova-backup" format always carries Nova data.
+         */
+        val hasNovaData: Boolean = true
     )
 
     /** What a restore did, for the toast. */
@@ -127,6 +175,28 @@ object BackupManager {
                 "order" to data.groupOverrides.order,
                 "moves" to data.groupOverrides.moves
             ),
+            // Combine — Nova's data (see BackupData.hasNovaData).
+            "favoriteOrder" to data.favoriteOrder,
+            "reminders" to data.reminders.map { r ->
+                linkedMapOf<String, Any?>(
+                    "channelId" to r.channelId,
+                    "channelName" to r.channelName,
+                    "startMillis" to r.startMillis,
+                    "stopMillis" to r.stopMillis,
+                    "title" to r.title
+                )
+            },
+            "scheduledRecordings" to data.scheduledRecordings.map { r ->
+                linkedMapOf<String, Any?>(
+                    "channelId" to r.channelId,
+                    "channelName" to r.channelName,
+                    "channelUrl" to r.channelUrl,
+                    "startMillis" to r.startMillis,
+                    "stopMillis" to r.stopMillis,
+                    "title" to r.title
+                )
+            },
+            "keywords" to data.keywords,
             "settings" to linkedMapOf<String, Any?>(
                 "guideOpensOnCurrentChannel" to data.guideOpensOnCurrentChannel,
                 "tvInfoFade" to data.tvInfoFade,
@@ -142,7 +212,17 @@ object BackupManager {
                 "reducedAnimations" to data.reducedAnimations,
                 "largerText" to data.largerText,
                 "speakChannelNames" to data.speakChannelNames,
-                "longPressOkAction" to data.longPressOkAction
+                "longPressOkAction" to data.longPressOkAction,
+                // Combine — Nova's preferences.
+                "accentChoice" to data.accentChoice,
+                "guideTextSize" to data.guideTextSize,
+                "favoritesZap" to data.favoritesZap,
+                "nightDimPercent" to data.nightDimPercent,
+                "qualityMode" to data.qualityMode,
+                "guideZoomHours" to data.guideZoomHours,
+                "idleSaverEnabled" to data.idleSaverEnabled,
+                "surfIntervalSeconds" to data.surfIntervalSeconds,
+                "autoDeleteCapBytes" to data.autoDeleteCapBytes
             )
         )
         return Json.stringify(root)
@@ -152,6 +232,11 @@ object BackupManager {
      * backup at all (bad JSON, wrong format, newer version than this
      * build understands). Missing fields fall back to the defaults,
      * so a backup from an older 8.x still restores. */
+    /** Nova's own backup format marker (see NovaBackup) — decode
+     * accepts it too, so a backup written by the Nova line
+     * restores here with nothing dropped. */
+    const val NOVA_FORMAT = "opentv-nova-backup"
+
     fun decode(text: String): Result<BackupData> {
         val parsed = try {
             Json.parse(text)
@@ -161,9 +246,15 @@ object BackupManager {
         val root = parsed as? Map<*, *> ?: return Result.failure(
             IllegalArgumentException("Backup is not a JSON object")
         )
-        if (root["format"] != FORMAT) {
-            return Result.failure(IllegalArgumentException("Not an OpenTV backup file"))
+        return when (root["format"]) {
+            FORMAT -> decodeCombined(root)
+            NOVA_FORMAT -> decodeNova(root)
+            else -> Result.failure(IllegalArgumentException("Not an OpenTV backup file"))
         }
+    }
+
+    /** Decode the unified ("opentv-backup") format. */
+    private fun decodeCombined(root: Map<*, *>): Result<BackupData> {
         val version = (root["version"] as? Number)?.toInt() ?: 0
         if (version < 1 || version > VERSION) {
             return Result.failure(
@@ -181,6 +272,12 @@ object BackupManager {
         // 9.3.1: the 9.3.0 accessibility settings were added as one
         // batch — the held-OK key marks the batch.
         val hasAccessibilitySettings = settings?.containsKey("longPressOkAction") ?: false
+        // Combine: the Nova-side data was added as one batch — any
+        // of its top-level keys marks the batch.
+        val hasNovaData = root.containsKey("favoriteOrder") ||
+            root.containsKey("reminders") ||
+            root.containsKey("scheduledRecordings") ||
+            root.containsKey("keywords")
         val groupOverrides = GroupOverrides(
             renames = stringMap(groupOverridesRaw?.get("renames")),
             order = stringList(groupOverridesRaw?.get("order")),
@@ -225,10 +322,131 @@ object BackupManager {
                 largerText = settings?.get("largerText") as? Boolean ?: false,
                 speakChannelNames = settings?.get("speakChannelNames") as? Boolean ?: false,
                 longPressOkAction = settings?.get("longPressOkAction") as? String ?: "menu",
-                hasAccessibilitySettings = hasAccessibilitySettings
+                hasAccessibilitySettings = hasAccessibilitySettings,
+                favoriteOrder = stringList(root["favoriteOrder"]),
+                reminders = parseReminders(root["reminders"]),
+                scheduledRecordings = parseScheduled(root["scheduledRecordings"]),
+                keywords = stringList(root["keywords"]),
+                accentChoice = (settings?.get("accentChoice") as? Number)?.toInt() ?: 0,
+                guideTextSize = (settings?.get("guideTextSize") as? Number)?.toInt() ?: 0,
+                favoritesZap = settings?.get("favoritesZap") as? Boolean ?: false,
+                nightDimPercent = (settings?.get("nightDimPercent") as? Number)?.toInt() ?: 0,
+                qualityMode = (settings?.get("qualityMode") as? Number)?.toInt() ?: 0,
+                guideZoomHours = (settings?.get("guideZoomHours") as? Number)?.toInt() ?: 3,
+                idleSaverEnabled = settings?.get("idleSaverEnabled") as? Boolean ?: true,
+                surfIntervalSeconds = (settings?.get("surfIntervalSeconds") as? Number)?.toInt() ?: 12,
+                autoDeleteCapBytes = (settings?.get("autoDeleteCapBytes") as? Number)?.toLong() ?: 0L,
+                hasNovaData = hasNovaData
             )
         )
     }
+
+    /** Decode Nova's own ("opentv-nova-backup") format into the
+     * unified data. A Nova backup never carried Juniper's
+     * group overrides, track picks or appearance/accessibility
+     * settings, so those decode to their defaults and restore
+     * leaves the current ones alone (hasGroupOverrides /
+     * hasAccessibilitySettings false). */
+    private fun decodeNova(root: Map<*, *>): Result<BackupData> {
+        val version = (root["version"] as? Number)?.toInt() ?: 0
+        if (version < 1 || version > VERSION) {
+            return Result.failure(
+                IllegalArgumentException("Backup version $version is not supported")
+            )
+        }
+        val settings = root["settings"] as? Map<*, *>
+        val playlists = (root["playlists"] as? List<*>)?.mapNotNull { item ->
+            val entry = item as? Map<*, *> ?: return@mapNotNull null
+            val name = entry["name"] as? String ?: return@mapNotNull null
+            val url = entry["url"] as? String ?: return@mapNotNull null
+            BackupPlaylist(
+                name = name,
+                url = url,
+                enabled = entry["enabled"] as? Boolean ?: true,
+                localText = null
+            )
+        } ?: emptyList()
+        val epgUrl = root["epgUrl"] as? String
+        return Result.success(
+            BackupData(
+                playlists = playlists,
+                activePlaylistUrl = root["activePlaylistUrl"] as? String,
+                epgUrls = if (epgUrl.isNullOrBlank()) emptyList() else listOf(epgUrl),
+                uploadUrl = root["uploadUrl"] as? String ?: "",
+                favorites = stringList(root["favorites"]).toSet(),
+                hiddenChannels = stringList(root["hiddenChannels"]).toSet(),
+                epgOverrides = stringMap(root["epgOverrides"]),
+                trackPrefs = emptyMap(),
+                groupOverrides = GroupOverrides(),
+                hasGroupOverrides = false,
+                guideOpensOnCurrentChannel = settings?.get("guideOpensOnCurrentChannel") as? Boolean ?: true,
+                tvInfoFade = settings?.get("tvInfoFade") as? Boolean ?: true,
+                guideShowsPast = settings?.get("guideShowsPast") as? Boolean ?: true,
+                guideFavoritesOnly = false,
+                channelListSize = settings?.get("channelListSize") as? String ?: "small",
+                guideWindowSize = "6",
+                autoDeleteRecordingsDays = 0,
+                launchBehaviour = "home",
+                guideDensity = "comfortable",
+                fontSize = "medium",
+                highContrastFocus = false,
+                reducedAnimations = false,
+                largerText = false,
+                speakChannelNames = false,
+                longPressOkAction = "menu",
+                hasAccessibilitySettings = false,
+                favoriteOrder = stringList(root["favoriteOrder"]),
+                reminders = parseReminders(root["reminders"]),
+                scheduledRecordings = parseScheduled(root["scheduledRecordings"]),
+                keywords = stringList(root["keywords"]),
+                accentChoice = (settings?.get("accentChoice") as? Number)?.toInt() ?: 0,
+                guideTextSize = (settings?.get("guideTextSize") as? Number)?.toInt() ?: 0,
+                favoritesZap = settings?.get("favoritesZap") as? Boolean ?: false,
+                nightDimPercent = (settings?.get("nightDimPercent") as? Number)?.toInt() ?: 0,
+                qualityMode = (settings?.get("qualityMode") as? Number)?.toInt() ?: 0,
+                guideZoomHours = (settings?.get("guideZoomHours") as? Number)?.toInt() ?: 3,
+                idleSaverEnabled = settings?.get("idleSaverEnabled") as? Boolean ?: true,
+                surfIntervalSeconds = (settings?.get("surfIntervalSeconds") as? Number)?.toInt() ?: 12,
+                autoDeleteCapBytes = (settings?.get("recordingAutoDeleteCapBytes") as? Number)?.toLong() ?: 0L,
+                hasNovaData = true
+            )
+        )
+    }
+
+    /** Parse a reminders list (each entry a map); malformed
+     * entries are skipped, one bad entry never breaks the rest. */
+    private fun parseReminders(value: Any?): List<BackupReminder> =
+        (value as? List<*>)?.mapNotNull { item ->
+            val entry = item as? Map<*, *> ?: return@mapNotNull null
+            val channelId = entry["channelId"] as? String ?: return@mapNotNull null
+            val start = (entry["startMillis"] as? Number)?.toLong() ?: return@mapNotNull null
+            val stop = (entry["stopMillis"] as? Number)?.toLong() ?: return@mapNotNull null
+            BackupReminder(
+                channelId = channelId,
+                channelName = entry["channelName"] as? String ?: "",
+                startMillis = start,
+                stopMillis = stop,
+                title = entry["title"] as? String ?: ""
+            )
+        } ?: emptyList()
+
+    /** Parse a scheduled-recordings list (each entry a map);
+     * malformed entries are skipped. */
+    private fun parseScheduled(value: Any?): List<BackupScheduled> =
+        (value as? List<*>)?.mapNotNull { item ->
+            val entry = item as? Map<*, *> ?: return@mapNotNull null
+            val channelId = entry["channelId"] as? String ?: return@mapNotNull null
+            val start = (entry["startMillis"] as? Number)?.toLong() ?: return@mapNotNull null
+            val stop = (entry["stopMillis"] as? Number)?.toLong() ?: return@mapNotNull null
+            BackupScheduled(
+                channelId = channelId,
+                channelName = entry["channelName"] as? String ?: "",
+                channelUrl = entry["channelUrl"] as? String ?: "",
+                startMillis = start,
+                stopMillis = stop,
+                title = entry["title"] as? String ?: ""
+            )
+        } ?: emptyList()
 
     private fun stringList(value: Any?): List<String> =
         (value as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
@@ -287,7 +505,28 @@ object BackupManager {
             speakChannelNames = AppSettings.speakChannelNames(context),
             longPressOkAction = AppSettings.longPressOkActionKey(
                 AppSettings.longPressOkAction(context)
-            )
+            ),
+            // Combine — Nova's data (see BackupData.hasNovaData).
+            favoriteOrder = PlaylistRepository.favoriteOrder(context),
+            reminders = PlaylistRepository.reminders(context).map {
+                BackupReminder(it.channelId, it.channelName, it.startMillis, it.stopMillis, it.title)
+            },
+            scheduledRecordings = PlaylistRepository.scheduledRecordings(context).map {
+                BackupScheduled(
+                    it.channelId, it.channelName, it.channelUrl,
+                    it.startMillis, it.stopMillis, it.title
+                )
+            },
+            keywords = AppSettings.guideKeywords(context),
+            accentChoice = AppSettings.accentChoice(context),
+            guideTextSize = AppSettings.guideTextSize(context),
+            favoritesZap = AppSettings.favoritesZap(context),
+            nightDimPercent = AppSettings.nightDimPercent(context),
+            qualityMode = AppSettings.qualityMode(context),
+            guideZoomHours = AppSettings.guideZoomHours(context),
+            idleSaverEnabled = AppSettings.idleSaverEnabled(context),
+            surfIntervalSeconds = AppSettings.surfIntervalSeconds(context),
+            autoDeleteCapBytes = AppSettings.recordingAutoDeleteCapBytes(context)
         )
     }
 
@@ -396,6 +635,51 @@ object BackupManager {
             AppSettings.setLongPressOkAction(
                 context, AppSettings.parseLongPressOkAction(data.longPressOkAction)
             )
+        }
+        // Combine: only replace the Nova-side data when the backup
+        // actually carried it — a pre-combine Juniper backup decodes
+        // it to the defaults, and applying those would wipe the
+        // user's current favorites order, reminders, scheduled
+        // recordings, keywords and Nova preferences. Scheduled
+        // recordings get their start alarms re-armed (the alarms of
+        // the recordings they replace are cancelled first), so an
+        // imported schedule actually fires.
+        if (data.hasNovaData) {
+            PlaylistRepository.setFavoriteOrder(context, data.favoriteOrder)
+            PlaylistRepository.replaceReminders(
+                context,
+                data.reminders.map {
+                    PlaylistRepository.Reminder(
+                        it.channelId, it.channelName, it.startMillis, it.stopMillis, it.title
+                    )
+                }
+            )
+            for (old in PlaylistRepository.scheduledRecordings(context)) {
+                RecordingManager.cancelRecordingStart(context, old)
+            }
+            val mapped = data.scheduledRecordings.map {
+                PlaylistRepository.ScheduledRecording(
+                    it.channelId, it.channelName, it.channelUrl,
+                    it.startMillis, it.stopMillis, it.title
+                )
+            }
+            PlaylistRepository.replaceScheduledRecordings(context, mapped)
+            val now = System.currentTimeMillis()
+            for (entry in mapped) {
+                if (entry.startMillis > now) {
+                    RecordingManager.scheduleRecordingStart(context, entry)
+                }
+            }
+            AppSettings.setGuideKeywords(context, data.keywords)
+            AppSettings.setAccentChoice(context, data.accentChoice)
+            AppSettings.setGuideTextSize(context, data.guideTextSize)
+            AppSettings.setFavoritesZap(context, data.favoritesZap)
+            AppSettings.setNightDimPercent(context, data.nightDimPercent)
+            AppSettings.setQualityMode(context, data.qualityMode)
+            AppSettings.setGuideZoomHours(context, data.guideZoomHours)
+            AppSettings.setIdleSaverEnabled(context, data.idleSaverEnabled)
+            AppSettings.setSurfIntervalSeconds(context, data.surfIntervalSeconds)
+            AppSettings.setRecordingAutoDeleteCapBytes(context, data.autoDeleteCapBytes)
         }
         return RestoreReport(
             playlists = playlistCount,
