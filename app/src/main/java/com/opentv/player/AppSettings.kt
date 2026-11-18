@@ -375,15 +375,6 @@ object AppSettings {
     fun guideTextScale(context: Context): Float =
         if (guideTextSize(context) == GUIDE_TEXT_LARGE) 1.2f else 1.0f
 
-    /** Guide shows favorites only (default OFF). 7.0.0: toggled from
-     * the guide menu or Settings → Guide & playback. */
-    fun guideFavoritesOnly(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_GUIDE_FAVORITES_ONLY, false)
-
-    fun setGuideFavoritesOnly(context: Context, value: Boolean) {
-        prefs(context).edit().putBoolean(KEY_GUIDE_FAVORITES_ONLY, value).apply()
-    }
-
     /** Guide window size (7.2.0): how many hours forward the guide
      * shows from its anchor. 6 h is the old behaviour; the past
      * hours from the show-past setting are added on top. */
