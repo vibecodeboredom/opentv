@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 9.0.0: TV home screen host — just a frame for TvHomeFragment
+     (the Leanback browse rows), on the app's dark grey background. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tv_home_frame"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/opentv_background" />

@@ -8,8 +8,10 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,15 +54,73 @@ object PlaylistRepository {
     private const val KEY_ACTIVE_PLAYLIST = "active_playlist"
     private const val KEY_UPLOAD_URL = "upload_url"
     private const val KEY_FAVORITES = "favorites"
+    /** 9.1.0 (Nova): the user's custom favorites order, one
+     * channel id per line. Empty until the user reorders —
+     * playlist order rules while it is unset. Once set it is a
+     * permutation of the favorites: toggleFavorite appends new
+     * favorites at the end and drops removed ones, so the stored
+     * order never names a channel that is not a favorite. */
+    private const val KEY_FAVORITE_ORDER = "favorite_order"
     private const val KEY_HIDDEN = "hidden_channels"
     private const val KEY_EPG_OVERRIDES = "epg_overrides"
+    /** Combined (Juniper 8.2.0): per-source EPG fetch status,
+     * encoded by EpgQuality.encodeStatuses. */
+    private const val KEY_EPG_SOURCE_STATUS = "epg_source_status"
+    /** 8.1.0: custom channel groups — renames, order, moves. */
+    private const val KEY_GROUP_RENAMES = "group_renames"
+    private const val KEY_GROUP_ORDER = "group_order"
+    private const val KEY_GROUP_MOVES = "group_moves"
+    /** Scheduled recordings, one per line (see
+     * [scheduledRecordings]). */
+    private const val KEY_SCHEDULED_RECORDINGS = "scheduled_recordings"
     private const val KEY_RECENT = "recent_channels"
     /** 4.9.3: guide search queries, one per line, most recent first. */
     private const val KEY_RECENT_SEARCHES = "recent_searches"
     /** Id of the last channel that actually played (4.6.0: resume it on launch). */
     private const val KEY_LAST_CHANNEL = "last_channel"
-    /** The overlay's channel strip shows this many most recent channels. */
-    private const val MAX_RECENT = 3
+    /** 7.2.1 (Nova): the channel watched before the last one — the
+     * previous-channel swap target, persisted so the swap survives
+     * an app restart. */
+    private const val KEY_PREVIOUS_CHANNEL = "previous_channel"
+    /** 7.0.0 (Nova): the guide position last focused (channel id +
+     * programme start), so the guide can return to it on open. */
+    private const val KEY_GUIDE_FOCUS_CHANNEL = "guide_focus_channel"
+    private const val KEY_GUIDE_FOCUS_START = "guide_focus_start"
+    /** 8.0.0 (Nova): programme reminders, one per line, fields
+     * separated by \u0001 (the playlists key's separator): channel
+     * id, channel name, start millis, stop millis, title. The
+     * channel name and title are stored with the reminder so the
+     * prompt and the list can name them even if the playlist has
+     * changed since the reminder was set. */
+    private const val KEY_REMINDERS = "programme_reminders"
+
+    /** 9.0.0 (Nova): recording playback progress, same
+     * one-per-line storage as the reminders: recording id,
+     * position millis, duration millis, last-watched millis.
+     * Keyed by the recording's DownloadManager id — the stable
+     * identity a recording keeps for its whole life. */
+    private const val KEY_RECORDING_PROGRESS = "recording_progress"
+    /** 9.1.0 (Nova): catch-up playback progress, same one-per-line
+     * storage: channel id, programme start millis, programme stop
+     * millis, position millis, duration millis, last-watched
+     * millis. Keyed by channel + programme start — the identity a
+     * replay keeps; the same programme on the same channel is the
+     * same replay. */
+    private const val KEY_CATCHUP_PROGRESS = "catchup_progress"
+    /** 9.1.0 (Nova): how many catch-up resume points are kept.
+     * A replay is only resumable inside its archive window, so a
+     * small most-recent cap loses nothing real. */
+    private const val MAX_CATCHUP_PROGRESS = 25
+    /** How many recent channels are remembered. The overlay strip
+     * shows the first 3; 7.0.0 (Nova) keeps 12 so the home screen's
+     * Recently watched row and the sidebar History group have a
+     * real history to show. */
+    /** 9.0.0: how many most recent channels are kept (most recent
+     * first). The TV home's Recent rail and the sidebar History
+     * list show up to this many; the playback overlay strip still
+     * caps itself at 3 (its own take(3)), so it is unchanged. Was
+     * 3 — too thin for a rail. */
+    private const val MAX_RECENT = 12
     /** Guide search remembers this many past queries. */
     private const val MAX_RECENT_SEARCHES = 8
     private const val CACHE_FILE = "playlist.m3u"
@@ -81,6 +141,10 @@ object PlaylistRepository {
     /** Playlist is re-downloaded at most every 6h; EPG at most every 12h. */
     private const val PLAYLIST_TTL_MS = 6L * 60 * 60 * 1000
     private const val EPG_TTL_MS = 12L * 60 * 60 * 1000
+    /** 9.2.0: the EPG warm-up in preload() waits this long after
+     * process start, so the playlist load — the critical path to
+     * the first screen — gets the IO/CPU first on a 1 GB box. */
+    private const val EPG_PRELOAD_DELAY_MS = 2_000L
 
     /** In-memory cache so a playlist / EPG is never re-downloaded or
      * re-parsed twice in one session. @Volatile: replaced atomically,
@@ -99,6 +163,15 @@ object PlaylistRepository {
     /** Parsed EPG-overrides map, cached the same way. Only
      * setEpgOverride() changes it, and it invalidates the cache. */
     @Volatile private var epgOverridesCache: Map<String, String>? = null
+
+    /** Parsed group-overrides, cached the same way. Only the
+     * setGroup*() / moveChannelToGroup() calls change it, and they
+     * invalidate the cache. */
+    @Volatile private var groupOverridesCache: GroupOverrides? = null
+
+    /** Parsed scheduled recordings, cached the same way. Only the
+     * add/removeScheduledRecording() calls change it, and they
+     * invalidate the cache. */
 
     /**
      * Background refresh (4.7.0): when a snapshot is stale, the fresh
@@ -123,7 +196,10 @@ object PlaylistRepository {
     private val loadLock = Any()
     @Volatile private var playlistLoad: Deferred<Result<List<Channel>>>? = null
     @Volatile private var epgLoad: Deferred<Map<String, List<EpgParser.Programme>>>? = null
-
+    /** Combined (Juniper 8.2.1): the forced EPG refresh is
+     * single-flight too — two taps on the guide's "Refresh guide
+     * data" share one download + parse instead of racing two. */
+    @Volatile private var epgRefreshLoad: Deferred<Map<String, List<EpgParser.Programme>>>? = null
     private fun playlistLoadDeferred(context: Context): Deferred<Result<List<Channel>>> {
         playlistLoad?.let { return it }
         synchronized(loadLock) {
@@ -188,15 +264,59 @@ object PlaylistRepository {
      * reads them (active playlist, configured EPG URLs). Failures are
      * swallowed: a failed warm-up leaves the caches cold and the next
      * screen load behaves exactly as it did before the preload existed.
+     *
+     * 9.2.0: the playlist load starts at once (it is the critical path
+     * to the first screen); the EPG warm-up waits 2 s so the two heavy
+     * snapshot reads do not contend on a 1 GB box. A screen opening
+     * the guide in the meantime starts the EPG load immediately
+     * (single-flight), so the delay only ever reorders background
+     * work, never the user's wait.
+     *
+     * 9.2.1: the 2 s is a cap, not a fixed wait — the delay only
+     * exists to let the playlist win the IO race, so once the
+     * playlist load finishes there is nothing left to protect and
+     * the EPG warm-up starts at once (startEpgWarmupWhenReady). On
+     * a fast box that hands the guide its EPG head start back: before,
+     * a cold start that reached the guide inside the 2 s window
+     * found the EPG still unwarm and painted "No information"
+     * placeholders until the fill-in landed.
      */
     fun preload(context: Context) {
         try {
             val appContext = context.applicationContext
-            playlistLoadDeferred(appContext)
-            epgLoadDeferred(appContext)
+            val playlist = playlistLoadDeferred(appContext)
+            refreshScope.launch {
+                startEpgWarmupWhenReady(playlist) { epgLoadDeferred(appContext) }
+            }
         } catch (ignored: Exception) {
             // Best-effort: the warm-up must never break app startup.
         }
+    }
+
+    /**
+     * 9.2.1: start the EPG warm-up as soon as the playlist load
+     * finishes, or when [delayMs] elapses — whichever comes first.
+     * A stalled playlist load can never starve the EPG warm-up past
+     * the cap. The playlist Deferred is only awaited, never
+     * cancelled, so a slow load keeps running for its own awaiters.
+     */
+    internal suspend fun startEpgWarmupWhenReady(
+        playlistLoad: Deferred<Result<List<Channel>>>,
+        delayMs: Long = EPG_PRELOAD_DELAY_MS,
+        startEpg: () -> Unit
+    ) {
+        withTimeoutOrNull(delayMs) { playlistLoad.await() }
+        startEpg()
+    }
+
+    /** 9.2.0: drop the in-memory playlist + EPG caches (memory
+     * pressure, or the app backgrounded — see MemoryPressure). Both
+     * rebuild from the SQLite snapshot on the next load, so this
+     * costs the user nothing. An in-flight load is unaffected: its
+     * Deferred re-sets the cache when it completes. */
+    fun releaseMemoryCaches() {
+        playlistCache = null
+        epgCache = null
     }
 
     /** The in-memory playlist when it is already loaded and fresh, else
@@ -369,6 +489,24 @@ object PlaylistRepository {
      * un-loadable entry can never be created.
      */
     fun saveLocalPlaylist(context: Context, name: String, text: String): Playlist? {
+        val entry = storeLocalPlaylistFile(context, name, text) ?: return null
+        val list = playlists(context).toMutableList()
+        // A distinct file name per upload, so this is always an append.
+        list += entry
+        savePlaylists(context, list)
+        return entry
+    }
+
+    /**
+     * 8.0.0 — Write an M3U text to a local file and return its
+     * playlist entry WITHOUT touching the playlist list. The backup
+     * restore uses this so it can build the new list first and
+     * replace it in one go (saveLocalPlaylist appends to the old
+     * list, which would leave strays behind when the restore then
+     * replaces it). Returns null when the text is not a usable
+     * playlist (same checks as saveLocalPlaylist).
+     */
+    fun storeLocalPlaylistFile(context: Context, name: String, text: String): Playlist? {
         if (!text.trimStart().startsWith("#EXTM3U")) return null
         if (M3uParser.parse(text).isEmpty()) return null
         val fileName = SHARED_FILE_PREFIX + System.currentTimeMillis() + ".m3u"
@@ -376,12 +514,7 @@ object PlaylistRepository {
             context.openFileOutput(fileName, Context.MODE_PRIVATE)
                 .use { it.write(text.toByteArray(Charsets.UTF_8)) }
             val cleanName = cleanPlaylistName(name).ifBlank { "Shared playlist" }
-            val entry = Playlist(cleanName, LOCAL_SCHEME + fileName)
-            val list = playlists(context).toMutableList()
-            // A distinct file name per upload, so this is always an append.
-            list += entry
-            savePlaylists(context, list)
-            entry
+            Playlist(cleanName, LOCAL_SCHEME + fileName)
         } catch (ignored: Exception) {
             null
         }
@@ -397,6 +530,122 @@ object PlaylistRepository {
         } catch (ignored: Exception) {
             null
         }
+    }
+
+    /**
+     * 8.0.0 — Replace the whole playlist list at once (backup
+     * restore). The list must have at least one entry and at least
+     * one enabled entry, and the active URL must be an enabled entry
+     * in it; anything else is refused and the current list is left
+     * alone. Clears the in-memory playlist cache so the next load
+     * fetches the new setup.
+     */
+    fun restorePlaylists(context: Context, list: List<Playlist>, activeUrl: String): Boolean {
+        if (list.isEmpty() || list.none { it.enabled }) return false
+        if (list.none { it.url == activeUrl && it.enabled }) return false
+        savePlaylists(context, list)
+        prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, activeUrl).apply()
+        playlistCache = null
+        return true
+    }
+
+    /** 8.0.0 — Replace the per-channel EPG overrides wholesale
+     * (backup restore). */
+    fun setEpgOverrides(context: Context, overrides: Map<String, String>) {
+        epgOverridesCache = null
+        val raw = overrides.entries.joinToString("\n") { "${it.key}=${it.value}" }
+        prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
+    }
+
+    // ---- Channel groups (8.1.0) ----------------------------------------
+    //
+    // Custom groups are overrides on top of the playlist's own
+    // group-title values — the playlist file is never edited. See
+    // GroupOverrides for the model; the three maps live in three
+    // keys, one per kind, so a rename never has to re-write the
+    // moves and a move never has to re-write the order.
+
+    /** The user's group overrides (renames, order, moves). */
+    fun groupOverrides(context: Context): GroupOverrides {
+        groupOverridesCache?.let { return it }
+        val parsed = GroupOverrides(
+            renames = GroupOverrides.decodeMap(
+                prefs(context).getString(KEY_GROUP_RENAMES, "") ?: ""
+            ),
+            order = GroupOverrides.decodeOrder(
+                prefs(context).getString(KEY_GROUP_ORDER, "") ?: ""
+            ),
+            moves = GroupOverrides.decodeMap(
+                prefs(context).getString(KEY_GROUP_MOVES, "") ?: ""
+            )
+        )
+        groupOverridesCache = parsed
+        return parsed
+    }
+
+    /** 8.1.0 — Replace the group overrides wholesale (backup restore).
+     * 8.1.1: the set is sanitized first, so a foreign backup can
+     * never store a value that breaks the line format (a rename
+     * with a newline in it would split into two stored lines and
+     * corrupt the entry on the next read). */
+    fun setGroupOverrides(context: Context, overrides: GroupOverrides) {
+        val clean = GroupOverrides.sanitize(overrides)
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(clean.renames))
+            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(clean.order))
+            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(clean.moves))
+            .apply()
+    }
+
+    /** Rename a playlist group (by its playlist name). A blank new
+     * name clears the rename, so the group shows under its playlist
+     * name again. Names are cleaned so a stored line stays one line. */
+    fun setGroupRename(context: Context, group: String, newName: String) {
+        val clean = GroupOverrides.cleanGroupName(newName)
+        val current = groupOverrides(context).renames.toMutableMap()
+        if (clean.isBlank()) current.remove(group) else current[group] = clean
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_RENAMES, GroupOverrides.encodeMap(current))
+            .apply()
+    }
+
+    /** Replace the custom group order wholesale. */
+    fun setGroupOrder(context: Context, order: List<String>) {
+        val clean = order.map { GroupOverrides.cleanGroupName(it) }
+            .filter { it.isNotEmpty() }.distinct()
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_ORDER, GroupOverrides.encodeOrder(clean))
+            .apply()
+    }
+
+    /** Move a channel to another group (by the target group's
+     * playlist name). A blank target clears the move, so the channel
+     * goes back to the group its playlist entry carries. */
+    fun moveChannelToGroup(context: Context, channelId: String, group: String) {
+        val clean = GroupOverrides.cleanGroupName(group)
+        val current = groupOverrides(context).moves.toMutableMap()
+        if (clean.isBlank()) current.remove(channelId) else current[channelId] = clean
+        groupOverridesCache = null
+        prefs(context).edit()
+            .putString(KEY_GROUP_MOVES, GroupOverrides.encodeMap(current))
+            .apply()
+    }
+
+    /** Hide several channels at once (bulk hide, 8.1.0). */
+    fun hideChannels(context: Context, channelIds: Collection<String>) {
+        val current = hiddenChannels(context).toMutableSet()
+        current.addAll(channelIds)
+        prefs(context).edit().putStringSet(KEY_HIDDEN, current).apply()
+    }
+
+    /** Unhide several channels at once (bulk unhide, 8.1.0). */
+    fun unhideChannels(context: Context, channelIds: Collection<String>) {
+        val current = hiddenChannels(context).toMutableSet()
+        current.removeAll(channelIds.toSet())
+        prefs(context).edit().putStringSet(KEY_HIDDEN, current).apply()
     }
 
     private fun savePlaylists(context: Context, list: List<Playlist>) {
@@ -435,6 +684,35 @@ object PlaylistRepository {
     fun epgUrl(context: Context): String =
         prefs(context).getString(KEY_EPG_URL, DEFAULT_EPG_URL) ?: DEFAULT_EPG_URL
 
+    /**
+     * 8.0.0 — EPG sources as a list. The stored string is split on
+     * commas or newlines (the same split the loader uses), so a list
+     * written before 8.0.0 as one comma-separated field reads back
+     * as its sources with no migration. An empty or missing value
+     * falls back to the single default source.
+     */
+    fun epgUrls(context: Context): List<String> =
+        parseEpgUrls(prefs(context).getString(KEY_EPG_URL, null) ?: "")
+
+    /** Split a stored EPG value into its sources (pure, tested). */
+    fun parseEpgUrls(raw: String): List<String> {
+        val urls = raw.split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        return urls.ifEmpty { listOf(DEFAULT_EPG_URL) }
+    }
+
+    /** Replace the EPG source list. Stored newline-joined — the
+     * loader splits on commas or newlines, so both separators read
+     * back, and a newline never appears inside a URL. An empty list
+     * stores the default (the app always needs one source). */
+    fun setEpgUrls(context: Context, urls: List<String>) {
+        val clean = urls.map { it.trim() }
+            .filter { it.startsWith("http://") || it.startsWith("https://") }
+            .distinct()
+            .ifEmpty { listOf(DEFAULT_EPG_URL) }
+        prefs(context).edit().putString(KEY_EPG_URL, clean.joinToString("\n")).apply()
+        epgCache = null
+    }
+
     /** Base URL recordings are uploaded to (HTTP PUT). Empty = not configured. */
     fun uploadUrl(context: Context): String =
         prefs(context).getString(KEY_UPLOAD_URL, "") ?: ""
@@ -472,8 +750,64 @@ object PlaylistRepository {
 
     fun toggleFavorite(context: Context, channelId: String) {
         val current = favorites(context).toMutableSet()
-        if (current.contains(channelId)) current.remove(channelId) else current.add(channelId)
+        val added = channelId !in current
+        if (added) current.add(channelId) else current.remove(channelId)
         prefs(context).edit().putStringSet(KEY_FAVORITES, current).apply()
+        // 9.1.0 (Nova): keep an established custom order in step —
+        // a new favorite joins at the end, a removed one drops
+        // out. While no order is stored the user has never
+        // reordered, so leave it unset and playlist order rules.
+        val order = favoriteOrder(context)
+        if (order.isNotEmpty()) {
+            val updated = when {
+                added && channelId !in order -> order + channelId
+                !added -> order - channelId
+                else -> order
+            }
+            if (updated != order) setFavoriteOrder(context, updated)
+        }
+    }
+
+    /** 9.1.0 (Nova): the stored custom favorites order (channel
+     * ids, most wanted first). May name channels that are no
+     * longer favorites if the store was written before 9.1.0's
+     * toggle maintenance — consumers reconcile, see
+     * [sortByFavoriteOrder]. */
+    fun favoriteOrder(context: Context): List<String> {
+        val raw = prefs(context).getString(KEY_FAVORITE_ORDER, "") ?: ""
+        return raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    /** 9.1.0 (Nova): persist the custom favorites order. */
+    fun setFavoriteOrder(context: Context, ids: List<String>) {
+        prefs(context).edit()
+            .putString(KEY_FAVORITE_ORDER, ids.joinToString("\n"))
+            .apply()
+    }
+
+    /** 9.1.0 (Nova): [favoriteChannels] (in playlist order) with
+     * the user's custom order applied. Until an order is set this
+     * is the list unchanged. */
+    fun applyFavoriteOrder(
+        context: Context,
+        favoriteChannels: List<Channel>
+    ): List<Channel> = sortByFavoriteOrder(favoriteOrder(context), favoriteChannels)
+
+    /** 9.1.0 (Nova): the pure core of [applyFavoriteOrder] —
+     * channels named in [order] come first, in that order; the
+     * rest keep their incoming (playlist) order after them, so
+     * favorites added since the order was set land at the end
+     * and ids that are no longer favorites simply never match.
+     * The sort is stable, which is what keeps the unranked tail
+     * in playlist order. */
+    fun sortByFavoriteOrder(
+        order: List<String>,
+        favoriteChannels: List<Channel>
+    ): List<Channel> {
+        if (order.isEmpty() || favoriteChannels.size < 2) return favoriteChannels
+        val rank = HashMap<String, Int>(order.size)
+        order.forEachIndexed { index, id -> if (id !in rank) rank[id] = index }
+        return favoriteChannels.sortedBy { rank[it.id] ?: Int.MAX_VALUE }
     }
 
     /** Channels the user hid or blocked (by channel id). Hidden from guide + browser. */
@@ -490,13 +824,13 @@ object PlaylistRepository {
         prefs(context).edit().remove(KEY_HIDDEN).apply()
     }
 
-    /** Most recently watched channel ids, most recent first (max 3). */
+    /** Most recently watched channel ids, most recent first (max 12). */
     fun recentChannelIds(context: Context): List<String> {
         val raw = prefs(context).getString(KEY_RECENT, "") ?: ""
         return raw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    /** Record a channel as most recently watched (deduped, max 3). */
+    /** Record a channel as most recently watched (deduped, max 12). */
     fun recordRecentChannel(context: Context, channelId: String) {
         val current = recentChannelIds(context).toMutableList()
         current.remove(channelId)
@@ -551,6 +885,417 @@ object PlaylistRepository {
         prefs(context).edit().putString(KEY_LAST_CHANNEL, channelId).apply()
     }
 
+    /** 7.2.1 (Nova): id of the channel watched before the last
+     * one, or "" when none was recorded. May name a channel that
+     * has since left the playlist — callers resolve it against
+     * the current playlist and treat a miss as "no previous". */
+    fun previousChannelId(context: Context): String =
+        prefs(context).getString(KEY_PREVIOUS_CHANNEL, "") ?: ""
+
+    /** 7.2.1 (Nova): remember the previous-channel swap target. */
+    fun setPreviousChannelId(context: Context, channelId: String) {
+        prefs(context).edit().putString(KEY_PREVIOUS_CHANNEL, channelId).apply()
+    }
+
+    /**
+     * 7.0.0 (Nova) — guide memory: the channel + programme start last
+     * focused in the TV guide, or null when the guide was never used
+     * (or the programme's start wasn't recorded). The guide restores
+     * this position when it is opened without a playing channel
+     * underneath (browse menu / mobile home), instead of always
+     * resetting to the top of the grid.
+     */
+    fun lastGuideFocus(context: Context): Pair<String, Long>? {
+        val channelId = prefs(context).getString(KEY_GUIDE_FOCUS_CHANNEL, null)
+            ?: return null
+        val start = prefs(context).getLong(KEY_GUIDE_FOCUS_START, 0L)
+        return if (start > 0L) channelId to start else null
+    }
+
+    /** Remember the guide position (called on programme-card focus). */
+    fun setLastGuideFocus(context: Context, channelId: String, startMillis: Long) {
+        prefs(context).edit()
+            .putString(KEY_GUIDE_FOCUS_CHANNEL, channelId)
+            .putLong(KEY_GUIDE_FOCUS_START, startMillis)
+            .apply()
+    }
+
+    /** 8.0.0 (Nova): one programme reminder. [channelName] and
+     * [title] are snapshots from when the reminder was set, so the
+     * prompt can name the programme even if the playlist or guide
+     * data has moved on since. */
+    data class Reminder(
+        val channelId: String,
+        val channelName: String,
+        val startMillis: Long,
+        val stopMillis: Long,
+        val title: String
+    )
+
+    /** Field separator for a stored reminder line (see KEY_REMINDERS). */
+    private const val REMINDER_SEP = "\u0001"
+
+    /** Reminder text fields are single-line by construction: strip
+     * the separator and any newlines an EPG title might carry. */
+    private fun reminderField(raw: String): String =
+        raw.replace(REMINDER_SEP, " ").replace('\n', ' ').trim()
+
+    private fun saveReminders(context: Context, reminders: List<Reminder>) {
+        val raw = reminders.joinToString("\n") { r ->
+            listOf(
+                reminderField(r.channelId),
+                reminderField(r.channelName),
+                r.startMillis.toString(),
+                r.stopMillis.toString(),
+                reminderField(r.title)
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_REMINDERS, raw).apply()
+    }
+
+    /**
+     * 8.0.0 (Nova): the pending programme reminders, soonest first.
+     * Reading prunes reminders whose programme has already ended —
+     * a reminder that came and went while the app was closed never
+     * prompts late and never lingers in the list. Malformed lines
+     * are dropped the same way, so a corrupt entry costs one
+     * reminder, not the whole list.
+     */
+    fun reminders(context: Context): List<Reminder> {
+        val raw = prefs(context).getString(KEY_REMINDERS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        val now = System.currentTimeMillis()
+        val parsed = raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 5) return@mapNotNull null
+            val start = fields[2].toLongOrNull() ?: return@mapNotNull null
+            val stop = fields[3].toLongOrNull() ?: return@mapNotNull null
+            Reminder(fields[0], fields[1], start, stop, fields[4])
+        }
+        val pending = parsed.filter { it.stopMillis > now }.sortedBy { it.startMillis }
+        if (pending.size != parsed.size) saveReminders(context, pending)
+        return pending
+    }
+
+    /** 8.0.0 (Nova): is there a reminder for this programme? */
+    fun hasReminder(context: Context, channelId: String, startMillis: Long): Boolean =
+        reminders(context).any { it.channelId == channelId && it.startMillis == startMillis }
+
+    /** 8.0.0 (Nova): set (or replace) a programme reminder. One
+     * reminder per programme: re-setting the same programme just
+     * refreshes its stored title/name. */
+    fun addReminder(context: Context, reminder: Reminder) {
+        val current = reminders(context).filterNot {
+            it.channelId == reminder.channelId && it.startMillis == reminder.startMillis
+        }
+        saveReminders(context, current + reminder)
+    }
+
+    /** 8.0.0 (Nova): cancel a programme reminder (also how a fired
+     * reminder retires itself, so it can never prompt twice). */
+    fun removeReminder(context: Context, channelId: String, startMillis: Long) {
+        val current = reminders(context)
+        val kept = current.filterNot {
+            it.channelId == channelId && it.startMillis == startMillis
+        }
+        if (kept.size != current.size) saveReminders(context, kept)
+    }
+
+    /** 9.0.0 (Nova): where a recording's playback got to.
+     * Written by PlaybackActivity when recording playback stops;
+     * read back on the next play (resume) and by the recordings
+     * screen's Continue watching row. */
+    data class RecordingProgress(
+        val recordingId: String,
+        val positionMs: Long,
+        val durationMs: Long,
+        val updatedAtMillis: Long
+    ) {
+        /** Inside the resume window: far enough in to be worth
+         * resuming (> 30s), not so far that it's effectively
+         * finished (< 95% through). Integer maths only — a
+         * position/duration pair never needs floats. */
+        fun isResumable(): Boolean =
+            durationMs > 0L && positionMs > RESUME_MIN_POSITION_MS &&
+                positionMs * 100 < durationMs * RESUME_MAX_PERCENT
+
+        companion object {
+            const val RESUME_MIN_POSITION_MS = 30_000L
+            const val RESUME_MAX_PERCENT = 95L
+        }
+    }
+
+    private fun saveRecordingProgress(
+        context: Context,
+        entries: List<RecordingProgress>
+    ) {
+        val raw = entries.joinToString("\n") { e ->
+            listOf(
+                reminderField(e.recordingId),
+                e.positionMs.toString(),
+                e.durationMs.toString(),
+                e.updatedAtMillis.toString()
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_RECORDING_PROGRESS, raw).apply()
+    }
+
+    /** 9.0.0 (Nova): all stored recording progress, most
+     * recently watched first. Malformed lines are dropped, as
+     * with the reminders — one corrupt entry costs one resume
+     * point, never the whole store. Entries are NOT pruned
+     * against the recordings list here (this store doesn't know
+     * it); PlaybackActivity clears an entry when its recording
+     * finishes, and the recordings screen clears one when its
+     * recording is deleted. */
+    fun recordingProgress(context: Context): List<RecordingProgress> {
+        val raw = prefs(context).getString(KEY_RECORDING_PROGRESS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 4) return@mapNotNull null
+            val position = fields[1].toLongOrNull() ?: return@mapNotNull null
+            val duration = fields[2].toLongOrNull() ?: return@mapNotNull null
+            val updated = fields[3].toLongOrNull() ?: return@mapNotNull null
+            RecordingProgress(fields[0], position, duration, updated)
+        }.sortedByDescending { it.updatedAtMillis }
+    }
+
+    /** 9.0.0 (Nova): the stored progress for one recording, if
+     * any (resumable or not — callers decide via [isResumable]). */
+    fun recordingProgressFor(
+        context: Context,
+        recordingId: String
+    ): RecordingProgress? =
+        recordingProgress(context).firstOrNull { it.recordingId == recordingId }
+
+    /** 9.0.0 (Nova): remember where a recording's playback
+     * stopped. Replaces any older entry for the same recording. */
+    fun setRecordingProgress(
+        context: Context,
+        recordingId: String,
+        positionMs: Long,
+        durationMs: Long
+    ) {
+        val kept = recordingProgress(context)
+            .filterNot { it.recordingId == recordingId }
+        saveRecordingProgress(
+            context,
+            kept + RecordingProgress(
+                recordingId, positionMs, durationMs, System.currentTimeMillis()
+            )
+        )
+    }
+
+    /** 9.0.0 (Nova): forget a recording's progress (it finished,
+     * or it was deleted). */
+    fun clearRecordingProgress(context: Context, recordingId: String) {
+        val current = recordingProgress(context)
+        val kept = current.filterNot { it.recordingId == recordingId }
+        if (kept.size != current.size) saveRecordingProgress(context, kept)
+    }
+
+    /** 9.1.0 (Nova): where a catch-up replay got to — the
+     * recording progress idea (9.0.0) carried to replays. Written
+     * by PlaybackActivity when a replay is left mid-watch; read
+     * back when the same programme is replayed again. */
+    data class CatchupProgress(
+        val channelId: String,
+        val programmeStartMillis: Long,
+        val programmeStopMillis: Long,
+        val positionMs: Long,
+        val durationMs: Long,
+        val updatedAtMillis: Long
+    ) {
+        /** The same resume window as recordings (9.0.0): far
+         * enough in to be worth resuming, not so far that the
+         * programme is effectively finished. */
+        fun isResumable(): Boolean =
+            durationMs > 0L &&
+                positionMs > RecordingProgress.RESUME_MIN_POSITION_MS &&
+                positionMs * 100 < durationMs * RecordingProgress.RESUME_MAX_PERCENT
+    }
+
+    private fun saveCatchupProgress(
+        context: Context,
+        entries: List<CatchupProgress>
+    ) {
+        val raw = entries.joinToString("\n") { e ->
+            listOf(
+                reminderField(e.channelId),
+                e.programmeStartMillis.toString(),
+                e.programmeStopMillis.toString(),
+                e.positionMs.toString(),
+                e.durationMs.toString(),
+                e.updatedAtMillis.toString()
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_CATCHUP_PROGRESS, raw).apply()
+    }
+
+    /** 9.1.0 (Nova): all stored catch-up progress, most recently
+     * watched first. Malformed lines are dropped, as with the
+     * other stores. Entries are NOT pruned against the archive
+     * window here (this store doesn't know each channel's
+     * catch-up days); PlaybackActivity checks the real window
+     * via CatchUp.isAvailable before resuming and prunes the
+     * entry when it has passed, and [setCatchupProgress] sweeps
+     * entries dead under the default window on every write. */
+    fun catchupProgress(context: Context): List<CatchupProgress> {
+        val raw = prefs(context).getString(KEY_CATCHUP_PROGRESS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        return raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 6) return@mapNotNull null
+            val start = fields[1].toLongOrNull() ?: return@mapNotNull null
+            val stop = fields[2].toLongOrNull() ?: return@mapNotNull null
+            val position = fields[3].toLongOrNull() ?: return@mapNotNull null
+            val duration = fields[4].toLongOrNull() ?: return@mapNotNull null
+            val updated = fields[5].toLongOrNull() ?: return@mapNotNull null
+            CatchupProgress(fields[0], start, stop, position, duration, updated)
+        }.sortedByDescending { it.updatedAtMillis }
+    }
+
+    /** 9.1.0 (Nova): the stored progress for one replay — the
+     * same channel and the same programme start — if any
+     * (resumable or not; callers decide via [isResumable]). */
+    fun catchupProgressFor(
+        context: Context,
+        channelId: String,
+        programmeStartMillis: Long
+    ): CatchupProgress? = catchupProgress(context).firstOrNull {
+        it.channelId == channelId && it.programmeStartMillis == programmeStartMillis
+    }
+
+    /** 9.1.0 (Nova): remember where a catch-up replay stopped.
+     * Replaces any older entry for the same replay. The write
+     * also sweeps entries whose programme ended more than the
+     * default archive window ago (dead under CatchUp's default
+     * 7 days, so no replay could ever resume them) and caps the
+     * store at the most recent [MAX_CATCHUP_PROGRESS]. */
+    fun setCatchupProgress(
+        context: Context,
+        channelId: String,
+        programmeStartMillis: Long,
+        programmeStopMillis: Long,
+        positionMs: Long,
+        durationMs: Long
+    ) {
+        val deadBefore = System.currentTimeMillis() -
+            CatchUp.DEFAULT_CATCHUP_DAYS * 24L * 60 * 60 * 1000
+        val kept = catchupProgress(context).filterNot {
+            (it.channelId == channelId &&
+                it.programmeStartMillis == programmeStartMillis) ||
+                it.programmeStopMillis < deadBefore
+        }
+        val updated = kept + CatchupProgress(
+            channelId, programmeStartMillis, programmeStopMillis,
+            positionMs, durationMs, System.currentTimeMillis()
+        )
+        saveCatchupProgress(
+            context,
+            updated.sortedByDescending { it.updatedAtMillis }
+                .take(MAX_CATCHUP_PROGRESS)
+        )
+    }
+
+    /** 9.1.0 (Nova): forget a replay's progress (it finished, or
+     * its archive window passed). */
+    fun clearCatchupProgress(
+        context: Context,
+        channelId: String,
+        programmeStartMillis: Long
+    ) {
+        val current = catchupProgress(context)
+        val kept = current.filterNot {
+            it.channelId == channelId &&
+                it.programmeStartMillis == programmeStartMillis
+        }
+        if (kept.size != current.size) saveCatchupProgress(context, kept)
+    }
+
+    /** 8.2.0 (Nova): one scheduled recording. Like [Reminder], the
+     * channel name and programme title are snapshots from when the
+     * recording was scheduled; the channel URL is stored too, so
+     * the start alarm can begin the recording even if the playlist
+     * has been refreshed since. */
+    data class ScheduledRecording(
+        val channelId: String,
+        val channelName: String,
+        val channelUrl: String,
+        val startMillis: Long,
+        val stopMillis: Long,
+        val title: String
+    )
+
+    private fun saveScheduledRecordings(
+        context: Context,
+        scheduled: List<ScheduledRecording>
+    ) {
+        val raw = scheduled.joinToString("\n") { r ->
+            listOf(
+                reminderField(r.channelId),
+                reminderField(r.channelName),
+                reminderField(r.channelUrl),
+                r.startMillis.toString(),
+                r.stopMillis.toString(),
+                reminderField(r.title)
+            ).joinToString(REMINDER_SEP)
+        }
+        prefs(context).edit().putString(KEY_SCHEDULED_RECORDINGS, raw).apply()
+    }
+
+    /**
+     * 8.2.0 (Nova): the pending scheduled recordings, soonest
+     * first. Reading prunes entries whose programme has already
+     * ended — one that came and went without firing (the TV was
+     * off, say) never lingers in the list. Malformed lines are
+     * dropped the same way as malformed reminders.
+     */
+    fun scheduledRecordings(context: Context): List<ScheduledRecording> {
+        val raw = prefs(context).getString(KEY_SCHEDULED_RECORDINGS, "") ?: ""
+        if (raw.isBlank()) return emptyList()
+        val now = System.currentTimeMillis()
+        val parsed = raw.split("\n").mapNotNull { line ->
+            val fields = line.split(REMINDER_SEP)
+            if (fields.size != 6) return@mapNotNull null
+            val start = fields[3].toLongOrNull() ?: return@mapNotNull null
+            val stop = fields[4].toLongOrNull() ?: return@mapNotNull null
+            ScheduledRecording(fields[0], fields[1], fields[2], start, stop, fields[5])
+        }
+        val pending = parsed.filter { it.stopMillis > now }.sortedBy { it.startMillis }
+        if (pending.size != parsed.size) saveScheduledRecordings(context, pending)
+        return pending
+    }
+
+    /** 8.2.0 (Nova): is there a scheduled recording for this programme? */
+    fun hasScheduledRecording(
+        context: Context,
+        channelId: String,
+        startMillis: Long
+    ): Boolean = scheduledRecordings(context).any {
+        it.channelId == channelId && it.startMillis == startMillis
+    }
+
+    /** 8.2.0 (Nova): schedule (or replace) a programme recording.
+     * One per programme, like reminders. */
+    fun addScheduledRecording(context: Context, scheduled: ScheduledRecording) {
+        val current = scheduledRecordings(context).filterNot {
+            it.channelId == scheduled.channelId && it.startMillis == scheduled.startMillis
+        }
+        saveScheduledRecordings(context, current + scheduled)
+    }
+
+    /** 8.2.0 (Nova): cancel a scheduled recording (also how a fired
+     * one retires itself once the recording has started). */
+    fun removeScheduledRecording(context: Context, channelId: String, startMillis: Long) {
+        val current = scheduledRecordings(context)
+        val kept = current.filterNot {
+            it.channelId == channelId && it.startMillis == startMillis
+        }
+        if (kept.size != current.size) saveScheduledRecordings(context, kept)
+    }
+
     /** Per-channel EPG id overrides (channel id -> tvg-id), set via "Assign EPG". */
     fun epgOverrides(context: Context): Map<String, String> {
         epgOverridesCache?.let { return it }
@@ -573,6 +1318,70 @@ object PlaylistRepository {
         val raw = current.entries.joinToString("\n") { "${it.key}=${it.value}" }
         prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
         epgOverridesCache = null
+    }
+
+    // ---- Backup restore (10.0.0, Nova) --------------------------------
+    //
+    // Wholesale replacements for NovaBackup.applyBackup. Each one
+    // writes exactly the store's own format and drops the same
+    // caches the store's other writers drop, so a restore is
+    // indistinguishable from the user having set the data by hand.
+
+    /** Replace the favorites set wholesale (backup restore). */
+    fun setFavorites(context: Context, ids: Set<String>) {
+        prefs(context).edit().putStringSet(KEY_FAVORITES, ids).apply()
+    }
+
+    /** Replace the hidden-channels set wholesale (backup restore). */
+    fun setHiddenChannels(context: Context, ids: Set<String>) {
+        prefs(context).edit().putStringSet(KEY_HIDDEN, ids).apply()
+    }
+
+    /** Replace all reminders wholesale (backup restore). The
+     * past-reminder pruning happens on the next read, as usual. */
+    fun replaceReminders(context: Context, reminders: List<Reminder>) {
+        saveReminders(context, reminders)
+    }
+
+    /** Replace all scheduled recordings wholesale (backup
+     * restore). Alarms are the caller's job — see
+     * NovaBackup.applyBackup, which re-arms the start alarms. */
+    fun replaceScheduledRecordings(
+        context: Context,
+        scheduled: List<ScheduledRecording>
+    ) {
+        saveScheduledRecordings(context, scheduled)
+    }
+
+    /** Replace the EPG overrides wholesale (backup restore). */
+    fun replaceEpgOverrides(context: Context, overrides: Map<String, String>) {
+        val raw = overrides.entries.joinToString("\n") { "${it.key}=${it.value}" }
+        prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
+        epgOverridesCache = null
+    }
+
+    /** Replace the playlist list and the active marker wholesale
+     * (backup restore). Names are cleaned like every other
+     * writer's; the active URL is honoured when it names an
+     * enabled entry, else the first enabled entry becomes active
+     * — the same rule [activePlaylist] applies on read. The
+     * parsed playlist/EPG caches are dropped so the next load
+     * reads the restored sources. */
+    fun replacePlaylists(
+        context: Context,
+        list: List<Playlist>,
+        activeUrl: String?
+    ) {
+        val cleaned = list.map {
+            Playlist(cleanPlaylistName(it.name), it.url, it.enabled)
+        }
+        savePlaylists(context, cleaned)
+        val active = cleaned.firstOrNull { it.url == activeUrl && it.enabled }
+            ?: cleaned.firstOrNull { it.enabled }
+            ?: cleaned.first()
+        prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, active.url).apply()
+        playlistCache = null
+        epgCache = null
     }
 
     /**
@@ -829,6 +1638,81 @@ object PlaylistRepository {
     suspend fun loadEpg(context: Context): Map<String, List<EpgParser.Programme>> =
         epgLoadDeferred(context).await()
 
+    /**
+     * When the guide data the user is looking at was saved: the
+     * in-memory cache's stamp, or the disk snapshot's when nothing
+     * has loaded yet this session. Combined: ported from Juniper
+     * 7.0.0 — the guide header's "Guide updated …" freshness label.
+     */
+    fun epgUpdatedAt(context: Context): Long? {
+        epgCache?.let { return it.first }
+        return ParsedCache.epgSavedAt(context, epgUrl(context))
+    }
+
+    /**
+     * Re-download + re-parse the EPG right now, bypassing the 12 h
+     * disk cache, and store the result. Returns the fresh map; when
+     * the fetch fails for every source the map is empty and the
+     * stored snapshot is left alone, so the caller can keep showing
+     * the saved guide. Combined: ported from Juniper 7.0.0 — the
+     * guide menu's "Refresh guide data" action.
+     */
+    suspend fun refreshEpg(context: Context): Map<String, List<EpgParser.Programme>> =
+        refreshEpgDeferred(context).await()
+
+    /** The forced refresh, single-flight like loadEpg (see the
+     * epgRefreshLoad field comment). Runs on refreshScope, so a
+     * caller going away never cancels a refresh another caller is
+     * waiting on. */
+    private fun refreshEpgDeferred(
+        context: Context
+    ): Deferred<Map<String, List<EpgParser.Programme>>> {
+        epgRefreshLoad?.let { return it }
+        synchronized(loadLock) {
+            epgRefreshLoad?.let { return it }
+            val appContext = context.applicationContext
+            val deferred: Deferred<Map<String, List<EpgParser.Programme>>> =
+                refreshScope.async {
+                    try {
+                        val merged = loadEpgFresh(appContext, force = true)
+                        if (merged.isNotEmpty()) {
+                            storeEpg(appContext, epgUrl(appContext), merged)
+                        }
+                        merged
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        emptyMap()
+                    }
+                }
+            epgRefreshLoad = deferred
+            deferred.invokeOnCompletion {
+                synchronized(loadLock) {
+                    if (epgRefreshLoad === deferred) epgRefreshLoad = null
+                }
+            }
+            return deferred
+        }
+    }
+
+    /** Combined (Juniper 8.2.0): per-source EPG fetch status,
+     * recorded on every fresh load (see loadEpgFresh). Survives
+     * restarts; the guide's EPG quality dialog shows one line per
+     * source from this. */
+    fun epgSourceStatuses(context: Context): List<EpgQuality.SourceStatus> =
+        EpgQuality.decodeStatuses(
+            prefs(context).getString(KEY_EPG_SOURCE_STATUS, "") ?: ""
+        )
+
+    private fun setEpgSourceStatuses(
+        context: Context,
+        statuses: List<EpgQuality.SourceStatus>
+    ) {
+        prefs(context).edit()
+            .putString(KEY_EPG_SOURCE_STATUS, EpgQuality.encodeStatuses(statuses))
+            .apply()
+    }
+
     /** The EPG load itself; loadEpg gates it single-flight. */
     private suspend fun loadEpgInternal(context: Context): Map<String, List<EpgParser.Programme>> = withContext(Dispatchers.IO) {
         val cached = epgCache
@@ -884,41 +1768,113 @@ object PlaylistRepository {
         }
     }
 
-    /** Fetch + parse every EPG source and merge them (the old loadEpg body). */
-    private fun loadEpgFresh(context: Context): Map<String, List<EpgParser.Programme>> {
+    /**
+     * Fetch + parse every EPG source and merge them (the old loadEpg
+     * body). Combined (Juniper 8.2.0/8.2.1): each source's fetch
+     * outcome is recorded for the EPG quality surface, and airings
+     * carried by two sources are merged once — without the dedupe
+     * the guide shows the programme twice and coverage counts
+     * double. [force] bypasses the sources' 12 h disk cache (the
+     * guide's manual refresh).
+     */
+    private fun loadEpgFresh(
+        context: Context,
+        force: Boolean = false
+    ): Map<String, List<EpgParser.Programme>> {
         val merged = mutableMapOf<String, MutableList<EpgParser.Programme>>()
         val urls = epgUrl(context).split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        val statuses = mutableListOf<EpgQuality.SourceStatus>()
+        // Airings already merged under each key, so a programme
+        // carried by two sources is stored once.
+        val seen = mutableMapOf<String, MutableSet<Triple<Long, Long, String>>>()
+        /** Append a source's programmes under [key], skipping airings
+         * already there. Returns how many were added. */
+        fun addProgrammes(key: String, incoming: List<EpgParser.Programme>): Int {
+            val target = merged.getOrPut(key) { mutableListOf() }
+            val keys = seen.getOrPut(key) { HashSet() }
+            var added = 0
+            for (p in incoming) {
+                if (keys.add(Triple(p.startMillis, p.stopMillis, p.title))) {
+                    target += p
+                    added++
+                }
+            }
+            return added
+        }
         for (url in urls) {
             try {
-                val text = epgXml(context, url)
-                val (parsed, names) = EpgParser.parseWithNames(text)
+                val result = epgXml(context, url, force)
+                val (parsed, names) = EpgParser.parseWithNames(result.text)
+                var programmes = 0
                 for ((id, list) in parsed) {
-                    merged.getOrPut(id) { mutableListOf() } += list
+                    programmes += addProgrammes(id, list)
                 }
                 for ((id, name) in names) {
                     val list = parsed[id] ?: continue
-                    merged.getOrPut(name.lowercase()) { mutableListOf() } += list
+                    addProgrammes(name.lowercase(), list)
                 }
-            } catch (ignored: Exception) {
+                statuses += if (result.fetchFailed) {
+                    // The fetch failed and this is the stale disk
+                    // copy: the guide still works, but the status
+                    // must say so instead of claiming a fresh load.
+                    EpgQuality.SourceStatus(
+                        url, result.fetchedAtMillis, false,
+                        "Fetch failed, using cached data",
+                        parsed.size, programmes
+                    )
+                } else {
+                    EpgQuality.SourceStatus(
+                        url, result.fetchedAtMillis, true, null,
+                        parsed.size, programmes
+                    )
+                }
+            } catch (e: Exception) {
                 // One bad source doesn't kill the rest.
+                statuses += EpgQuality.SourceStatus(
+                    url, System.currentTimeMillis(), false,
+                    e.message?.take(80), 0, 0
+                )
             }
         }
+        if (statuses.isNotEmpty()) setEpgSourceStatuses(context, statuses)
         return merged
     }
 
+    /** What epgXml returned, and where it came from. loadEpgFresh
+     * records the per-source status from this, so a failed fetch is
+     * never reported as a fresh load and a cached read is never
+     * stamped with the read time. Combined: ported from Juniper
+     * 8.2.0. */
+    private data class EpgXmlResult(
+        val text: String,
+        /** When the data was actually fetched: the disk file's time
+         * for a cached copy, now for a fresh download. */
+        val fetchedAtMillis: Long,
+        /** True when the fetch failed and [text] is the stale disk         * copy. */
+        val fetchFailed: Boolean
+    )
+
     /**
-     * Raw EPG XML for one source URL: the disk copy is used when it is
-     * fresh (12h TTL), otherwise the URL is fetched and the disk copy
-     * refreshed. Falls back to a stale disk copy when the fetch fails.
-     */
-    private fun epgXml(context: Context, url: String): String {
+     * Raw EPG XML for one source URL: the disk copy is used when it
+     * is fresh (12h TTL), otherwise the URL is fetched and the disk
+     * copy refreshed. Falls back to a stale disk copy when the fetch
+     * fails. [force] skips the fresh-disk read (a fetch failure
+     * still falls back to the stale copy).     */
+    private fun epgXml(context: Context, url: String, force: Boolean = false): EpgXmlResult {
         val fileName = EPG_CACHE_PREFIX + url.hashCode().toString(16) + ".xml"
         val file = context.getFileStreamPath(fileName)
-        val fresh = file.exists() &&
+        val fresh = !force && file.exists() &&
             System.currentTimeMillis() - file.lastModified() < EPG_TTL_MS
         if (fresh) {
             try {
-                return file.bufferedReader().use { it.readText() }
+                // 8.2.1: a cached read is stamped with when the data
+                // was fetched (the file's time), not with now — the
+                // old code claimed "Loaded just now" for data hours
+                // old.
+                return EpgXmlResult(
+                    file.bufferedReader().use { it.readText() },
+                    file.lastModified(), false
+                )
             } catch (ignored: Exception) {
                 // Fall through to a fresh fetch.
             }
@@ -930,10 +1886,15 @@ object PlaylistRepository {
             } catch (ignored: Exception) {
                 // Disk cache is best-effort.
             }
-            text
+            EpgXmlResult(text, System.currentTimeMillis(), false)
         } catch (e: Exception) {
             // Fetch failed: use the stale disk copy if there is one.
-            if (file.exists()) file.bufferedReader().use { it.readText() } else throw e
+            if (file.exists()) {
+                EpgXmlResult(
+                    file.bufferedReader().use { it.readText() },
+                    file.lastModified(), true
+                )
+            } else throw e
         }
     }
 

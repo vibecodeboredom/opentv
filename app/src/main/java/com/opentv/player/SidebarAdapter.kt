@@ -33,12 +33,22 @@ data class SidebarGroup(val key: String, val label: String, val count: Int)
  * 260dp layout, Large is roomier). A channel name that overflows its
  * row scrolls left-right (marquee) instead of being cut off; short
  * names never scroll, so nothing moves unless it has to.
+ *
+ * 9.1.0: the font-size setting scales the group + channel text
+ * (channel rows already get their sizes from SidebarSizing, which
+ * applies the scale; the group rows scale theirs here), and the
+ * high-contrast focus setting swaps the row background for the
+ * thick-outline variant.
  */
 class SidebarAdapter(
     private val onGroupClick: (SidebarGroup) -> Unit,
     private val onChannelClick: (Channel) -> Unit,
     private val currentChannelId: () -> String?,
-    private val sizing: AppSettings.SidebarSizing
+    private val sizing: AppSettings.SidebarSizing,
+    private val fontSize: Appearance.FontSize = Appearance.FontSize.MEDIUM,
+    /** 9.3.0: larger-text mode, on top of the font size. */
+    private val largerText: Boolean = false,
+    private val highContrast: Boolean = false
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     /** One row of the list: a group or a channel. */
@@ -141,11 +151,18 @@ class SidebarAdapter(
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(2, density); bottomMargin = dp(2, density) }
             minimumHeight = dp(sizing.rowMinHeightDp, density)
-            setBackgroundResource(R.drawable.sidebar_row_bg)
+            // 9.1.0: high-contrast focus swaps in the thick-outline
+            // row background.
+            setBackgroundResource(
+                if (highContrast) R.drawable.sidebar_row_bg_hc else R.drawable.sidebar_row_bg
+            )
         }
         val nameView = TextView(context).apply {
             setTextColor(0xFFFFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                Appearance.scaledTextSp(16f, fontSize, largerText)
+            )
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -153,7 +170,10 @@ class SidebarAdapter(
         }
         val countView = TextView(context).apply {
             setTextColor(0xB3FFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                Appearance.scaledTextSp(14f, fontSize, largerText)
+            )
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -180,13 +200,25 @@ class SidebarAdapter(
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(2, density); bottomMargin = dp(2, density) }
             minimumHeight = dp(sizing.rowMinHeightDp, density)
-            setBackgroundResource(R.drawable.sidebar_row_bg)
+            // 9.1.0: high-contrast focus swaps in the thick-outline
+            // row background.
+            setBackgroundResource(
+                if (highContrast) R.drawable.sidebar_row_bg_hc else R.drawable.sidebar_row_bg
+            )
         }
         val numberView = TextView(context).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sizing.nameSp)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(dp(sizing.numberWidthDp, density), LinearLayout.LayoutParams.MATCH_PARENT)
+            // 9.3.1: the number takes what its digits need — a
+            // 3-digit number at Large + larger text is wider than
+            // the old fixed column — but never less than the
+            // font-scaled column width, so numbers stay aligned.
+            minWidth = dp(sizing.numberWidthDp, density)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT
+            )
         }
         val logoView = ImageView(context).apply {
             layoutParams = LinearLayout.LayoutParams(dp(sizing.logoDp, density), dp(sizing.logoDp, density)).apply {
@@ -239,7 +271,10 @@ class SidebarAdapter(
         init {
             view.setOnClickListener { group?.let(onGroupClick) }
             view.onFocusChangeListener = View.OnFocusChangeListener { _, hasFocus ->
-                nameView.setTextColor(if (hasFocus) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
+                nameView.setTextColor(
+                    if (hasFocus) AppSettings.accentColor(view.context)
+                    else 0xFFFFFFFF.toInt()
+                )
             }
         }
 
@@ -249,7 +284,8 @@ class SidebarAdapter(
             countView.text = group.count.toString()
             // A rebound row keeps its focus state; re-apply the colour.
             nameView.setTextColor(
-                if (itemView.isFocused) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                if (itemView.isFocused) AppSettings.accentColor(itemView.context)
+                else 0xFFFFFFFF.toInt()
             )
         }
     }
@@ -291,11 +327,13 @@ class SidebarAdapter(
         private fun applyFocusColors(hasFocus: Boolean) {
             // Focused row: name (and number, unless it is the current
             // channel, which is already accent) turns accent.
+            // 9.0.0 (Nova): the accent itself is the Settings choice.
+            val accent = AppSettings.accentColor(itemView.context)
             nameView.setTextColor(
-                if (hasFocus || isCurrent) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt()
+                if (hasFocus || isCurrent) accent else 0xFFFFFFFF.toInt()
             )
             numberView.setTextColor(
-                if (isCurrent || hasFocus) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt()
+                if (isCurrent || hasFocus) accent else 0xB3FFFFFF.toInt()
             )
         }
     }

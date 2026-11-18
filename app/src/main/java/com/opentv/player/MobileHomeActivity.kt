@@ -55,6 +55,10 @@ class MobileHomeActivity : FragmentActivity() {
     )
 
     private var allChannels: List<Channel> = emptyList()
+    /** 9.2.1 (Nova): the EPG, loaded after the playlist (the
+     * playlist load doesn't wait for it) — only the discovery
+     * section needs it, for what's on now. Empty until it lands. */
+    private var epgMap: Map<String, List<EpgParser.Programme>> = emptyMap()
     private var favorites: Set<String> = emptySet()
     /** Favorites as last rendered, so onResume only rebuilds when
      * something actually changed (e.g. favorited from playback) —
@@ -79,6 +83,13 @@ class MobileHomeActivity : FragmentActivity() {
         retryButton = findViewById(R.id.mobile_retry_button)
         continueCard = findViewById(R.id.mobile_continue_card)
         continueName = findViewById(R.id.mobile_continue_name)
+        // 9.0.0 (Nova): the Continue watching card's outline and
+        // title take the chosen accent (AccentDrawables mirrors
+        // the card_accent_bg XML it replaces).
+        continueCard.background = AccentDrawables.cardOutlineBackground(this)
+        (continueCard.getChildAt(0) as? TextView)?.setTextColor(
+            AppSettings.accentColor(this)
+        )
 
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter
@@ -156,6 +167,17 @@ class MobileHomeActivity : FragmentActivity() {
                 lastChannel = allChannels.firstOrNull { it.id == lastId }
                 updateContinueCard()
                 renderList()
+                // 9.2.1 (Nova): fetch the EPG for the discovery
+                // section — loadEpg is single-flight and usually
+                // already warm from the app-start preload. When
+                // it lands, re-render so the section appears.
+                lifecycleScope.launch {
+                    val loaded = PlaylistRepository.loadEpg(this@MobileHomeActivity)
+                    if (loaded.isNotEmpty()) {
+                        epgMap = loaded
+                        if (currentQuery.trim().isEmpty()) renderList()
+                    }
+                }
             }.onFailure {
                 recycler.visibility = View.GONE
                 emptyText.setText(R.string.load_failed)
@@ -175,29 +197,57 @@ class MobileHomeActivity : FragmentActivity() {
     }
 
     /** Build the sectioned list for the current query: Favorites
-     * first, then one section per group in playlist order (the
-     * LinkedHashMap keeps first-occurrence order, like the TV
-     * browse menu). A non-empty query shows a single "Results"
-     * section of name/group matches instead. */
+     * first, then one section per group (9.0.0: built by the shared
+     * HomeRails builder, so the mobile home and the TV home show
+     * the same sections — favorites first, then the effective
+     * groups with renames, moves and custom order applied. The
+     * mobile home passes no recents: it keeps its Continue card
+     * instead of a Recent rail). A non-empty query shows a single
+     * "Results" section of name/group matches instead. */
     private fun renderList() {
         val query = currentQuery.trim()
         val items = mutableListOf<MobileChannelAdapter.Item>()
         if (query.isEmpty()) {
-            val favoriteChannels = allChannels.filter { it.id in favorites }
-            if (favoriteChannels.isNotEmpty()) {
-                items += MobileChannelAdapter.Item.Header(getString(R.string.favorites))
-                favoriteChannels.forEach {
-                    items += MobileChannelAdapter.Item.ChannelItem(it, true)
+            val rails = HomeRails.buildRails(
+                channels = allChannels,
+                favorites = favorites,
+                recentIds = emptyList(),
+                hidden = emptySet(),
+                overrides = PlaylistRepository.groupOverrides(this),
+                favoritesTitle = getString(R.string.favorites),
+                recentsTitle = ""
+            )
+            for ((index, rail) in rails.withIndex()) {
+                // 9.1.0 (Nova): the user's custom favorites order,
+                // once one is set (playlist order until then) — the
+                // Favorites rail is first when it exists.
+                val railChannels = if (rail.title == getString(R.string.favorites)) {
+                    PlaylistRepository.applyFavoriteOrder(this, rail.channels)
+                } else {
+                    rail.channels
                 }
-            }
-            val grouped = linkedMapOf<String, MutableList<Channel>>()
-            for (ch in allChannels) {
-                (grouped.getOrPut(ch.group) { mutableListOf() }) += ch
-            }
-            for ((group, groupChannels) in grouped) {
-                items += MobileChannelAdapter.Item.Header(group)
-                groupChannels.forEach {
+                items += MobileChannelAdapter.Item.Header(rail.title)
+                railChannels.forEach {
                     items += MobileChannelAdapter.Item.ChannelItem(it, it.id in favorites)
+                }
+                // 9.2.1 (Nova): "More of what you watch" — the same
+                // discovery selection as the TV home row, as a
+                // section under Favorites. It needs the EPG, so it
+                // shows only once loadEpg has landed; like
+                // Favorites, its channels also stay listed in their
+                // group sections below.
+                if (index == 0 && epgMap.isNotEmpty()) {
+                    val more = Discovery.moreEntries(this, allChannels, epgMap)
+                    if (more.isNotEmpty()) {
+                        items += MobileChannelAdapter.Item.Header(
+                            getString(R.string.more_of_what_you_watch)
+                        )
+                        more.forEach {
+                            items += MobileChannelAdapter.Item.ChannelItem(
+                                it.channel, it.channel.id in favorites
+                            )
+                        }
+                    }
                 }
             }
         } else {

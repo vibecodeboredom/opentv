@@ -71,7 +71,7 @@ class MobileChannelAdapter(
             val view = TextView(parent.context).apply {
                 textSize = 14f
                 setTypeface(typeface, Typeface.BOLD)
-                setTextColor(0xFF86C739.toInt())
+                setTextColor(AppSettings.accentColor(parent.context))
                 val pad = TypedValue.applyDimension(
                     TypedValue.COMPLEX_UNIT_DIP, 16f, resources.displayMetrics
                 ).toInt()
@@ -130,12 +130,13 @@ class MobileChannelAdapter(
             val ch = item.channel
             // 6.1.0: the channel number is accent green, the name stays
             // white — same hierarchy as the TV sidebar rows, which
-            // colour the number separately.
+            // colour the number separately. 9.0.0 (Nova): the accent
+            // is the Settings choice.
             name.text = if (ch.number > 0) {
                 val num = ch.number.toString()
                 SpannableString("$num  ${ch.name}").apply {
                     setSpan(
-                        ForegroundColorSpan(0xFF86C739.toInt()),
+                        ForegroundColorSpan(AppSettings.accentColor(itemView.context)),
                         0, num.length,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                     )

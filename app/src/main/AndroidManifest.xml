@@ -6,6 +6,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Combined (Juniper 8.3.1): re-arm scheduled-recording alarms
+         after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -48,9 +51,18 @@
             android:name=".MobileHomeActivity"
             android:exported="false" />
 
+        <!-- Combined (Juniper 9.0.0): browse-first TV home screen.
+             MainActivity routes the TV here instead of auto-playing,
+             unless the launch-behaviour setting says auto-play. -->
+        <activity
+            android:name=".TvHomeActivity"
+            android:exported="false" />
+
         <activity
             android:name=".PlaybackActivity"
             android:exported="false"
+            android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:theme="@style/Theme.OpenTV.Playback" />
 
         <activity
@@ -69,6 +81,10 @@
             android:name=".StatsActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".WhatsNewActivity"
+            android:exported="false" />
+
         <service
             android:name=".RecordingService"
             android:exported="false"
@@ -77,6 +93,34 @@
         <receiver
             android:name=".RecordStopReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".RecordStartReceiver"
+            android:exported="false" />
+
+        <!-- Combined (Juniper 8.3.1): alarms do not survive a
+             reboot — re-arm the scheduled-recording start alarms
+             after one. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Combined (Juniper 8.0.0): share the backup file (written
+             to the cache dir) with other apps — the share sheet gets
+             a content:// URI, never a raw file path. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

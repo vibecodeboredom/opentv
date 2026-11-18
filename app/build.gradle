@@ -8,11 +8,17 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.opentv.player'
+        // Combined line (from Nova 7.0.0's pattern): separate
+        // applicationId so combined builds install NEXT TO the main
+        // app and both v10 lines instead of replacing any of them —
+        // all four can be compared on the same TV. The namespace /
+        // source package stay com.opentv.player; only the installed
+        // identity changes.
+        applicationId 'com.opentv.player.combined'
         minSdk 26
         targetSdk 35
-        versionCode 49
-        versionName '6.1.8'
+        versionCode 75
+        versionName '10.0.0'
     }
 
     // Fixed debug keystore (committed) so every CI build shares one

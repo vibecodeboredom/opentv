@@ -27,6 +27,67 @@ object GuideData {
         return (nowMillis / hour) * hour
     }
 
+    /** Tonight's prime-time hours (combined: ported from Juniper 7.2.0). */
+    const val TONIGHT_START_HOUR = 18
+    const val TONIGHT_HOURS = 5
+
+    /** Combined (Juniper 7.2.0): tonight's prime-time window, 6–11 PM
+     * local time. Always today's 6–11 PM — after 11 PM it is the
+     * prime time that just aired, so the header never says "Tonight"
+     * about tomorrow's date. Returns (window start, window hours).
+     * The Tonight QUICK VIEW's window — Nova's own Tonight guide
+     * jump (19:00 anchor) is a different feature and stays. */
+
+    /** 7.2.0: the guide window's anchor — the top of the current
+     * hour, shifted by whole days for day navigation (0 = today,
+     * +1 = tomorrow). Calendar day math, not a fixed 24 h — a
+     * daylight-saving day is 23 or 25 hours long. The window is
+     * [pastHours] back from the anchor and the forward hours ahead
+     * of it. */
+    fun dayAnchorMillis(nowMillis: Long, dayOffset: Int): Long {
+        val cal = calendarFor(windowStartMillis(nowMillis))
+        cal.add(java.util.Calendar.DAY_OF_YEAR, dayOffset)
+        return cal.timeInMillis
+    }
+
+    /** 7.2.0: tonight's prime-time window, 6–11 PM local time.
+     * Always today's 6–11 PM — after 11 PM it is the prime time
+     * that just aired (shown with the past styling), so the header
+     * never says "Tonight" about tomorrow's date. Returns
+     * (window start, window hours). */
+    fun tonightWindow(nowMillis: Long): Pair<Long, Int> {
+        val dayStart = midnightMillis(nowMillis)
+        return Pair(dayStart + TONIGHT_START_HOUR * 60L * 60 * 1000, TONIGHT_HOURS)
+    }
+
+    /** Midnight (00:00) of the day containing [millis], local time. */
+    private fun midnightMillis(millis: Long): Long {
+        val cal = calendarFor(millis)
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
+
+    /** Combined (Juniper 7.2.1): true when any channel in [channels]
+     * has a real programme inside the window — the Tonight quick
+     * view's second empty state (favorites exist, but their rows
+     * would be all "No information" placeholders). */    fun anyRealProgrammes(
+        channels: List<Channel>,
+        epg: Map<String, List<EpgParser.Programme>>,
+        windowStartMillis: Long,
+        windowHours: Int = 6,
+        epgOverrides: Map<String, String> = emptyMap()
+    ): Boolean {
+        val windowEnd = windowStartMillis + windowHours * 60L * 60 * 1000
+        return channels.any { channel ->
+            programmesForChannel(channel, epg, epgOverrides).any {
+                it.stopMillis > windowStartMillis && it.startMillis < windowEnd
+            }
+        }
+    }
+
     /** Build the row for one channel: its programmes inside the window,
      * or "No information" placeholders when it has none. Hidden
      * channels get no row (null). The window math lives here so the
@@ -145,7 +206,16 @@ object GuideData {
             if (matchesWords(channel.name, words)) {
                 buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { channelMatches += it }
-            } else if (programmes.any { matchesWords(it.title, words) }) {
+            } else if (programmes.any {
+                    // 9.3.0 (Nova): the description matches too —
+                    // a word that only appears in a programme's
+                    // synopsis ("documentary about the 1969 moon
+                    // landing") now finds the programme, ranked
+                    // with the title matches.
+                    matchesWords(it.title, words) ||
+                        (it.desc.isNotEmpty() && matchesWords(it.desc, words))
+                }
+            ) {
                 buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { programmeMatches += it }
             }
@@ -188,6 +258,32 @@ object GuideData {
         hidden: Set<String> = emptySet()
     ): List<Channel> =
         channels.filter { !hidden.contains(it.id) }.take(MAX_GUIDE_ROWS)
+
+    /** 8.1.0 (Nova): the playlist's distinct channel groups, in
+     * playlist order (first appearance wins) — the guide group
+     * filter's choices. Groups are never empty strings: the parser
+     * defaults a missing group-title to "Other". */
+    fun channelGroups(channels: List<Channel>): List<String> {
+        val seen = LinkedHashSet<String>()
+        for (channel in channels) seen += channel.group
+        return seen.toList()
+    }
+
+    /** 8.1.0 (Nova): the group filter that actually applies — the
+     * stored choice when some channel in the playlist still
+     * carries that group, null (all groups) when nothing is stored
+     * or the group has left the playlist, so a stale preference
+     * can never filter the guide down to nothing on its own. */
+    fun effectiveGroupFilter(channels: List<Channel>, stored: String?): String? =
+        stored?.takeIf { group -> channels.any { it.group == group } }
+
+    /** 8.1.0 (Nova): restrict a channel list to one group, playlist
+     * order kept; a null group returns the list untouched. The
+     * guide applies this to the channel list BEFORE rowChannels /
+     * LazyRows, so filtering happens at the row source and the
+     * lazy row machinery never sees the filtered-out channels. */
+    fun filterChannelsByGroup(channels: List<Channel>, group: String?): List<Channel> =
+        if (group == null) channels else channels.filter { it.group == group }
 
     /**
      * Guide rows built one at a time, on first access, instead of all
@@ -295,6 +391,29 @@ object GuideData {
         return if (minute == 0) "$hour12 $amPm" else "$hour12:${twoDigits(minute)} $amPm"
     }
 
+    /** First channel with this playlist number, or null. Numbers are
+     * the playlist positions (1-based); a playlist can carry gaps, so
+     * the first match wins. Combined: ported from Juniper 7.0.0
+     * (channel-number jump). */
+    fun channelByNumber(
+        channels: List<Channel>,
+        number: Int
+    ): Channel? = channels.firstOrNull { it.number == number }
+
+    /** How long ago [updatedAtMillis] was, as "just now", "5 min ago",
+     * "2 h ago" or "3 d ago". Combined: ported from Juniper 7.0.0 —
+     * the guide header's EPG freshness label and the EPG quality
+     * source lines. A zero or future timestamp reads as "just now". */
+    fun formatAge(updatedAtMillis: Long, nowMillis: Long): String {
+        val ageMinutes = (nowMillis - updatedAtMillis) / 60_000L
+        return when {
+            ageMinutes < 1 -> "just now"
+            ageMinutes < 60 -> "$ageMinutes min ago"
+            ageMinutes < 60 * 24 -> "${ageMinutes / 60} h ago"
+            else -> "${ageMinutes / (60 * 24)} d ago"
+        }
+    }
+
     /** Format a clock time as "8:00 PM" (always with minutes). */
     fun formatClock(millis: Long): String {
         val cal = calendarFor(millis)
@@ -314,6 +433,22 @@ object GuideData {
     fun formatTimeRange(startMillis: Long, stopMillis: Long): String =
         "${formatClock(startMillis)} – ${formatClock(stopMillis)}"
 
+    /** 9.0.0 (Nova): format a playback position / duration as an
+     * elapsed clock — "12:34", or "1:02:34" once past an hour.
+     * Used by recording resume (the "Resumed from" toast and the
+     * Continue watching cards). */
+    fun formatElapsedClock(millis: Long): String {
+        val totalSeconds = (millis / 1000).coerceAtLeast(0)
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) {
+            "$hours:${twoDigits(minutes.toInt())}:${twoDigits(seconds.toInt())}"
+        } else {
+            "${minutes}:${twoDigits(seconds.toInt())}"
+        }
+    }
+
     /** Fraction of a programme already aired (0.0–1.0) for the progress bar. */
     fun progressFraction(
         programme: EpgParser.Programme,
@@ -326,6 +461,60 @@ object GuideData {
     /** Whole minutes left in a programme ("48 min"). */
     fun remainingMinutes(programme: EpgParser.Programme, nowMillis: Long): Long =
         maxOf((programme.stopMillis - nowMillis) / 60_000L, 0L)
+
+    /** 9.3.0 (Nova): a span until something starts, compactly —
+     * "45m" under an hour, "2h 15m" under a day (whole hours drop
+     * the minutes: "2h"), "3d 4h" beyond (whole days: "3d"). The
+     * watchlist cards prefix it with "in". A span of a minute or
+     * less still reads "1m" — the countdown never claims "0m"
+     * for something that hasn't started yet; a non-positive span
+     * (already started) reads "0m" and callers show "On now"
+     * instead. */
+    fun formatCountdown(deltaMillis: Long): String {
+        if (deltaMillis <= 0L) return "0m"
+        val minutes = maxOf(deltaMillis / 60_000L, 1L)
+        if (minutes < 60L) return "${minutes}m"
+        val hours = minutes / 60L
+        val remMinutes = minutes % 60L
+        if (hours < 24L) {
+            return if (remMinutes > 0L) "${hours}h ${remMinutes}m" else "${hours}h"
+        }
+        val days = hours / 24L
+        val remHours = hours % 24L
+        return if (remHours > 0L) "${days}d ${remHours}h" else "${days}d"
+    }
+
+    /** 9.3.1 (Nova): a short window of a programme description
+     * around the first occurrence of [keywordLower] (already
+     * lowercase), so the keyword hits list can show why a
+     * description-only hit matched. Whitespace is collapsed to
+     * single spaces; "…" marks a cut at either end. When the
+     * keyword isn't found (callers check containment first, so
+     * this is only a fallback) the head of the description is
+     * returned. */
+    fun descSnippet(desc: String, keywordLower: String): String {
+        val flat = desc.replace(Regex("\\s+"), " ").trim()
+        val idx = flat.lowercase().indexOf(keywordLower)
+        if (idx < 0) {
+            return if (flat.length > SNIPPET_WINDOW) {
+                flat.substring(0, SNIPPET_WINDOW) + "…"
+            } else {
+                flat
+            }
+        }
+        val start = maxOf(0, idx - SNIPPET_LEAD)
+        val end = minOf(flat.length, idx + keywordLower.length + SNIPPET_TAIL)
+        val window = flat.substring(start, end)
+        return (if (start > 0) "…" else "") + window +
+            (if (end < flat.length) "…" else "")
+    }
+
+    /** 9.3.1 (Nova): descSnippet window sizes — a little context
+     * before the keyword, more after it (that's where the
+     * sentence usually goes). */
+    private const val SNIPPET_LEAD = 20
+    private const val SNIPPET_TAIL = 40
+    private const val SNIPPET_WINDOW = 60
 
     /** Format date + clock as "Sat, Nov 7, 10:12 PM" for the guide header. */
     fun formatDateTime(millis: Long): String =

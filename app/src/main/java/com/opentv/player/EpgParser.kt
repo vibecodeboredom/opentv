@@ -5,16 +5,18 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Minimal XMLTV parser. Only keeps programme titles with start/stop times,
- * keyed by channel id, so the player can show "Now" / "Next".
+ * Minimal XMLTV parser. Keeps programme titles with start/stop times
+ * (and, since 9.3.0, the first <desc> per programme), keyed by channel
+ * id, so the player can show "Now" / "Next".
  *
  * Single-pass streaming scan over the XML text: the old version built a
  * full DOM tree (javax.xml) just to walk two element types, which for a
  * multi-MB guide meant the raw string AND a DOM of several times its size
  * were live at once, plus the tree-build time on every cold parse. This
  * scanner walks the text once with an element stack, captures only
- * <programme> (channel/start/stop + first <title>) and <channel>
- * (id + first <display-name>), and never materialises the document.
+ * <programme> (channel/start/stop + first <title> + first <desc>)
+ * and <channel> (id + first <display-name>), and never materialises
+ * the document.
  * Pure Kotlin string code, so it behaves identically on-device and in
  * plain JVM unit tests (Android's XmlPullParser is a stub there).
  *
@@ -29,8 +31,18 @@ object EpgParser {
         val channelId: String,
         val startMillis: Long,
         val stopMillis: Long,
-        val title: String
+        val title: String,
+        /** 9.3.0 (Nova): the programme's XMLTV <desc>, "" when the
+         * guide carries none. Shown in the guide's details header
+         * and matched by the guide search. Capped at
+         * [MAX_DESC_LENGTH] chars by the scanner — descriptions are
+         * the one unbounded field in a guide, and the EPG map holds
+         * every programme in memory at once. */
+        val desc: String = ""
     )
+
+    /** 9.3.0 (Nova): the description length cap (see [Programme.desc]). */
+    const val MAX_DESC_LENGTH = 1000
 
     private val xmltvDate = SimpleDateFormat("yyyyMMddHHmmss Z", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
@@ -118,18 +130,21 @@ object EpgParser {
         private var progStart: String? = null
         private var progStop: String? = null
         private var progTitle: String? = null
+        private var progDesc: String? = null
 
         // The open <channel>, same pattern.
         private var chanDepth = -1
         private var chanId = ""
         private var chanName: String? = null
 
-        // Text capture for the first <title> / <display-name> inside the
-        // open element: while captureDepth > 0, all character data (the
-        // element's own and any nested element's, matching textContent)
-        // goes to captureBuf until the element at captureDepth closes.
+        // Text capture for the first <title> / <desc> / <display-name>
+        // inside the open element: while captureDepth > 0, all
+        // character data (the element's own and any nested element's,
+        // matching textContent) goes to captureBuf until the element
+        // at captureDepth closes. captureKind says which field the
+        // captured text lands in.
         private var captureDepth = -1
-        private var captureForProgramme = false
+        private var captureKind = CAPTURE_NONE
         private val captureBuf = StringBuilder()
 
         fun scan(): Boolean {
@@ -250,8 +265,13 @@ object EpgParser {
             // element on top of the stack right now).
             if (captureDepth == stack.size) {
                 val value = captureBuf.toString()
-                if (captureForProgramme) progTitle = value else chanName = value
+                when (captureKind) {
+                    CAPTURE_TITLE -> progTitle = value
+                    CAPTURE_DESC -> progDesc = value
+                    else -> chanName = value
+                }
                 captureDepth = -1
+                captureKind = CAPTURE_NONE
                 captureBuf.setLength(0)
             }
             if (name == "programme" && progDepth == stack.size) finishProgramme()
@@ -269,7 +289,10 @@ object EpgParser {
                     channelId = progChannel,
                     startMillis = start,
                     stopMillis = stop,
-                    title = title
+                    title = title,
+                    // 9.3.0 (Nova): first <desc>, whitespace-trimmed
+                    // and length-capped (see Programme.desc).
+                    desc = progDesc?.trim()?.take(MAX_DESC_LENGTH) ?: ""
                 )
             }
             progDepth = -1
@@ -277,6 +300,7 @@ object EpgParser {
             progStart = null
             progStop = null
             progTitle = null
+            progDesc = null
         }
 
         private fun finishChannel() {
@@ -360,6 +384,7 @@ object EpgParser {
                     progStart = start
                     progStop = stop
                     progTitle = null
+                    progDesc = null
                     progDepth = depth
                     if (selfClosing) finishProgramme()
                 }
@@ -374,7 +399,20 @@ object EpgParser {
                         progTitle = ""
                     } else {
                         captureDepth = depth
-                        captureForProgramme = true
+                        captureKind = CAPTURE_TITLE
+                        captureBuf.setLength(0)
+                    }
+                }
+                // 9.3.0 (Nova): the first <desc> of the open
+                // programme, captured exactly like the title. The
+                // scan cost is one string compare per element; the
+                // text itself is only buffered while a desc is open.
+                "desc" -> if (progDepth > 0 && progDesc == null && captureDepth < 0) {
+                    if (selfClosing) {
+                        progDesc = ""
+                    } else {
+                        captureDepth = depth
+                        captureKind = CAPTURE_DESC
                         captureBuf.setLength(0)
                     }
                 }
@@ -383,13 +421,21 @@ object EpgParser {
                         chanName = ""
                     } else {
                         captureDepth = depth
-                        captureForProgramme = false
+                        captureKind = CAPTURE_NAME
                         captureBuf.setLength(0)
                     }
                 }
             }
             if (!selfClosing) stack.add(name)
             return i
+        }
+
+        private companion object {
+            // What the current text capture feeds (see captureKind).
+            const val CAPTURE_NONE = 0
+            const val CAPTURE_TITLE = 1
+            const val CAPTURE_NAME = 2
+            const val CAPTURE_DESC = 3
         }
 
         /** Entity-decode an attribute value; null on a bad reference. */

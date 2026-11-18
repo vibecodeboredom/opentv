@@ -42,8 +42,10 @@ object ParsedCache {
     private const val DB_NAME = "parsed_cache.db"
     /** 5.0.0: catch-up columns on the channels table (catchup_type,
      * catchup_days, catchup_source). onUpgrade drops and recreates,
-     * so the snapshot is just re-parsed on the next load. */
-    private const val DB_VERSION = 3
+     * so the snapshot is just re-parsed on the next load.
+     * 9.3.0 (Nova): a description column on the epg table, same
+     * drop-and-recreate upgrade. */
+    private const val DB_VERSION = 4
 
     /** Meta key for a playlist's save time, keyed by its URL hash. */
     private fun playlistSavedAtKey(url: String): String =
@@ -64,7 +66,8 @@ object ParsedCache {
                 "CREATE TABLE epg (" +
                     "map_key TEXT NOT NULL, channel_id TEXT NOT NULL, " +
                     "start_ms INTEGER NOT NULL, stop_ms INTEGER NOT NULL, " +
-                    "title TEXT NOT NULL, seq INTEGER NOT NULL)"
+                    "title TEXT NOT NULL, description TEXT NOT NULL, " +
+                    "seq INTEGER NOT NULL)"
             )
             db.execSQL("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         }
@@ -212,6 +215,25 @@ object ParsedCache {
     }
 
     /**
+     * When the stored EPG was saved, or null when there is no snapshot
+     * for this URL. Reads only the meta table — epgSnapshot reads the
+     * whole programme table, which is far too heavy for a freshness
+     * label. 7.0.0: the guide header's "Guide updated …" line.
+     */
+    fun epgSavedAt(context: Context, url: String): Long? {
+        val db = open(context) ?: return null
+        try {
+            val meta = readMeta(db)
+            if (meta[META_EPG_URL] != url) return null
+            return meta[META_EPG_SAVED_AT]?.toLongOrNull()
+        } catch (ignored: Exception) {
+            return null
+        } finally {
+            closeQuietly(db)
+        }
+    }
+
+    /**
      * The stored EPG for this URL: (savedAt, merged map), or null. An
      * empty map is a real snapshot (no guide data) — only a missing or
      * mismatched meta row means "no snapshot".
@@ -227,7 +249,7 @@ object ParsedCache {
             val savedAt = meta[META_EPG_SAVED_AT]?.toLongOrNull() ?: return null
             val merged = LinkedHashMap<String, MutableList<EpgParser.Programme>>()
             db.rawQuery(
-                "SELECT map_key, channel_id, start_ms, stop_ms, title " +
+                "SELECT map_key, channel_id, start_ms, stop_ms, title, description " +
                     "FROM epg ORDER BY seq",
                 null
             ).use { c ->
@@ -236,13 +258,19 @@ object ParsedCache {
                 val startI = c.getColumnIndexOrThrow("start_ms")
                 val stopI = c.getColumnIndexOrThrow("stop_ms")
                 val titleI = c.getColumnIndexOrThrow("title")
+                val descI = c.getColumnIndexOrThrow("description")
                 while (c.moveToNext()) {
                     val key = c.getString(keyI)
                     merged.getOrPut(key) { ArrayList() } += EpgParser.Programme(
                         channelId = c.getString(channelIdI),
                         startMillis = c.getLong(startI),
                         stopMillis = c.getLong(stopI),
-                        title = c.getString(titleI)
+                        title = c.getString(titleI),
+                        // 9.3.0 (Nova): the description round-trips
+                        // too — without the column, a cold start on
+                        // the snapshot would silently lose every
+                        // description the parse had captured.
+                        desc = if (c.isNull(descI)) "" else c.getString(descI)
                     )
                 }
             }
@@ -267,8 +295,8 @@ object ParsedCache {
                 db.delete("epg", null, null)
                 val stmt = db.compileStatement(
                     "INSERT INTO epg " +
-                        "(map_key, channel_id, start_ms, stop_ms, title, seq) " +
-                        "VALUES (?,?,?,?,?,?)"
+                        "(map_key, channel_id, start_ms, stop_ms, title, description, seq) " +
+                        "VALUES (?,?,?,?,?,?,?)"
                 )
                 try {
                     var seq = 0L
@@ -279,7 +307,8 @@ object ParsedCache {
                             stmt.bindLong(3, p.startMillis)
                             stmt.bindLong(4, p.stopMillis)
                             stmt.bindString(5, p.title)
-                            stmt.bindLong(6, seq++)
+                            stmt.bindString(6, p.desc)
+                            stmt.bindLong(7, seq++)
                             stmt.executeInsert()
                         }
                     }

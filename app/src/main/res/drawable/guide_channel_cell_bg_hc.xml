@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 9.1.1: high-contrast focused guide channel cell. The focused
+     channel cell used to only brighten its fill (#3A3E42) — the one
+     focus surface without the thick accent outline the programme
+     cells and sidebar rows get. Same fill, plus a 3dp accent
+     outline, so the focused channel reads at a glance. Used when
+     the high-contrast focus setting is on. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#3A3E42" />
+    <corners android:radius="8dp" />
+    <stroke
+        android:width="3dp"
+        android:color="#86C739" />
+</shape>

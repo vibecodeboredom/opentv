@@ -48,9 +48,11 @@ class StatsActivity : FragmentActivity() {
             val channels = playlistResult.getOrNull() ?: emptyList()
             val favorites = PlaylistRepository.favorites(this@StatsActivity).size
             val recordings = RecordingManager.listRecordings(this@StatsActivity)
-            // Total bytes from the list already fetched — totalBytesUsed
-            // re-runs the whole DownloadIndex query to sum the same rows.
-            val recordingsBytes = recordings.sumOf { it.bytesDownloaded }
+            // 8.3.1: the true on-disk figure (diskBytesUsed), not
+            // the sum of the index's claimed bytes — the cache's
+            // LRU evictor may have dropped segments of old
+            // recordings, which the index never learns.
+            val recordingsBytes = RecordingManager.diskBytesUsed(this@StatsActivity)
 
             // Already on the main thread (lifecycleScope is Main, and
             // loadPlaylist does its I/O inside withContext(IO)) — the

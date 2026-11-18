@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 9.1.0: high-contrast sidebar row background. Same shape as
+     sidebar_row_bg, but the focused row gets a 2dp accent outline
+     and a brighter fill, so focus is unmistakable on the TV even at
+     a glance. Used when the high-contrast focus setting is on. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#45484D" />
+            <corners android:radius="16dp" />
+            <stroke
+                android:width="2dp"
+                android:color="#86C739" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#45484D" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>
