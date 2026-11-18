@@ -201,14 +201,28 @@ Rules (from Chuni, 2026-11-17):
   the rest were wrong or duplicates and were dropped. GLM 429'd on
   its review call and sat this one out.
 
-### 8.3.0 (planned) — Recordings
+### 8.3.0 ✅ (this release) — Recordings
 
 - Scheduled recordings from the guide: pick a future programme,
-  set it to record when it starts. Builds on the existing custom
-  recording timer.
-- Recordings list: sort / filter, and storage usage shown per
-  recording.
-- Auto-delete old recordings option (keep the last N days).
+  set it to record when it starts. An AlarmManager alarm fires
+  RecordStartReceiver at the start time, which starts the recording
+  and schedules its stop at the programme's end (inexact alarms, no
+  exact-alarm permission needed — may land a few minutes late).
+  Cancel from the guide menu, the recordings screen, or Settings →
+  Recordings. A programme that already ended by the time the alarm
+  fires is skipped.
+- Recordings list: sort (newest / oldest / largest / smallest /
+  name) and filter (all / recording now / saved) controls on the
+  recordings screen, persisted across opens; per-recording storage
+  usage and date on the card, not only in the options dialog.
+- Auto-delete old recordings option (Off / 7 / 14 / 30 / 90 days)
+  in Settings → Recordings; enforced when the recordings screen
+  opens and when a scheduled recording starts. Never deletes
+  in-progress recordings or ones with no start time recorded. The
+  setting rides in backups (old backups decode to Off).
+- Gemini lite reviewed the diff (no findings) and wrote 4 extra
+  unit tests (1 fixed: wrong expected spacing in cleanField);
+  GLM 429'd and sat this one out.
 
 ### 8.3.1 (planned) — Patch
 
