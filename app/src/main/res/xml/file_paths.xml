@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 8.0.0: the backup file lives in the cache dir; the share sheet
+     gets a content:// URI for it through the FileProvider. -->
+<paths>
+    <cache-path name="backup" path="." />
+</paths>

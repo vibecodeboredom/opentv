@@ -86,4 +86,26 @@ object TrackPrefs {
             .putString(subtitleKey(channelId), value)
             .apply()
     }
+
+    /** 8.0.0 — Every stored track pick, raw ("a:<id>" / "s:<id>"
+     * -> stored value), for the backup. */
+    fun allEntries(context: Context): Map<String, String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.all.mapNotNull { (key, value) ->
+            val str = value as? String ?: return@mapNotNull null
+            key to str
+        }.toMap()
+    }
+
+    /** 8.0.0 — Replace all stored track picks wholesale (backup
+     * restore). */
+    fun restoreAll(context: Context, entries: Map<String, String>) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        editor.clear()
+        for ((key, value) in entries) {
+            editor.putString(key, value)
+        }
+        editor.apply()
+    }
 }

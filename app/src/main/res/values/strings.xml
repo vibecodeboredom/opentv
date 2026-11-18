@@ -213,6 +213,29 @@
     <string name="playlist_activated">Activated %1$s</string>
     <string name="playlist_cannot_deactivate_last">You need at least one active playlist.</string>
     <string name="playlist_disabled_hint">This playlist is disabled — long-press it to activate it.</string>
+    <!-- EPG source manager (8.0.0): the EPG URLs are a list now. -->
+    <string name="epg_sources_title">EPG sources (XMLTV)</string>
+    <string name="epg_sources_hint">Guide data sources — add or remove them one by one. Several sources are merged into one guide.</string>
+    <string name="epg_source_add">Add EPG source</string>
+    <string name="epg_source_add_title">Add EPG source</string>
+    <string name="epg_source_url_hint">https://example.com/guide.xml</string>
+    <string name="epg_source_added">Added EPG source</string>
+    <string name="epg_source_invalid_url">Enter a valid EPG URL (http:// or https://).</string>
+    <string name="epg_source_remove">Remove</string>
+    <string name="epg_source_remove_confirm">Remove this EPG source?</string>
+    <string name="epg_source_removed">Removed EPG source</string>
+    <string name="epg_source_cannot_remove_last">You need at least one EPG source.</string>
+    <!-- Backup &amp; restore (8.0.0). -->
+    <string name="backup_title">Backup &amp; restore</string>
+    <string name="backup_hint">Save your playlists, favorites, hidden channels and settings to one file, and restore it on another device so it starts with the same setup.</string>
+    <string name="backup_export">Export backup</string>
+    <string name="backup_import">Import backup</string>
+    <string name="backup_exported">Backup saved to Downloads</string>
+    <string name="backup_export_failed">Could not create the backup file.</string>
+    <string name="backup_share_failed">No app available to share it — the backup is saved in Downloads.</string>
+    <string name="backup_imported">Backup restored — %1$d playlists, %2$d favorites, %3$d EPG sources</string>
+    <string name="backup_import_failed">That file is not a valid OpenTV backup.</string>
+    <string name="backup_no_picker">No file picker on this TV.</string>
     <!-- Mobile (6.0.0-rc1): touch home screen + playback. -->
     <string name="mobile_continue_watching">▶  Continue watching</string>
     <string name="mobile_refresh">↻ Refresh</string>

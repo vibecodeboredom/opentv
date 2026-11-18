@@ -1,11 +1,17 @@
 package com.opentv.player
 
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
@@ -17,11 +23,13 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /** Lets the user manage M3U playlists (4.8.0: several playlists, one
  * active at a time), change the (optional) XMLTV EPG URL and the
@@ -65,6 +73,42 @@ class SettingsActivity : FragmentActivity() {
             }
         }
 
+    /** Backup file picker (8.0.0): pick an opentv-backup.json to
+     * restore from. */
+    private val pickBackupFile =
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            lifecycleScope.launch {
+                val text = withContext(Dispatchers.IO) {
+                    try {
+                        contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (text.isNullOrBlank()) {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_import_failed, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val data = BackupManager.decode(text).getOrElse {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_import_failed, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val report = withContext(Dispatchers.IO) {
+                    BackupManager.restore(this@SettingsActivity, data)
+                }
+                Toast.makeText(
+                    this@SettingsActivity,
+                    getString(
+                        R.string.backup_imported,
+                        report.playlists, report.favorites, report.epgSources
+                    ),
+                    Toast.LENGTH_LONG
+                ).show()
+                restartToMain()
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
@@ -74,12 +118,11 @@ class SettingsActivity : FragmentActivity() {
         findViewById<TextView>(R.id.about_version).text =
             getString(R.string.about_version, BuildConfig.VERSION_NAME)
 
-        val epgUrl = findViewById<EditText>(R.id.epg_url)
         val uploadUrl = findViewById<EditText>(R.id.upload_url)
-        epgUrl.setText(PlaylistRepository.epgUrl(this))
         uploadUrl.setText(PlaylistRepository.uploadUrl(this))
 
         buildPlaylistsUi()
+        buildEpgSourcesUi()
 
         // 6.1.2: guide & playback preferences — toggles save
         // immediately; the channel-list size applies the next time
@@ -158,17 +201,36 @@ class SettingsActivity : FragmentActivity() {
             showAddPlaylistDialog()
         }
 
+        findViewById<Button>(R.id.add_epg_source_button).setOnClickListener {
+            showAddEpgSourceDialog()
+        }
+
+        findViewById<Button>(R.id.export_backup_button).setOnClickListener {
+            exportBackup()
+        }
+
+        findViewById<Button>(R.id.import_backup_button).setOnClickListener {
+            try {
+                pickBackupFile.launch("*/*")
+            } catch (e: Exception) {
+                // Some TVs have no document picker at all.
+                Toast.makeText(this, R.string.backup_no_picker, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 8.0.0: the EPG sources save immediately when added or
+        // removed (like the playlists), so Save only writes the
+        // recording upload URL now.
         findViewById<Button>(R.id.save_button).setOnClickListener {
-            PlaylistRepository.setEpgUrl(this, epgUrl.text.toString().trim())
             PlaylistRepository.setUploadUrl(this, uploadUrl.text.toString().trim())
             finish()
         }
 
         findViewById<Button>(R.id.reset_button).setOnClickListener {
             PlaylistRepository.resetUrls(this)
-            epgUrl.setText(PlaylistRepository.DEFAULT_EPG_URL)
             uploadUrl.setText("")
             buildPlaylistsUi()
+            buildEpgSourcesUi()
         }
 
         findViewById<Button>(R.id.unhide_button).setOnClickListener {
@@ -550,5 +612,175 @@ class SettingsActivity : FragmentActivity() {
         }
         updateShareUi()
         startShareTicker()
+    }
+
+    // ---- EPG sources (8.0.0) --------------------------------------------
+
+    /** One row per EPG source URL. Long-press to remove it (the last
+     * source can't be removed — the app always needs one). Sources
+     * save immediately, like the playlists. */
+    private fun buildEpgSourcesUi() {
+        val container = findViewById<LinearLayout>(R.id.epg_sources_list)
+        container.removeAllViews()
+        val density = resources.displayMetrics.density
+        fun dp(v: Int): Int = (v * density).toInt()
+        for (url in PlaylistRepository.epgUrls(this)) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(4); bottomMargin = dp(4) }
+                setBackgroundResource(R.drawable.settings_row_bg)
+            }
+            val urlView = TextView(this).apply {
+                text = url
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            row.addView(urlView)
+            row.setOnLongClickListener {
+                showRemoveEpgSourceDialog(url)
+                true
+            }
+            container.addView(row)
+        }
+    }
+
+    /** Add an EPG source: one http/https XMLTV URL. */
+    private fun showAddEpgSourceDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_TEXT_VARIATION_URI
+            hint = getString(R.string.epg_source_url_hint)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.epg_source_add_title)
+            .setView(input)
+            .setPositiveButton(R.string.epg_source_add) { _, _ ->
+                val url = input.text.toString().trim()
+                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                    Toast.makeText(this, R.string.epg_source_invalid_url, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val current = PlaylistRepository.epgUrls(this)
+                if (current.contains(url)) {
+                    Toast.makeText(this, R.string.epg_source_added, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                PlaylistRepository.setEpgUrls(this, current + url)
+                Toast.makeText(this, R.string.epg_source_added, Toast.LENGTH_SHORT).show()
+                buildEpgSourcesUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showRemoveEpgSourceDialog(url: String) {
+        val current = PlaylistRepository.epgUrls(this)
+        if (current.size <= 1) {
+            Toast.makeText(this, R.string.epg_source_cannot_remove_last, Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setMessage(R.string.epg_source_remove_confirm)
+            .setPositiveButton(R.string.epg_source_remove) { _, _ ->
+                PlaylistRepository.setEpgUrls(this, current - url)
+                Toast.makeText(this, R.string.epg_source_removed, Toast.LENGTH_SHORT).show()
+                buildEpgSourcesUi()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ---- Backup & restore (8.0.0) ----------------------------------------
+
+    /** Export the backup: write opentv-backup.json to the cache dir
+     * and to Downloads (so it can be pulled off the TV), then offer
+     * the Android share sheet. On a TV there may be no app to share
+     * with — the Downloads copy is the fallback, and the toast says
+     * so. */
+    private fun exportBackup() {
+        lifecycleScope.launch {
+            val json = withContext(Dispatchers.IO) {
+                BackupManager.encode(BackupManager.export(this@SettingsActivity))
+            }
+            val file = withContext(Dispatchers.IO) {
+                try {
+                    File(cacheDir, "opentv-backup.json").apply {
+                        writeText(json, Charsets.UTF_8)
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            if (file == null) {
+                Toast.makeText(this@SettingsActivity, R.string.backup_export_failed, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val inDownloads = withContext(Dispatchers.IO) { saveBackupToDownloads(json) }
+            if (inDownloads) {
+                Toast.makeText(this@SettingsActivity, R.string.backup_exported, Toast.LENGTH_SHORT).show()
+            }
+            val uri = FileProvider.getUriForFile(
+                this@SettingsActivity, "${packageName}.fileprovider", file
+            )
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "application/json"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, "OpenTV backup")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                startActivity(Intent.createChooser(send, getString(R.string.backup_export)))
+            } catch (e: ActivityNotFoundException) {
+                if (inDownloads) {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_share_failed, Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this@SettingsActivity, R.string.backup_export_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /** Copy the backup JSON into the public Downloads folder. Best
+     * effort — returns false when the platform refuses (e.g. no
+     * storage permission on an old Android), and the cache-dir file
+     * + share sheet still work. */
+    private fun saveBackupToDownloads(json: String): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, "opentv-backup.json")
+                    put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val uri: Uri? = contentResolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                ) ?: return false
+                contentResolver.openOutputStream(uri)?.use {
+                    it.write(json.toByteArray(Charsets.UTF_8))
+                } ?: return false
+                true
+            } else {
+                val downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+                File(downloads, "opentv-backup.json").apply {
+                    parentFile?.mkdirs()
+                    writeText(json, Charsets.UTF_8)
+                }
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 }

@@ -67,6 +67,9 @@
 
     </LinearLayout>
 
+    <!-- EPG sources (8.0.0): the URLs are a list now — add or remove
+         them one by one instead of editing one comma-separated field.
+         Long-press a row to remove it. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -78,23 +81,39 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/epg_url_label"
+            android:text="@string/epg_sources_title"
             android:textColor="@android:color/white"
             android:textSize="18sp"
             android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/epg_url"
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/epg_sources_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:id="@+id/epg_sources_list"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:background="@drawable/settings_input_bg"
-            android:padding="14dp"
-            android:textColor="@android:color/white"
-            android:textColorHint="#FF7A7A85"
+            android:orientation="vertical" />
+
+        <Button
+            android:id="@+id/add_epg_source_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/settings_button_bg"
+            android:minHeight="48dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="@string/epg_source_add"
+            android:textColor="@color/settings_button_text"
             android:textSize="16sp"
-            android:inputType="textUri"
-            android:singleLine="true" />
+            android:textStyle="bold" />
 
     </LinearLayout>
 
@@ -393,6 +412,70 @@
             android:textColor="@color/settings_button_text"
             android:textSize="16sp"
             android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Backup & restore (8.0.0): one file holds the playlists,
+         favorites, hidden channels and settings — export it to share
+         or save, import it on another device. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_rounded_bg"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/backup_title"
+            android:textColor="@android:color/white"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/backup_hint"
+            android:textColor="#B3FFFFFF"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/export_backup_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/backup_export"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/import_backup_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/settings_button_bg"
+                android:minHeight="48dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:text="@string/backup_import"
+                android:textColor="@color/settings_button_text"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

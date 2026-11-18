@@ -397,6 +397,24 @@ object PlaylistRepository {
      * un-loadable entry can never be created.
      */
     fun saveLocalPlaylist(context: Context, name: String, text: String): Playlist? {
+        val entry = storeLocalPlaylistFile(context, name, text) ?: return null
+        val list = playlists(context).toMutableList()
+        // A distinct file name per upload, so this is always an append.
+        list += entry
+        savePlaylists(context, list)
+        return entry
+    }
+
+    /**
+     * 8.0.0 — Write an M3U text to a local file and return its
+     * playlist entry WITHOUT touching the playlist list. The backup
+     * restore uses this so it can build the new list first and
+     * replace it in one go (saveLocalPlaylist appends to the old
+     * list, which would leave strays behind when the restore then
+     * replaces it). Returns null when the text is not a usable
+     * playlist (same checks as saveLocalPlaylist).
+     */
+    fun storeLocalPlaylistFile(context: Context, name: String, text: String): Playlist? {
         if (!text.trimStart().startsWith("#EXTM3U")) return null
         if (M3uParser.parse(text).isEmpty()) return null
         val fileName = SHARED_FILE_PREFIX + System.currentTimeMillis() + ".m3u"
@@ -404,12 +422,7 @@ object PlaylistRepository {
             context.openFileOutput(fileName, Context.MODE_PRIVATE)
                 .use { it.write(text.toByteArray(Charsets.UTF_8)) }
             val cleanName = cleanPlaylistName(name).ifBlank { "Shared playlist" }
-            val entry = Playlist(cleanName, LOCAL_SCHEME + fileName)
-            val list = playlists(context).toMutableList()
-            // A distinct file name per upload, so this is always an append.
-            list += entry
-            savePlaylists(context, list)
-            entry
+            Playlist(cleanName, LOCAL_SCHEME + fileName)
         } catch (ignored: Exception) {
             null
         }
@@ -425,6 +438,41 @@ object PlaylistRepository {
         } catch (ignored: Exception) {
             null
         }
+    }
+
+    /**
+     * 8.0.0 — Replace the whole playlist list at once (backup
+     * restore). The list must have at least one entry and at least
+     * one enabled entry, and the active URL must be an enabled entry
+     * in it; anything else is refused and the current list is left
+     * alone. Clears the in-memory playlist cache so the next load
+     * fetches the new setup.
+     */
+    fun restorePlaylists(context: Context, list: List<Playlist>, activeUrl: String): Boolean {
+        if (list.isEmpty() || list.none { it.enabled }) return false
+        if (list.none { it.url == activeUrl && it.enabled }) return false
+        savePlaylists(context, list)
+        prefs(context).edit().putString(KEY_ACTIVE_PLAYLIST, activeUrl).apply()
+        playlistCache = null
+        return true
+    }
+
+    /** 8.0.0 — Replace the favorites set wholesale (backup restore). */
+    fun setFavorites(context: Context, favorites: Set<String>) {
+        prefs(context).edit().putStringSet(KEY_FAVORITES, favorites).apply()
+    }
+
+    /** 8.0.0 — Replace the hidden-channels set wholesale (backup restore). */
+    fun setHiddenChannels(context: Context, hidden: Set<String>) {
+        prefs(context).edit().putStringSet(KEY_HIDDEN, hidden).apply()
+    }
+
+    /** 8.0.0 — Replace the per-channel EPG overrides wholesale
+     * (backup restore). */
+    fun setEpgOverrides(context: Context, overrides: Map<String, String>) {
+        epgOverridesCache = null
+        val raw = overrides.entries.joinToString("\n") { "${it.key}=${it.value}" }
+        prefs(context).edit().putString(KEY_EPG_OVERRIDES, raw).apply()
     }
 
     private fun savePlaylists(context: Context, list: List<Playlist>) {
@@ -462,6 +510,35 @@ object PlaylistRepository {
 
     fun epgUrl(context: Context): String =
         prefs(context).getString(KEY_EPG_URL, DEFAULT_EPG_URL) ?: DEFAULT_EPG_URL
+
+    /**
+     * 8.0.0 — EPG sources as a list. The stored string is split on
+     * commas or newlines (the same split the loader uses), so a list
+     * written before 8.0.0 as one comma-separated field reads back
+     * as its sources with no migration. An empty or missing value
+     * falls back to the single default source.
+     */
+    fun epgUrls(context: Context): List<String> =
+        parseEpgUrls(prefs(context).getString(KEY_EPG_URL, null) ?: "")
+
+    /** Split a stored EPG value into its sources (pure, tested). */
+    fun parseEpgUrls(raw: String): List<String> {
+        val urls = raw.split(",", "\n").map { it.trim() }.filter { it.isNotEmpty() }
+        return urls.ifEmpty { listOf(DEFAULT_EPG_URL) }
+    }
+
+    /** Replace the EPG source list. Stored newline-joined — the
+     * loader splits on commas or newlines, so both separators read
+     * back, and a newline never appears inside a URL. An empty list
+     * stores the default (the app always needs one source). */
+    fun setEpgUrls(context: Context, urls: List<String>) {
+        val clean = urls.map { it.trim() }
+            .filter { it.startsWith("http://") || it.startsWith("https://") }
+            .distinct()
+            .ifEmpty { listOf(DEFAULT_EPG_URL) }
+        prefs(context).edit().putString(KEY_EPG_URL, clean.joinToString("\n")).apply()
+        epgCache = null
+    }
 
     /** Base URL recordings are uploaded to (HTTP PUT). Empty = not configured. */
     fun uploadUrl(context: Context): String =

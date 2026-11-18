@@ -78,6 +78,19 @@
             android:name=".RecordStopReceiver"
             android:exported="false" />
 
+        <!-- 8.0.0: share the backup file (written to the cache dir)
+             with other apps — the share sheet gets a content:// URI,
+             never a raw file path. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>
