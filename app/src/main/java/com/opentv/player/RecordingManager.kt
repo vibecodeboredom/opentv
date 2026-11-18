@@ -176,24 +176,44 @@ object RecordingManager {
     }
 
     /**
-     * 8.2.0 (Nova): schedule a recording to START at a programme's
-     * start time. Same inexact-alarm pattern as [scheduleStopRecording]:
-     * fires [RecordStartReceiver], which starts the recording and
-     * arms the matching stop. The receiver can only run while the
-     * app process can be started by the system, so — like the
-     * reminders — this is an OpenTV-is-running feature, and the UI
-     * string says so.
+     * Combine (8.2.0 Nova + 8.3.1 Juniper): schedule a recording
+     * to START at a programme's start time. Fires
+     * [RecordStartReceiver], which starts the recording and arms
+     * the matching stop. Uses setAlarmClock, not
+     * setAndAllowWhileIdle: an alarm-clock alarm is exact (the
+     * recording starts on time instead of a few minutes late) AND
+     * it grants the app a temporary exemption from Android 12's
+     * background foreground-service restriction. The receiver has
+     * to start the foreground RecordingService while the app is
+     * closed, and a plain inexact alarm does not grant that — the
+     * start threw ForegroundServiceStartNotAllowedException and the
+     * recording silently never happened. setAlarmClock needs no
+     * SCHEDULE_EXACT_ALARM permission.
      */
     fun scheduleRecordingStart(
         context: Context,
         scheduled: PlaylistRepository.ScheduledRecording
     ) {
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarm.setAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            scheduled.startMillis,
+        alarm.setAlarmClock(
+            AlarmManager.AlarmClockInfo(scheduled.startMillis, null),
             recordStartPendingIntent(context, scheduled)
         )
+    }
+
+    /**
+     * Combine (8.3.1 Juniper, adapted to Nova's store): re-arm
+     * the start alarms for every upcoming scheduled recording.
+     * Alarms do not survive a reboot, so the boot receiver calls
+     * this — without it a schedule made before a reboot would sit
+     * in the list looking scheduled and never fire. Returns how
+     * many alarms were re-armed. (The BootReceiver's manifest
+     * registration is foundation work — see the combine notes.)
+     */
+    fun rearmScheduledRecordingAlarms(context: Context): Int {
+        val upcoming = PlaylistRepository.scheduledRecordings(context)
+        for (recording in upcoming) scheduleRecordingStart(context, recording)
+        return upcoming.size
     }
 
     /** 8.2.0 (Nova): cancel a scheduled recording's start alarm. */
@@ -206,6 +226,39 @@ object RecordingManager {
         alarm.cancel(pending)
         pending.cancel()
     }
+
+    /**
+     * 8.3.0 — Delete the finished recordings older than [keepDays]
+     * days (see [RecordingLibrary.oldRecordings]), returning the
+     * ones deleted. The recordings screen calls this with the list
+     * it already fetched, so the DownloadIndex is not queried twice
+     * for one screen load — and the caller drops the returned ids
+     * from its fetched list instead of re-querying.
+     */
+    fun deleteOldRecordings(
+        context: Context,
+        recordings: List<Recording>,
+        keepDays: Int,
+        nowMillis: Long = System.currentTimeMillis()
+    ): List<Recording> {
+        val old = RecordingLibrary.oldRecordings(recordings, keepDays, nowMillis)
+        for (recording in old) {
+            deleteRecording(context, recording.id)
+        }
+        return old
+    }
+
+    /**
+     * 8.3.0 — The same pruning, fetching the list first — for
+     * callers that do not have one (the scheduled-record start
+     * receiver, which runs in the background). Returns how many
+     * were deleted.
+     */
+    fun pruneOldRecordings(
+        context: Context,
+        keepDays: Int,
+        nowMillis: Long = System.currentTimeMillis()
+    ): Int = deleteOldRecordings(context, listRecordings(context), keepDays, nowMillis).size
 
     /** True while a channel's recording is actively downloading.
      * 6.1.0: does NOT create the DownloadManager. updateTransportIcons
@@ -268,9 +321,18 @@ object RecordingManager {
         return out.sortedByDescending { it.startedAtMillis }
     }
 
-    /** Total bytes used by recordings on disk. */
-    fun totalBytesUsed(context: Context): Long =
-        listRecordings(context).sumOf { it.bytesDownloaded }
+    /**
+     * 8.3.1 — Actual bytes the recordings occupy on disk. The
+     * DownloadIndex's bytesDownloaded can overstate it: the cache's
+     * LRU evictor may drop segments of old recordings once the
+     * cache passes its cap, and the index never learns. The cache
+     * holds only recording downloads (playback never writes to
+     * it), so its on-disk size is the true total — use this for
+     * the totals the user sees. Per-recording sizes still come
+     * from the index; after eviction a single card can claim
+     * slightly more than its share on disk.
+     */
+    fun diskBytesUsed(context: Context): Long = getCache(context).cacheSpace
 
     /**
      * 9.2.0 (Nova): the recordings storage guard. When the user
