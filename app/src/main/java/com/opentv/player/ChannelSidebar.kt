@@ -106,7 +106,12 @@ class ChannelSidebar(
         },
         onChannelClick = onChannelSelected,
         currentChannelId = currentChannelId,
-        sizing = sizing
+        sizing = sizing,
+        // 9.1.0: the font-size + high-contrast settings, read when
+        // the sidebar is built (a fresh sidebar picks up a change,
+        // like the channel-list size).
+        fontSize = AppSettings.fontSize(activity),
+        highContrast = AppSettings.highContrastFocus(activity)
     )
 
     init {
@@ -128,7 +133,8 @@ class ChannelSidebar(
 
     /** Open the sidebar on the groups list. 5.0.0: it slides in from
      * the left (200ms) with the scrim fading in, instead of popping
-     * in — fast enough to never delay navigation. */
+     * in — fast enough to never delay navigation. 9.1.0: with
+     * reduced animations on, it jumps straight to its final state. */
     fun show() {
         hideGeneration++
         inGroups = true
@@ -138,6 +144,12 @@ class ChannelSidebar(
         panel.animate().cancel()
         scrim.animate().cancel()
         val width = panel.width.takeIf { it > 0 } ?: dp(sizing.panelDp)
+        if (AppSettings.reducedAnimations(activity)) {
+            panel.translationX = 0f
+            scrim.alpha = 1f
+            buildGroups()
+            return
+        }
         panel.translationX = -width.toFloat()
         scrim.alpha = 0f
         panel.animate().translationX(0f).setDuration(200).start()
@@ -146,12 +158,21 @@ class ChannelSidebar(
     }
 
     /** 5.0.0: slides back out to the left (180ms); the views hide
-     * when the slide finishes. */
+     * when the slide finishes. 9.1.0: with reduced animations on,
+     * it hides at once. */
     fun hide() {
         if (panel.visibility != View.VISIBLE) return
         val generation = ++hideGeneration
         panel.animate().cancel()
         scrim.animate().cancel()
+        if (AppSettings.reducedAnimations(activity)) {
+            panel.visibility = View.GONE
+            scrim.visibility = View.GONE
+            panel.translationX = 0f
+            scrim.alpha = 1f
+            adapter.clearTitles()
+            return
+        }
         val width = panel.width.takeIf { it > 0 } ?: dp(sizing.panelDp)
         panel.animate().translationX(-width.toFloat()).setDuration(180)
             .withEndAction {

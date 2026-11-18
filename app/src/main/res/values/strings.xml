@@ -327,5 +327,11 @@
     <string name="prefs_launch_behaviour">On launch (TV)</string>
     <string name="prefs_launch_home">Home screen</string>
     <string name="prefs_launch_autoplay">Auto-play last channel</string>
+    <string name="prefs_guide_density">Guide row density</string>
+    <string name="prefs_density_compact">Compact</string>
+    <string name="prefs_density_comfortable">Comfortable</string>
+    <string name="prefs_font_size">Font size (guide &amp; sidebar)</string>
+    <string name="prefs_high_contrast_focus">High-contrast focus</string>
+    <string name="prefs_reduced_animations">Reduce animations</string>
     <string name="home_recent_channels">Recent channels</string>
 </resources>

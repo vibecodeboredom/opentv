@@ -64,7 +64,15 @@ object BackupManager {
         val autoDeleteRecordingsDays: Int = 0,
         /** 9.0.0 — what the TV opens on ("home" or "autoplay").
          * Older backups have no key and decode to "home". */
-        val launchBehaviour: String = "home"
+        val launchBehaviour: String = "home",
+        /** 9.1.0 — appearance: guide row density ("compact" or
+         * "comfortable"), font size ("small", "medium" or "large"),
+         * high-contrast focus and reduced animations. Older backups
+         * have no keys and decode to the defaults. */
+        val guideDensity: String = "comfortable",
+        val fontSize: String = "medium",
+        val highContrastFocus: Boolean = false,
+        val reducedAnimations: Boolean = false
     )
 
     /** What a restore did, for the toast. */
@@ -113,7 +121,11 @@ object BackupManager {
                 "channelListSize" to data.channelListSize,
                 "guideWindowSize" to data.guideWindowSize,
                 "autoDeleteRecordingsDays" to data.autoDeleteRecordingsDays,
-                "launchBehaviour" to data.launchBehaviour
+                "launchBehaviour" to data.launchBehaviour,
+                "guideDensity" to data.guideDensity,
+                "fontSize" to data.fontSize,
+                "highContrastFocus" to data.highContrastFocus,
+                "reducedAnimations" to data.reducedAnimations
             )
         )
         return Json.stringify(root)
@@ -185,7 +197,11 @@ object BackupManager {
                 guideWindowSize = settings?.get("guideWindowSize") as? String ?: "6",
                 autoDeleteRecordingsDays = (settings?.get("autoDeleteRecordingsDays") as? Number)
                     ?.toInt()?.coerceAtLeast(0) ?: 0,
-                launchBehaviour = settings?.get("launchBehaviour") as? String ?: "home"
+                launchBehaviour = settings?.get("launchBehaviour") as? String ?: "home",
+                guideDensity = settings?.get("guideDensity") as? String ?: "comfortable",
+                fontSize = settings?.get("fontSize") as? String ?: "medium",
+                highContrastFocus = settings?.get("highContrastFocus") as? Boolean ?: false,
+                reducedAnimations = settings?.get("reducedAnimations") as? Boolean ?: false
             )
         )
     }
@@ -238,7 +254,11 @@ object BackupManager {
             launchBehaviour = when (AppSettings.launchBehaviour(context)) {
                 AppSettings.LaunchBehaviour.AUTOPLAY -> "autoplay"
                 AppSettings.LaunchBehaviour.HOME -> "home"
-            }
+            },
+            guideDensity = Appearance.guideDensityKey(AppSettings.guideDensity(context)),
+            fontSize = Appearance.fontSizeKey(AppSettings.fontSize(context)),
+            highContrastFocus = AppSettings.highContrastFocus(context),
+            reducedAnimations = AppSettings.reducedAnimations(context)
         )
     }
 
@@ -330,6 +350,12 @@ object BackupManager {
                 AppSettings.LaunchBehaviour.HOME
             }
         )
+        AppSettings.setGuideDensity(
+            context, Appearance.parseGuideDensity(data.guideDensity)
+        )
+        AppSettings.setFontSize(context, Appearance.parseFontSize(data.fontSize))
+        AppSettings.setHighContrastFocus(context, data.highContrastFocus)
+        AppSettings.setReducedAnimations(context, data.reducedAnimations)
         return RestoreReport(
             playlists = playlistCount,
             favorites = data.favorites.size,

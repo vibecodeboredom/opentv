@@ -269,12 +269,25 @@ Rules (from Chuni, 2026-11-17):
   fixed) and wrote 8 extra unit tests (7 added as-is, 1 fixed);
   GLM 429'd and sat this one out.
 
-### 9.1.0 (planned) — Appearance
+### 9.1.0 ✅ (this release) — Appearance
 
 - Guide row density setting (compact / comfortable), alongside the
-  existing channel-list size.
-- Font size options for guide and sidebar text.
-- High-contrast focus style + a reduced-animations toggle.
+  existing channel-list size. Comfortable keeps today's row heights;
+  Compact thins them to 0.8x so more channels fit on screen.
+- Font size options for guide and sidebar text (small / medium /
+  large — 0.9x / 1.0x / 1.15x): programme titles, channel names and
+  numbers, header labels, and the sidebar rows.
+- High-contrast focus style: focused guide cells and sidebar rows
+  get a thick accent outline (3dp on cells, 2dp on rows) and a
+  brighter fill, so focus is unmistakable at a glance.
+- Reduced-animations toggle: the guide's focus pop, the sidebar
+  slide, the playback overlay fades and the guide menu's slide-in
+  all jump to their final state instead of animating.
+- The four appearance settings ride in backups (old backups decode
+  to the defaults). New pure `Appearance.kt` with 14 unit tests.
+- Gemini lite reviewed the diff (no findings) and wrote 4 extra
+  unit tests, all verified correct and added; GLM 429'd and sat
+  this one out.
 
 ### 9.1.1 (planned) — Patch
 

@@ -33,12 +33,20 @@ data class SidebarGroup(val key: String, val label: String, val count: Int)
  * 260dp layout, Large is roomier). A channel name that overflows its
  * row scrolls left-right (marquee) instead of being cut off; short
  * names never scroll, so nothing moves unless it has to.
+ *
+ * 9.1.0: the font-size setting scales the group + channel text
+ * (channel rows already get their sizes from SidebarSizing, which
+ * applies the scale; the group rows scale theirs here), and the
+ * high-contrast focus setting swaps the row background for the
+ * thick-outline variant.
  */
 class SidebarAdapter(
     private val onGroupClick: (SidebarGroup) -> Unit,
     private val onChannelClick: (Channel) -> Unit,
     private val currentChannelId: () -> String?,
-    private val sizing: AppSettings.SidebarSizing
+    private val sizing: AppSettings.SidebarSizing,
+    private val fontSize: Appearance.FontSize = Appearance.FontSize.MEDIUM,
+    private val highContrast: Boolean = false
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     /** One row of the list: a group or a channel. */
@@ -141,11 +149,18 @@ class SidebarAdapter(
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(2, density); bottomMargin = dp(2, density) }
             minimumHeight = dp(sizing.rowMinHeightDp, density)
-            setBackgroundResource(R.drawable.sidebar_row_bg)
+            // 9.1.0: high-contrast focus swaps in the thick-outline
+            // row background.
+            setBackgroundResource(
+                if (highContrast) R.drawable.sidebar_row_bg_hc else R.drawable.sidebar_row_bg
+            )
         }
         val nameView = TextView(context).apply {
             setTextColor(0xFFFFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                Appearance.scaledTextSp(16f, fontSize)
+            )
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -153,7 +168,10 @@ class SidebarAdapter(
         }
         val countView = TextView(context).apply {
             setTextColor(0xB3FFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                Appearance.scaledTextSp(14f, fontSize)
+            )
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -180,7 +198,11 @@ class SidebarAdapter(
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(2, density); bottomMargin = dp(2, density) }
             minimumHeight = dp(sizing.rowMinHeightDp, density)
-            setBackgroundResource(R.drawable.sidebar_row_bg)
+            // 9.1.0: high-contrast focus swaps in the thick-outline
+            // row background.
+            setBackgroundResource(
+                if (highContrast) R.drawable.sidebar_row_bg_hc else R.drawable.sidebar_row_bg
+            )
         }
         val numberView = TextView(context).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sizing.nameSp)

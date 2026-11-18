@@ -30,6 +30,12 @@ object AppSettings {
      * into the last channel. Mobile ignores it (it always opens
      * the touch home screen). */
     private const val KEY_LAUNCH_BEHAVIOUR = "launch_behaviour"
+    /** 9.1.0: appearance — guide row density, guide/sidebar font
+     * size, high-contrast focus, reduced animations. */
+    private const val KEY_GUIDE_DENSITY = "guide_density"
+    private const val KEY_FONT_SIZE = "font_size"
+    private const val KEY_HIGH_CONTRAST_FOCUS = "high_contrast_focus"
+    private const val KEY_REDUCED_ANIMATIONS = "reduced_animations"
 
     /** Channel list (sidebar) size. Small is the compact 6.1.2
      * default, Medium is the old 260dp / 56dp layout, Large is
@@ -185,22 +191,75 @@ object AppSettings {
         ).apply()
     }
 
-    /** Dimensions for the current channel-list size. */
-    fun sidebarSizing(context: Context): SidebarSizing = when (channelListSize(context)) {
-        ChannelListSize.SMALL -> SidebarSizing(
-            panelDp = 220, rowMinHeightDp = 48, rowPaddingDp = 8, groupPaddingDp = 10,
-            numberWidthDp = 28, logoDp = 28, nameSp = 13f, programmeSp = 11f,
-            guideRowHeightDp = 40
-        )
-        ChannelListSize.MEDIUM -> SidebarSizing(
-            panelDp = 260, rowMinHeightDp = 56, rowPaddingDp = 10, groupPaddingDp = 12,
-            numberWidthDp = 32, logoDp = 32, nameSp = 14f, programmeSp = 12f,
-            guideRowHeightDp = 48
-        )
-        ChannelListSize.LARGE -> SidebarSizing(
-            panelDp = 300, rowMinHeightDp = 64, rowPaddingDp = 12, groupPaddingDp = 14,
-            numberWidthDp = 36, logoDp = 36, nameSp = 15f, programmeSp = 13f,
-            guideRowHeightDp = 56
-        )
+    /** 9.1.0 — Guide row density (default Comfortable = today's row
+     * heights; Compact thins them so more channels fit). Applies
+     * the next time the guide opens, like the channel-list size. */
+    fun guideDensity(context: Context): Appearance.GuideDensity =
+        Appearance.parseGuideDensity(prefs(context).getString(KEY_GUIDE_DENSITY, "comfortable"))
+
+    fun setGuideDensity(context: Context, density: Appearance.GuideDensity) {
+        prefs(context).edit().putString(
+            KEY_GUIDE_DENSITY, Appearance.guideDensityKey(density)
+        ).apply()
+    }
+
+    /** 9.1.0 — Font size for the guide + sidebar text (default
+     * Medium = today's size). Applies the next time the guide or a
+     * fresh sidebar opens, like the channel-list size. */
+    fun fontSize(context: Context): Appearance.FontSize =
+        Appearance.parseFontSize(prefs(context).getString(KEY_FONT_SIZE, "medium"))
+
+    fun setFontSize(context: Context, size: Appearance.FontSize) {
+        prefs(context).edit().putString(KEY_FONT_SIZE, Appearance.fontSizeKey(size)).apply()
+    }
+
+    /** 9.1.0 — High-contrast focus: focused guide cells and sidebar
+     * rows get a thick accent outline instead of the subtle one, so
+     * focus is unmistakable at a glance. Applies the next time the
+     * guide or a fresh sidebar opens. */
+    fun highContrastFocus(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_HIGH_CONTRAST_FOCUS, false)
+
+    fun setHighContrastFocus(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_HIGH_CONTRAST_FOCUS, value).apply()
+    }
+
+    /** 9.1.0 — Reduced animations: the guide's focus pop, the
+     * sidebar slide, the playback overlay fades and the guide menu's
+     * slide-in all jump to their final state instead of animating.
+     * Read at animation time, so it takes effect immediately. */
+    fun reducedAnimations(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_REDUCED_ANIMATIONS, false)
+
+    fun setReducedAnimations(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_REDUCED_ANIMATIONS, value).apply()
+    }
+
+    /** Dimensions for the current channel-list size. 9.1.0: the font
+     * size setting scales the text sizes here, so the sidebar's
+     * channel rows grow/shrink with it; the guide scales its own
+     * text at the call site (same helper). */
+    fun sidebarSizing(context: Context): SidebarSizing {
+        val fontScale = fontSize(context).scale
+        return when (channelListSize(context)) {
+            ChannelListSize.SMALL -> SidebarSizing(
+                panelDp = 220, rowMinHeightDp = 48, rowPaddingDp = 8, groupPaddingDp = 10,
+                numberWidthDp = 28, logoDp = 28,
+                nameSp = 13f * fontScale, programmeSp = 11f * fontScale,
+                guideRowHeightDp = 40
+            )
+            ChannelListSize.MEDIUM -> SidebarSizing(
+                panelDp = 260, rowMinHeightDp = 56, rowPaddingDp = 10, groupPaddingDp = 12,
+                numberWidthDp = 32, logoDp = 32,
+                nameSp = 14f * fontScale, programmeSp = 12f * fontScale,
+                guideRowHeightDp = 48
+            )
+            ChannelListSize.LARGE -> SidebarSizing(
+                panelDp = 300, rowMinHeightDp = 64, rowPaddingDp = 12, groupPaddingDp = 14,
+                numberWidthDp = 36, logoDp = 36,
+                nameSp = 15f * fontScale, programmeSp = 13f * fontScale,
+                guideRowHeightDp = 56
+            )
+        }
     }
 }

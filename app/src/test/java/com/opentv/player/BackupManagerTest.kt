@@ -51,6 +51,33 @@ class BackupManagerTest {
         assertEquals(data.groupOverrides, decoded.groupOverrides)
     }
 
+    /** 9.1.0: the appearance settings ride in the backup, and an
+     * old backup without them decodes to the defaults. */
+    @Test
+    fun appearanceSettingsSurviveTheRoundTrip() {
+        val data = sampleData().copy(
+            guideDensity = "compact",
+            fontSize = "large",
+            highContrastFocus = true,
+            reducedAnimations = true
+        )
+        val decoded = BackupManager.decode(BackupManager.encode(data)).getOrThrow()
+        assertEquals("compact", decoded.guideDensity)
+        assertEquals("large", decoded.fontSize)
+        assertTrue(decoded.highContrastFocus)
+        assertTrue(decoded.reducedAnimations)
+    }
+
+    @Test
+    fun oldBackupWithoutAppearanceDecodesToDefaults() {
+        val text = """{"format":"opentv-backup","version":1,"playlists":[],"epgUrls":[],"uploadUrl":"","favorites":[],"hiddenChannels":[],"epgOverrides":{},"trackPrefs":{},"settings":{}}"""
+        val decoded = BackupManager.decode(text).getOrThrow()
+        assertEquals("comfortable", decoded.guideDensity)
+        assertEquals("medium", decoded.fontSize)
+        assertFalse(decoded.highContrastFocus)
+        assertFalse(decoded.reducedAnimations)
+    }
+
     @Test
     fun oldBackupWithoutGroupOverridesDecodesToEmpty() {
         val text = """{"format":"opentv-backup","version":1,"playlists":[],"epgUrls":[],"uploadUrl":"","favorites":[],"hiddenChannels":[],"epgOverrides":{},"trackPrefs":{},"settings":{}}"""

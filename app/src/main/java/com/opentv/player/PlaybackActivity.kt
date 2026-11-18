@@ -1177,9 +1177,15 @@ class PlaybackActivity : FragmentActivity() {
         // smoother. Fast enough to never delay the info itself.
         // Cancel any fade-out in flight first, or its end action
         // would hide the overlay again after this show.
+        // 9.1.0: with reduced animations on, the fade is skipped —
+        // the overlay just appears at full opacity.
         overlay.animate().cancel()
-        overlay.alpha = 0f
-        overlay.animate().alpha(1f).setDuration(150).start()
+        if (AppSettings.reducedAnimations(this)) {
+            overlay.alpha = 1f
+        } else {
+            overlay.alpha = 0f
+            overlay.animate().alpha(1f).setDuration(150).start()
+        }
         // 6.0.0-rc3: on mobile the top Guide button and centred
         // channel info show and fade with the overlay.
         if (DeviceType.isMobile(this)) {
@@ -1222,10 +1228,16 @@ class PlaybackActivity : FragmentActivity() {
      * 6.1.2: the TV info overlay uses it too). Cancelling a fade-out
      * in flight (a re-show does this) never runs its end action, so
      * a re-shown view can't be hidden again by a stale fade. Alpha
-     * is reset so the next show starts clean. */
+     * is reset so the next show starts clean. 9.1.0: with reduced
+     * animations on, the view hides at once instead of fading. */
     private fun fadeOutOverlayView(view: View) {
         if (view.visibility != View.VISIBLE) return
         view.animate().cancel()
+        if (AppSettings.reducedAnimations(this)) {
+            view.visibility = View.GONE
+            view.alpha = 1f
+            return
+        }
         view.animate().alpha(0f).setDuration(OVERLAY_FADE_MS).withEndAction {
             view.visibility = View.GONE
             view.alpha = 1f
@@ -1244,10 +1256,15 @@ class PlaybackActivity : FragmentActivity() {
         if (player?.isPlaying != false) showMobileView(mobileCenterInfo)
     }
 
-    /** 6.0.0-rc3: fade one mobile overlay view in (150ms). */
+    /** 6.0.0-rc3: fade one mobile overlay view in (150ms). 9.1.0:
+     * with reduced animations on, the view just appears. */
     private fun showMobileView(view: View) {
         view.animate().cancel()
         view.visibility = View.VISIBLE
+        if (AppSettings.reducedAnimations(this)) {
+            view.alpha = 1f
+            return
+        }
         view.alpha = 0f
         view.animate().alpha(1f).setDuration(150).start()
     }

@@ -226,6 +226,61 @@ class SettingsActivity : FragmentActivity() {
             }
         }
 
+        // 9.1.0: appearance — guide row density, font size, and the
+        // two toggles. Density + font size apply the next time the
+        // guide opens (like the channel-list size); the focus style
+        // applies the next time the guide or a fresh sidebar opens;
+        // reduced animations takes effect immediately.
+        findViewById<RadioGroup>(R.id.pref_guide_density).apply {
+            check(
+                when (AppSettings.guideDensity(this@SettingsActivity)) {
+                    Appearance.GuideDensity.COMPACT -> R.id.pref_density_compact
+                    else -> R.id.pref_density_comfortable
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setGuideDensity(
+                    this@SettingsActivity,
+                    if (checkedId == R.id.pref_density_compact) {
+                        Appearance.GuideDensity.COMPACT
+                    } else {
+                        Appearance.GuideDensity.COMFORTABLE
+                    }
+                )
+            }
+        }
+        findViewById<RadioGroup>(R.id.pref_font_size).apply {
+            check(
+                when (AppSettings.fontSize(this@SettingsActivity)) {
+                    Appearance.FontSize.SMALL -> R.id.pref_font_small
+                    Appearance.FontSize.LARGE -> R.id.pref_font_large
+                    else -> R.id.pref_font_medium
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setFontSize(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_font_small -> Appearance.FontSize.SMALL
+                        R.id.pref_font_large -> Appearance.FontSize.LARGE
+                        else -> Appearance.FontSize.MEDIUM
+                    }
+                )
+            }
+        }
+        findViewById<Switch>(R.id.pref_high_contrast_focus).apply {
+            isChecked = AppSettings.highContrastFocus(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setHighContrastFocus(this@SettingsActivity, checked)
+            }
+        }
+        findViewById<Switch>(R.id.pref_reduced_animations).apply {
+            isChecked = AppSettings.reducedAnimations(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setReducedAnimations(this@SettingsActivity, checked)
+            }
+        }
+
         shareStatusView = findViewById(R.id.share_status)
         shareButtonView = findViewById(R.id.share_button)
 

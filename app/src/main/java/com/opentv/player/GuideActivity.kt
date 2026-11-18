@@ -198,6 +198,13 @@ class GuideActivity : FragmentActivity() {
      * menu toggle and Settings flip it. */
     private var favoritesOnly: Boolean = false
 
+    /** 9.1.0: appearance — read from the settings in onCreate and
+     * applied when the guide builds. Like the channel-list size,
+     * a change in Settings applies the next time the guide opens. */
+    private var guideDensity: Appearance.GuideDensity = Appearance.GuideDensity.COMFORTABLE
+    private var guideFontSize: Appearance.FontSize = Appearance.FontSize.MEDIUM
+    private var highContrastFocus: Boolean = false
+
     /** 7.0.0: channel-number entry — digits typed on the remote,
      * shown in the corner pill until the entry settles (timeout or
      * Enter) and the guide jumps to that channel. */
@@ -309,10 +316,17 @@ class GuideActivity : FragmentActivity() {
         // Mobile keeps the old 56dp rows / 40dp logo. Text sizes are
         // untouched — the rows get thinner by cutting height, not by
         // shrinking the font.
+        // 9.1.0: the row-density setting thins the rows further on
+        // Compact (0.8x); the font-size setting scales the guide
+        // text (titles, channel names/numbers, header labels).
         val isMobileDevice = DeviceType.isMobile(this)
         val guideSizing = AppSettings.sidebarSizing(this)
+        guideDensity = AppSettings.guideDensity(this)
+        guideFontSize = AppSettings.fontSize(this)
+        highContrastFocus = AppSettings.highContrastFocus(this)
         pxCellHeight = dpToPx(
-            if (isMobileDevice) CELL_HEIGHT_DP else guideSizing.guideRowHeightDp
+            if (isMobileDevice) CELL_HEIGHT_DP
+            else Appearance.guideRowHeightDp(guideSizing.guideRowHeightDp, guideDensity)
         )
         guideLogoDp = if (isMobileDevice) 40 else guideSizing.logoDp
         pxGuideLogo = dpToPx(guideLogoDp)
@@ -1251,7 +1265,11 @@ class GuideActivity : FragmentActivity() {
             text = headerDateText()
             setBackgroundColor(0xFF161616.toInt())
             setTextColor(0xFFC9C9D1.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            // 9.1.0: the header labels scale with the font-size setting.
+            setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                Appearance.scaledTextSp(16f, guideFontSize)
+            )
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
             setPadding(px12, 0, px12, 0)
@@ -1269,7 +1287,11 @@ class GuideActivity : FragmentActivity() {
             val label = TextView(this).apply {
                 text = GuideData.formatHourLabel(windowStart + m * 60L * 1000)
                 setTextColor(0xFF9A9AA3.toInt())
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                // 9.1.0: the header labels scale with the font-size setting.
+                setTextSize(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    Appearance.scaledTextSp(16f, guideFontSize)
+                )
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -1328,7 +1350,11 @@ class GuideActivity : FragmentActivity() {
                 setTextColor(
                     if (isCurrentChannel) 0xFF86C739.toInt() else 0xB3FFFFFF.toInt()
                 )
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                // 9.1.0: the channel number scales with the font-size setting.
+                setTextSize(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    Appearance.scaledTextSp(18f, guideFontSize)
+                )
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -1351,7 +1377,11 @@ class GuideActivity : FragmentActivity() {
         val nameView = TextView(this).apply {
             text = row.channel.name
             setTextColor(if (isCurrentChannel) 0xFF86C739.toInt() else 0xFFFFFFFF.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            // 9.1.0: the channel name scales with the font-size setting.
+            setTextSize(
+                TypedValue.COMPLEX_UNIT_SP,
+                Appearance.scaledTextSp(16f, guideFontSize)
+            )
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -1366,9 +1396,12 @@ class GuideActivity : FragmentActivity() {
             if (hasFocus) {
                 // Focused name turns accent, with a subtle panel
                 // highlight, and the details header shows this row's
-                // programme that's on now.
+                // programme that's on now. 9.1.0: high-contrast
+                // focus brightens the highlight further.
                 nameView.setTextColor(0xFF86C739.toInt())
-                channelCell.setBackgroundColor(0xFF232629.toInt())
+                channelCell.setBackgroundColor(
+                    if (highContrastFocus) 0xFF3A3E42.toInt() else 0xFF232629.toInt()
+                )
                 val current = displayRows.getOrNull(index)
                 val nowProg = current?.programmes?.firstOrNull {
                     nowMillis in it.startMillis until it.stopMillis
@@ -1450,11 +1483,25 @@ class GuideActivity : FragmentActivity() {
                 // Tagged with its programme so the sidebar's left-edge
                 // check (isFirstCardInRow) can find the first card.
                 tag = programme
+                // 9.1.0: high-contrast focus swaps in the thick-outline
+                // cell backgrounds.
                 setBackgroundResource(
                     when {
-                        isNow -> R.drawable.guide_cell_now_bg
-                        isPast -> R.drawable.guide_cell_past_bg
-                        else -> R.drawable.guide_cell_bg
+                        isNow -> if (highContrastFocus) {
+                            R.drawable.guide_cell_now_bg_hc
+                        } else {
+                            R.drawable.guide_cell_now_bg
+                        }
+                        isPast -> if (highContrastFocus) {
+                            R.drawable.guide_cell_past_bg_hc
+                        } else {
+                            R.drawable.guide_cell_past_bg
+                        }
+                        else -> if (highContrastFocus) {
+                            R.drawable.guide_cell_bg_hc
+                        } else {
+                            R.drawable.guide_cell_bg
+                        }
                     }
                 )
                 layoutParams = LinearLayout.LayoutParams(
@@ -1471,7 +1518,11 @@ class GuideActivity : FragmentActivity() {
                 // is dark for contrast; past cells are muted grey, except
                 // catch-up ones, which are brighter — they can be played.
                 setTextColor(programmeTitleColor(isNow, isPast, isCatchup))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                // 9.1.0: the programme title scales with the font-size setting.
+                setTextSize(
+                    TypedValue.COMPLEX_UNIT_SP,
+                    Appearance.scaledTextSp(15f, guideFontSize)
+                )
                 typeface = Typeface.DEFAULT_BOLD
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
@@ -1502,9 +1553,13 @@ class GuideActivity : FragmentActivity() {
                 // 5.0.0 — neat animations: the focused cell pops
                 // slightly (150ms, transform only, so the grid layout
                 // never moves). Quick enough to never feel slow.
-                card.animate().scaleX(if (hasFocus) 1.03f else 1f)
-                    .scaleY(if (hasFocus) 1.03f else 1f)
-                    .setDuration(150).start()
+                // 9.1.0: with reduced animations on, the pop is
+                // skipped — the cell stays at its resting scale.
+                if (!AppSettings.reducedAnimations(this)) {
+                    card.animate().scaleX(if (hasFocus) 1.03f else 1f)
+                        .scaleY(if (hasFocus) 1.03f else 1f)
+                        .setDuration(150).start()
+                }
             }
             rowLayout.addView(card)
             if (isNow && firstNowCard == null) firstNowCard = card
@@ -1807,9 +1862,12 @@ class GuideActivity : FragmentActivity() {
         // Side panel, not a centered popup: dock to the right edge,
         // full height, like TiviMate's menu. 5.0.0: it slides in from
         // the right edge (and back out) instead of the default dialog
-        // fade / slide-up.
+        // fade / slide-up. 9.1.0: with reduced animations on, the
+        // slide is skipped and the menu just appears.
         dialog.window?.setGravity(Gravity.END)
-        dialog.window?.setWindowAnimations(R.style.GuideMenuAnimation)
+        if (!AppSettings.reducedAnimations(this)) {
+            dialog.window?.setWindowAnimations(R.style.GuideMenuAnimation)
+        }
         val view = layoutInflater.inflate(R.layout.dialog_guide_menu, null)
         dialog.setContentView(view)
         // 6.0.0-rc1: the menu content is 480dp wide — wider than a
