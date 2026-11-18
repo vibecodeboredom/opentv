@@ -25,6 +25,7 @@ object AppSettings {
     private const val KEY_GUIDE_GROUP_FILTER = "guide_group_filter"
     private const val KEY_GUIDE_ZOOM_HOURS = "guide_zoom_hours"
     private const val KEY_IDLE_SAVER = "idle_saver"
+    private const val KEY_SURF_INTERVAL = "surf_interval_seconds"
 
     /** 7.3.0 (Nova): stream quality modes for the playback
      * track selector. AUTO is the player's default adaptive
@@ -188,6 +189,28 @@ object AppSettings {
 
     fun setIdleSaverEnabled(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean(KEY_IDLE_SAVER, value).apply()
+    }
+
+    /** 8.3.1 (Nova): the surf-mode hop interval in seconds —
+     * how long each channel stays up while surfing (see
+     * PlaybackActivity). One of SURF_INTERVAL_OPTIONS; anything
+     * else stored reads as the default. Read by the surf timer
+     * on every hop, so a change applies to the very next hop. */
+    const val SURF_INTERVAL_DEFAULT = 12
+    val SURF_INTERVAL_OPTIONS = intArrayOf(8, 12, 20, 30)
+
+    fun surfIntervalSeconds(context: Context): Int {
+        val stored = prefs(context).getInt(KEY_SURF_INTERVAL, SURF_INTERVAL_DEFAULT)
+        return if (stored in SURF_INTERVAL_OPTIONS) stored else SURF_INTERVAL_DEFAULT
+    }
+
+    fun setSurfIntervalSeconds(context: Context, seconds: Int) {
+        prefs(context).edit()
+            .putInt(
+                KEY_SURF_INTERVAL,
+                if (seconds in SURF_INTERVAL_OPTIONS) seconds else SURF_INTERVAL_DEFAULT
+            )
+            .apply()
     }
 
     /** Channel list size (default Small — the compact 6.1.2 layout). */

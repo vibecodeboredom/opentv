@@ -254,6 +254,12 @@
     <string name="prefs_idle_saver">Clock screensaver when paused</string>
     <string name="surf_mode">Surf mode</string>
     <string name="surf_hint">Surfing — press any key to stop</string>
+    <!-- Nova 8.3.1: surf interval picker, watchlist guide jump,
+         screensaver up-next line. -->
+    <string name="surf_interval">Surf interval</string>
+    <string name="surf_interval_state">Surf interval: %1$ds</string>
+    <string name="surf_interval_option">%1$ds</string>
+    <string name="saver_up_next">Up next: %1$s at %2$s</string>
     <string name="on_now_remaining">%1$s left</string>
     <string name="menu_record_programme">Record this programme</string>
     <string name="menu_cancel_scheduled_recording">Cancel scheduled recording</string>

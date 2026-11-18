@@ -550,6 +550,14 @@
             android:layout_marginTop="4dp"
             android:textColor="#999999"
             android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/idle_saver_next"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:textColor="#AAAAAA"
+            android:textSize="18sp" />
     </LinearLayout>
 
 </FrameLayout>

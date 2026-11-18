@@ -58,22 +58,24 @@ class BrowseFragment : BrowseSupportFragment() {
                 is Channel -> openChannel(item)
                 is OnNowEntry -> openChannel(item.channel)
                 // 8.3.0 (Nova): a watchlist card whose programme
-                // is on plays its channel; a future one just
-                // shows its info as a toast — there is nothing
-                // to play yet, and pretending otherwise would
-                // zap the viewer to a different programme.
+                // is on plays its channel.
+                // 8.3.1 (Nova): a future one opens the guide
+                // landed on its channel instead of the 8.3.0 info
+                // toast — the viewer can look at what's around it
+                // and set more reminders. It reuses the guide's
+                // ordinary open-on-a-channel extra, the same one
+                // playback passes for the channel underneath.
                 is WatchlistEntry -> {
                     if (item.onNow) {
                         openChannel(item.channel)
                     } else {
-                        Toast.makeText(
-                            requireContext(),
-                            item.reminder.title + " • " + item.channel.name + " • " +
-                                watchlistStartLabel(
-                                    requireContext(), item.reminder.startMillis
-                                ),
-                            Toast.LENGTH_LONG
-                        ).show()
+                        startActivity(
+                            Intent(requireContext(), GuideActivity::class.java)
+                                .putExtra(
+                                    GuideActivity.EXTRA_CURRENT_CHANNEL_ID,
+                                    item.channel.id
+                                )
+                        )
                     }
                 }
                 is MenuAction -> onMenuAction(item)

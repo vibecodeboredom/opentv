@@ -158,10 +158,6 @@ class PlaybackActivity : FragmentActivity() {
          * this often while up, so the minute it shows is never
          * stale by more than a few seconds. */
         private const val SCREENSAVER_CLOCK_MS = 20_000L
-        /** 8.3.0 (Nova): surf mode's hop cadence — long enough to
-         * actually see what a channel is showing, short enough to
-         * keep moving through the list. */
-        private const val SURF_INTERVAL_MS = 12_000L
     }
 
     private var player: ExoPlayer? = null
@@ -314,6 +310,7 @@ class PlaybackActivity : FragmentActivity() {
     private lateinit var idleSaverClock: TextView
     private lateinit var idleSaverTitle: TextView
     private lateinit var idleSaverChannel: TextView
+    private lateinit var idleSaverNext: TextView
     private var idleSaverShowing: Boolean = false
     private var saverRestoreSwallowUp: Boolean = false
     private val idleSaverRunnable = Runnable { showIdleSaver() }
@@ -321,11 +318,12 @@ class PlaybackActivity : FragmentActivity() {
         override fun run() {
             if (!idleSaverShowing) return
             updateSaverClock()
+            updateSaverNext()
             infoHandler.postDelayed(this, SCREENSAVER_CLOCK_MS)
         }
     }
     /** 8.3.0 (Nova): surf mode — while on, a hop to the next
-     * zap-eligible channel lands every SURF_INTERVAL_MS through
+     * zap-eligible channel lands every surf interval through
      * the ordinary zap path. Any key press ends it (the press is
      * swallowed, like the other wakes); the sleep timer, a
      * reminder zap, a pause and onStop end it too. */
@@ -336,9 +334,16 @@ class PlaybackActivity : FragmentActivity() {
         override fun run() {
             if (!surfMode) return
             switchToAdjacentChannel(1)
-            infoHandler.postDelayed(this, SURF_INTERVAL_MS)
+            infoHandler.postDelayed(this, surfIntervalMs())
         }
     }
+
+    /** 8.3.1 (Nova): the current surf hop interval in
+     * milliseconds — the persisted choice (see
+     * AppSettings.surfIntervalSeconds), re-read on every hop so
+     * a new choice takes effect on the very next one. */
+    private fun surfIntervalMs(): Long =
+        AppSettings.surfIntervalSeconds(this) * 1_000L
     /** The recents the strip was last built with, so an unchanged list
      * doesn't rebuild the whole strip a second time. */
     private var lastStripRecents: List<String> = emptyList()
@@ -434,6 +439,7 @@ class PlaybackActivity : FragmentActivity() {
         idleSaverClock = findViewById(R.id.idle_saver_clock)
         idleSaverTitle = findViewById(R.id.idle_saver_title)
         idleSaverChannel = findViewById(R.id.idle_saver_channel)
+        idleSaverNext = findViewById(R.id.idle_saver_next)
         // 7.2.0 (Nova): on mobile the top-end corner belongs to the
         // Guide button — drop the stream info panel below it.
         if (DeviceType.isMobile(this)) {
@@ -2121,9 +2127,13 @@ class PlaybackActivity : FragmentActivity() {
         actions += { toggleFavoritesZap() }
         // 8.3.0 (Nova): surf mode — hands-free zapping through
         // the zap-eligible list (favorites only while favorites
-        // zapping is on), a hop every 12s until any key press.
+        // zapping is on), a hop every surf interval until any
+        // key press.
         items += getString(R.string.surf_mode)
         actions += { startSurfMode() }
+        // 8.3.1 (Nova): how long each surfed channel stays up.
+        items += surfIntervalMenuLabel()
+        actions += { showSurfIntervalDialog() }
         items += streamInfoMenuLabel()
         actions += { setStreamInfo(!streamInfoOn) }
         items += nightDimMenuLabel()
@@ -2617,6 +2627,7 @@ class PlaybackActivity : FragmentActivity() {
             if (nowProgramme != null) View.VISIBLE else View.GONE
         idleSaverChannel.text = channel?.name ?: ""
         updateSaverClock()
+        updateSaverNext()
         idleSaverShowing = true
         idleSaverView.visibility = View.VISIBLE
         infoHandler.removeCallbacks(saverClockRunnable)
@@ -2638,10 +2649,30 @@ class PlaybackActivity : FragmentActivity() {
         idleSaverClock.text = GuideData.formatClock(System.currentTimeMillis())
     }
 
+    /** 8.3.1 (Nova): the screensaver's up-next line — the
+     * programme after the paused one on the same channel, from
+     * the same nextProgramme field the zap flash fills. Hidden
+     * when the guide data has nothing after the current
+     * programme. Refreshed with the clock tick so a long pause
+     * never shows a next programme that has already started. */
+    private fun updateSaverNext() {
+        val next = nextProgramme
+        if (next != null) {
+            idleSaverNext.text = getString(
+                R.string.saver_up_next,
+                next.title,
+                GuideData.formatClock(next.startMillis)
+            )
+            idleSaverNext.visibility = View.VISIBLE
+        } else {
+            idleSaverNext.visibility = View.GONE
+        }
+    }
+
     /** 8.3.0 (Nova): begin surfing — the first hop lands at
      * once (picking the menu item and staying put for twelve
      * seconds would read as nothing happening), then a hop
-     * every SURF_INTERVAL_MS through switchToAdjacentChannel,
+     * every surf interval through switchToAdjacentChannel,
      * so the eligible list, the favorites-zap mode and the zap
      * flash are exactly the manual ones. Live only in effect:
      * the menu that offers it never appears for recordings. */
@@ -2661,6 +2692,46 @@ class PlaybackActivity : FragmentActivity() {
         surfMode = false
         infoHandler.removeCallbacks(surfRunnable)
         if (::surfHint.isInitialized) surfHint.visibility = View.GONE
+    }
+
+    /** 8.3.1 (Nova): the options-menu label for the surf
+     * interval, carrying the current choice like the other
+     * state labels in this menu. */
+    private fun surfIntervalMenuLabel(): String = getString(
+        R.string.surf_interval_state,
+        AppSettings.surfIntervalSeconds(this)
+    )
+
+    /** 8.3.1 (Nova): pick the surf hop interval. Single-choice
+     * with the current value checked, like the other pickers. */
+    private fun showSurfIntervalDialog() {
+        val options = AppSettings.SURF_INTERVAL_OPTIONS
+        val labels = options.map {
+            getString(R.string.surf_interval_option, it)
+        }.toTypedArray()
+        val current = AppSettings.surfIntervalSeconds(this)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.surf_interval)
+            .setSingleChoiceItems(labels, options.indexOf(current)) { dialog, which ->
+                setSurfIntervalSeconds(options[which])
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    /** 8.3.1 (Nova): persist a surf interval. If a surf session
+     * is somehow running when the value changes, its pending hop
+     * is re-timed to the new interval at once. (In practice the
+     * menu that offers this picker can only be opened while NOT
+     * surfing — any key press, the menu's included, ends a surf
+     * first — so the re-time is a belt-and-braces hook; the
+     * runnable also re-reads the persisted value on every hop.) */
+    private fun setSurfIntervalSeconds(seconds: Int) {
+        AppSettings.setSurfIntervalSeconds(this, seconds)
+        if (surfMode) {
+            infoHandler.removeCallbacks(surfRunnable)
+            infoHandler.postDelayed(surfRunnable, surfIntervalMs())
+        }
     }
 
     /** 7.3.0 (Nova): the options-menu label for stream quality,
