@@ -149,14 +149,28 @@ Rules (from Chuni, 2026-11-17):
   the playlist and not hidden, matching the History list (the old
   raw recents size counted hidden or removed channels too).
 
-### 8.2.0 (planned) — EPG quality
+### 8.2.0 ✅ (this release) — EPG quality
 
-- EPG source status in Settings: which source loaded, which failed,
-  and when each was last fetched.
-- "Channels without guide data" list, with one-tap EPG assign for
-  the most common id mismatches.
+- EPG source status in Settings: each source row shows whether it
+  loaded or failed, when, and how many channels/programmes it
+  contributed ("Loaded 2h ago · 148 channels, 12,400 programmes" /
+  "Failed 1h ago — HTTP 404"); a "Refresh now" button re-downloads
+  + re-parses every source on the spot. Status is recorded on
+  every fresh EPG load and survives restarts.
+- "Channels without guide data" list in Settings, with one-tap
+  EPG assign: tap a channel to pick from ranked suggestions for
+  the most common id mismatches (case/punctuation, country/HD
+  suffix, display-name spelling, containment) or type the id in
+  manually. Assigning sets the per-channel EPG override, so the
+  channel drops off the list.
 - Per-channel guide coverage indicator in the guide's channel
-  options.
+  options: how many programmes in the next 24 h, whether one is
+  on now, and when the next one starts — or "no data for this
+  channel".
+- Gemini lite reviewed the diff (no real findings — 1 wrong on
+  verification, 1 non-issue) and wrote 3 extra unit tests (1
+  fixed: wrong EPG key; 2 added as-is). GLM 429'd on its review
+  call and sat this one out.
 
 ### 8.2.1 (planned) — Patch
 
