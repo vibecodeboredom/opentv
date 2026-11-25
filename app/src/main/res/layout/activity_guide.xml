@@ -239,7 +239,7 @@
         android:layout_gravity="top|end"
         android:layout_margin="24dp"
         android:background="@drawable/guide_now_button_bg"
-        android:textColor="#FFFFFF"
+        android:textColor="#121218"
         android:textSize="28sp"
         android:textStyle="bold"
         android:paddingStart="20dp"

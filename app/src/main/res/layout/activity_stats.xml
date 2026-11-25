@@ -41,6 +41,13 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
-        android:text="@string/clear_statistics" />
+        android:background="@drawable/settings_button_bg"
+        android:minHeight="48dp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:text="@string/clear_statistics"
+        android:textColor="@color/settings_button_text"
+        android:textSize="16sp"
+        android:textStyle="bold" />
 
 </LinearLayout>
