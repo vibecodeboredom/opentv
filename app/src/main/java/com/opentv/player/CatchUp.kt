@@ -60,6 +60,19 @@ object CatchUp {
         return programme.startMillis >= oldestStart
     }
 
+    /** 9.1.1 (Nova): when this programme leaves the catch-up
+     * archive — its start plus the channel's archive depth, the
+     * same window [isAvailable] checks against. Null when the
+     * channel declares no catch-up at all. */
+    fun archiveEndsMillis(
+        channel: Channel,
+        programme: EpgParser.Programme
+    ): Long? {
+        if (!hasCatchup(channel)) return null
+        val days = channel.catchupDays?.takeIf { it > 0 } ?: DEFAULT_CATCHUP_DAYS
+        return programme.startMillis + days * 24L * 60 * 60 * 1000
+    }
+
     /** The catch-up stream URL for this programme, or null when
      * catch-up is unavailable. Never throws on a malformed template
      * or bad attributes — those just mean "no catch-up". */

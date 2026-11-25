@@ -244,4 +244,122 @@ class GuideDataTest {
         assertTrue(date.contains("Nov"))
         assertTrue(date.contains("7"))
     }
+
+    private fun groupedChannel(id: String, group: String) =
+        Channel(
+            id = id, name = id, url = "https://example.com/$id.m3u8",
+            group = group, logo = null, tvgId = id
+        )
+
+    @Test
+    fun channelGroupsAreDistinctInPlaylistOrder() {
+        val channels = listOf(
+            groupedChannel("a", "News"),
+            groupedChannel("b", "Sports"),
+            groupedChannel("c", "News"),
+            groupedChannel("d", "Movies")
+        )
+        assertEquals(
+            listOf("News", "Sports", "Movies"),
+            GuideData.channelGroups(channels)
+        )
+    }
+
+    @Test
+    fun effectiveGroupFilterDropsGroupsMissingFromPlaylist() {
+        val channels = listOf(groupedChannel("a", "News"))
+        assertEquals("News", GuideData.effectiveGroupFilter(channels, "News"))
+        assertEquals(null, GuideData.effectiveGroupFilter(channels, "Gone"))
+        assertEquals(null, GuideData.effectiveGroupFilter(channels, null))
+    }
+
+    @Test
+    fun filterChannelsByGroupKeepsOnlyThatGroup() {
+        val channels = listOf(
+            groupedChannel("a", "News"),
+            groupedChannel("b", "Sports"),
+            groupedChannel("c", "News")
+        )
+        assertEquals(
+            listOf("a", "c"),
+            GuideData.filterChannelsByGroup(channels, "News").map { it.id }
+        )
+        assertEquals(
+            channels,
+            GuideData.filterChannelsByGroup(channels, null)
+        )
+    }
+
+    @Test
+    fun searchMatchesProgrammeDescriptions() {
+        // 9.3.0: a word that only appears in a programme's
+        // description finds the programme, like a title match.
+        val windowStart = 1_794_081_600_000L
+        val ch = channel("doc.1", "Documentaries")
+        val rows = GuideData.searchRows(
+            listOf(ch),
+            mapOf("doc.1" to listOf(
+                EpgParser.Programme(
+                    "doc.1", windowStart, windowStart + hour, "Space Hour",
+                    desc = "The 1969 moon landing, restored."
+                )
+            )),
+            windowStart, 6, query = "moon landing"
+        )
+        assertEquals(1, rows.size)
+        assertEquals("Documentaries", rows[0].channel.name)
+    }
+
+    @Test
+    fun formatCountdownShapes() {
+        // 9.3.0: the watchlist countdown — minutes under an hour,
+        // hours (+ minutes) under a day, days (+ hours) beyond;
+        // sub-minute still reads "1m", never "0m" before the start.
+        val minute = 60_000L
+        assertEquals("0m", GuideData.formatCountdown(0L))
+        assertEquals("0m", GuideData.formatCountdown(-5 * minute))
+        assertEquals("1m", GuideData.formatCountdown(30_000L))
+        assertEquals("45m", GuideData.formatCountdown(45 * minute))
+        assertEquals("2h", GuideData.formatCountdown(2 * 60 * minute))
+        assertEquals("2h 15m", GuideData.formatCountdown(135 * minute))
+        assertEquals("1d", GuideData.formatCountdown(24 * 60 * minute))
+        assertEquals("3d 4h", GuideData.formatCountdown((3 * 24 + 4) * 60 * minute))
+    }
+
+    @Test
+    fun descSnippetWindowsAroundKeyword() {
+        // 9.3.1: the snippet keeps a little lead-in before the
+        // keyword and more of what follows it; "…" marks cuts.
+        val desc = "A look back at the 1969 moon landing, restored " +
+            "with footage from the original mission reels."
+        val snippet = GuideData.descSnippet(desc, "moon landing")
+        assertTrue(snippet.startsWith("…"))
+        assertTrue(snippet.contains("moon landing"))
+        assertTrue(snippet.endsWith("…"))
+    }
+
+    @Test
+    fun descSnippetAtStartHasNoLeadEllipsis() {
+        val snippet = GuideData.descSnippet(
+            "Moon landing special: the full story of Apollo 11.",
+            "moon landing"
+        )
+        assertEquals(
+            "Moon landing special: the full story of Apollo 11.",
+            snippet
+        )
+    }
+
+    @Test
+    fun descSnippetCollapsesWhitespaceAndFallsBackToHead() {
+        assertEquals(
+            "Line one. Line two.",
+            GuideData.descSnippet("Line one.\n  Line two.", "line two")
+        )
+        // Keyword absent (callers check first): the head comes back.
+        assertEquals(
+            "Nothing relevant here.",
+            GuideData.descSnippet("Nothing relevant here.", "zzz")
+        )
+    }
 }

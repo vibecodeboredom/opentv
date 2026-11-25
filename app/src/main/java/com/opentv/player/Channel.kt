@@ -29,3 +29,32 @@ data class MenuAction(
     val title: String,
     val subtitle: String
 ) : Serializable
+
+/** 8.2.0 (Nova): one card of the home screen's "On now" row — a
+ * favorite channel plus the programme on it right now. Tapping the
+ * card plays the channel; the programme is display data only. */
+data class OnNowEntry(
+    val channel: Channel,
+    val programme: EpgParser.Programme
+)
+
+/** 8.3.0 (Nova): one card of the home screen's "Watchlist" row —
+ * a programme the user set a reminder for (8.0.0), resolved to
+ * its channel so the card can show the logo and, once the
+ * programme is on, play the channel. [onNow] is computed when
+ * the row is built; a future programme's card only shows its
+ * info. */
+data class WatchlistEntry(
+    val reminder: PlaylistRepository.Reminder,
+    val channel: Channel,
+    val onNow: Boolean
+)
+
+/** 9.0.0 (Nova): one card of the recordings screen's "Continue
+ * watching" row — a recording whose last viewing stopped inside
+ * the resume window, paired with its stored progress so the
+ * card can show how far through it got. */
+data class ContinueWatchingEntry(
+    val recording: Recording,
+    val progress: PlaylistRepository.RecordingProgress
+)

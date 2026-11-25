@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 10.1.0 (Nova): menu/dialog entrance for NovaDialogAnimation —
+     a quick scale-up from 92% with a fade, on the platform's
+     fast-out-slow-in curve (the closest framework interpolator to
+     the AnimConfig emphasized entrance). Window animations can't
+     use the app's PathInterpolator set, so the values mirror it. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shareInterpolator="false">
+    <scale
+        android:duration="220"
+        android:fromXScale="0.92"
+        android:fromYScale="0.92"
+        android:interpolator="@android:interpolator/fast_out_slow_in"
+        android:pivotX="50%"
+        android:pivotY="50%"
+        android:toXScale="1.0"
+        android:toYScale="1.0" />
+    <alpha
+        android:duration="180"
+        android:fromAlpha="0.0"
+        android:interpolator="@android:interpolator/fast_out_slow_in"
+        android:toAlpha="1.0" />
+</set>

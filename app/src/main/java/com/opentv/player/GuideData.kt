@@ -145,7 +145,16 @@ object GuideData {
             if (matchesWords(channel.name, words)) {
                 buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { channelMatches += it }
-            } else if (programmes.any { matchesWords(it.title, words) }) {
+            } else if (programmes.any {
+                    // 9.3.0 (Nova): the description matches too —
+                    // a word that only appears in a programme's
+                    // synopsis ("documentary about the 1969 moon
+                    // landing") now finds the programme, ranked
+                    // with the title matches.
+                    matchesWords(it.title, words) ||
+                        (it.desc.isNotEmpty() && matchesWords(it.desc, words))
+                }
+            ) {
                 buildRowFromProgrammes(channel, programmes, windowStartMillis, windowHours)
                     ?.let { programmeMatches += it }
             }
@@ -188,6 +197,32 @@ object GuideData {
         hidden: Set<String> = emptySet()
     ): List<Channel> =
         channels.filter { !hidden.contains(it.id) }.take(MAX_GUIDE_ROWS)
+
+    /** 8.1.0 (Nova): the playlist's distinct channel groups, in
+     * playlist order (first appearance wins) — the guide group
+     * filter's choices. Groups are never empty strings: the parser
+     * defaults a missing group-title to "Other". */
+    fun channelGroups(channels: List<Channel>): List<String> {
+        val seen = LinkedHashSet<String>()
+        for (channel in channels) seen += channel.group
+        return seen.toList()
+    }
+
+    /** 8.1.0 (Nova): the group filter that actually applies — the
+     * stored choice when some channel in the playlist still
+     * carries that group, null (all groups) when nothing is stored
+     * or the group has left the playlist, so a stale preference
+     * can never filter the guide down to nothing on its own. */
+    fun effectiveGroupFilter(channels: List<Channel>, stored: String?): String? =
+        stored?.takeIf { group -> channels.any { it.group == group } }
+
+    /** 8.1.0 (Nova): restrict a channel list to one group, playlist
+     * order kept; a null group returns the list untouched. The
+     * guide applies this to the channel list BEFORE rowChannels /
+     * LazyRows, so filtering happens at the row source and the
+     * lazy row machinery never sees the filtered-out channels. */
+    fun filterChannelsByGroup(channels: List<Channel>, group: String?): List<Channel> =
+        if (group == null) channels else channels.filter { it.group == group }
 
     /**
      * Guide rows built one at a time, on first access, instead of all
@@ -314,6 +349,22 @@ object GuideData {
     fun formatTimeRange(startMillis: Long, stopMillis: Long): String =
         "${formatClock(startMillis)} – ${formatClock(stopMillis)}"
 
+    /** 9.0.0 (Nova): format a playback position / duration as an
+     * elapsed clock — "12:34", or "1:02:34" once past an hour.
+     * Used by recording resume (the "Resumed from" toast and the
+     * Continue watching cards). */
+    fun formatElapsedClock(millis: Long): String {
+        val totalSeconds = (millis / 1000).coerceAtLeast(0)
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) {
+            "$hours:${twoDigits(minutes.toInt())}:${twoDigits(seconds.toInt())}"
+        } else {
+            "${minutes}:${twoDigits(seconds.toInt())}"
+        }
+    }
+
     /** Fraction of a programme already aired (0.0–1.0) for the progress bar. */
     fun progressFraction(
         programme: EpgParser.Programme,
@@ -326,6 +377,60 @@ object GuideData {
     /** Whole minutes left in a programme ("48 min"). */
     fun remainingMinutes(programme: EpgParser.Programme, nowMillis: Long): Long =
         maxOf((programme.stopMillis - nowMillis) / 60_000L, 0L)
+
+    /** 9.3.0 (Nova): a span until something starts, compactly —
+     * "45m" under an hour, "2h 15m" under a day (whole hours drop
+     * the minutes: "2h"), "3d 4h" beyond (whole days: "3d"). The
+     * watchlist cards prefix it with "in". A span of a minute or
+     * less still reads "1m" — the countdown never claims "0m"
+     * for something that hasn't started yet; a non-positive span
+     * (already started) reads "0m" and callers show "On now"
+     * instead. */
+    fun formatCountdown(deltaMillis: Long): String {
+        if (deltaMillis <= 0L) return "0m"
+        val minutes = maxOf(deltaMillis / 60_000L, 1L)
+        if (minutes < 60L) return "${minutes}m"
+        val hours = minutes / 60L
+        val remMinutes = minutes % 60L
+        if (hours < 24L) {
+            return if (remMinutes > 0L) "${hours}h ${remMinutes}m" else "${hours}h"
+        }
+        val days = hours / 24L
+        val remHours = hours % 24L
+        return if (remHours > 0L) "${days}d ${remHours}h" else "${days}d"
+    }
+
+    /** 9.3.1 (Nova): a short window of a programme description
+     * around the first occurrence of [keywordLower] (already
+     * lowercase), so the keyword hits list can show why a
+     * description-only hit matched. Whitespace is collapsed to
+     * single spaces; "…" marks a cut at either end. When the
+     * keyword isn't found (callers check containment first, so
+     * this is only a fallback) the head of the description is
+     * returned. */
+    fun descSnippet(desc: String, keywordLower: String): String {
+        val flat = desc.replace(Regex("\\s+"), " ").trim()
+        val idx = flat.lowercase().indexOf(keywordLower)
+        if (idx < 0) {
+            return if (flat.length > SNIPPET_WINDOW) {
+                flat.substring(0, SNIPPET_WINDOW) + "…"
+            } else {
+                flat
+            }
+        }
+        val start = maxOf(0, idx - SNIPPET_LEAD)
+        val end = minOf(flat.length, idx + keywordLower.length + SNIPPET_TAIL)
+        val window = flat.substring(start, end)
+        return (if (start > 0) "…" else "") + window +
+            (if (end < flat.length) "…" else "")
+    }
+
+    /** 9.3.1 (Nova): descSnippet window sizes — a little context
+     * before the keyword, more after it (that's where the
+     * sentence usually goes). */
+    private const val SNIPPET_LEAD = 20
+    private const val SNIPPET_TAIL = 40
+    private const val SNIPPET_WINDOW = 60
 
     /** Format date + clock as "Sat, Nov 7, 10:12 PM" for the guide header. */
     fun formatDateTime(millis: Long): String =

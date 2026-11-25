@@ -10,6 +10,87 @@
         android:layout_height="match_parent"
         android:keepScreenOn="true" />
 
+    <!-- 7.2.0 (Nova): night dim — a black veil over the video only,
+         its alpha set in code (25% / 50%). Above the PlayerView but
+         below every UI layer, so menus, the sidebar and the info
+         overlay stay fully readable while the picture calms down
+         for night viewing. Not clickable: touches pass through. -->
+    <View
+        android:id="@+id/dim_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:visibility="gone" />
+
+    <!-- 7.3.0 (Nova): audio-only mode — a full black cover over
+         the video (and the dim veil), below every UI layer. The
+         player is untouched: the sound keeps playing while the
+         picture is blanked for music / radio channels or for
+         falling asleep to TV audio. Not clickable. -->
+    <View
+        android:id="@+id/audio_only_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:visibility="gone" />
+
+    <!-- 7.3.1 (Nova): audio-only hint — a centred caption on
+         the black cover that fades a few seconds after the
+         mode turns on: long enough to learn the wake from,
+         short enough not to light the room all night. Not
+         clickable — the wake is any key (see
+         PlaybackActivity.dispatchKeyEvent), and this view
+         must never get in its way. -->
+    <TextView
+        android:id="@+id/audio_only_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/audio_only_hint"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:visibility="gone" />
+
+    <!-- 7.3.0 (Nova): auto-reconnect indicator — a small pill
+         under the centre of the screen, shown while a live stream
+         that already played is being re-connected after an error
+         or a stall. -->
+    <TextView
+        android:id="@+id/reconnect_view"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="110dp"
+        android:background="@drawable/loading_status_bg"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="@string/reconnecting"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <!-- 8.3.0 (Nova): surf mode hint — a small pill in the same
+         spot as the reconnect pill, shown with each surf hop's
+         channel flash (see PlaybackActivity.showChannelInfo) so
+         the viewer always knows how surfing stops. -->
+    <TextView
+        android:id="@+id/surf_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginTop="110dp"
+        android:background="@drawable/loading_status_bg"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="@string/surf_hint"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
     <!-- Paused cluster (4.6.0, TiviMate-style): a large centred play icon
          shown while playback is paused; tapping it (or the transport
          play/pause button, or the remote's play/pause key) resumes. -->
@@ -206,6 +287,29 @@
 
     </LinearLayout>
 
+    <!-- 7.2.0 (Nova): stream info — resolution / frame rate /
+         codec / bitrate / buffer, toggled from the options menu
+         and refreshed once a second while up. Top-end on a
+         translucent panel, above the video and sidebar but below
+         the channel info overlay. On mobile, code drops it below
+         the Guide button (see PlaybackActivity.onCreate). -->
+    <TextView
+        android:id="@+id/stream_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/loading_status_bg"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:fontFamily="monospace"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
     <!-- Channel info overlay (4.6.0, restyled to the TiviMate player
          pattern; 4.6.3 made it smaller and more transparent; 4.7.1 made
          it shorter so it sits well below the middle of the screen;
@@ -275,6 +379,20 @@
                 android:layout_marginTop="1dp"
                 android:textSize="11sp"
                 android:textColor="#B3FFFFFF" />
+
+            <!-- 9.3.1 (Nova): the current programme's description
+                 (9.3.0 EPG data), in the overlay's secondary style.
+                 Gone unless the guide carries one. -->
+            <TextView
+                android:id="@+id/info_now_desc"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:textSize="11sp"
+                android:textColor="#B3FFFFFF"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/info_next"
@@ -406,6 +524,54 @@
             android:progress="0"
             android:progressDrawable="@drawable/guide_progress_drawable" />
 
+    </LinearLayout>
+
+    <!-- 8.3.0 (Nova): idle-pause screensaver — a full black cover
+         shown after five minutes paused on a live channel: a big
+         clock, the paused programme and its channel, nothing else.
+         Last in the layout so it covers every other layer (frozen
+         frame, paused cluster, info overlay, sidebar). Any key
+         press takes it down (see PlaybackActivity.dispatchKeyEvent).
+         Not clickable. -->
+    <LinearLayout
+        android:id="@+id/idle_saver_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/idle_saver_clock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/white"
+            android:textSize="72sp" />
+
+        <TextView
+            android:id="@+id/idle_saver_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="#CCCCCC"
+            android:textSize="22sp" />
+
+        <TextView
+            android:id="@+id/idle_saver_channel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#999999"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/idle_saver_next"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:textColor="#AAAAAA"
+            android:textSize="18sp" />
     </LinearLayout>
 
 </FrameLayout>

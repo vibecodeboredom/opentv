@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputFilter
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
@@ -65,10 +66,43 @@ class SettingsActivity : FragmentActivity() {
             }
         }
 
+    /** 9.3.0 (Nova): the Settings PIN gate — true once no PIN is
+     * set or the PIN has been entered this visit. Until then the
+     * settings UI is never built, so nothing behind the PIN
+     * prompt can be seen or reached. */
+    private var pinUnlocked = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 6.0.0-rc1: TV stays landscape; mobile is free (portrait).
         DeviceType.applyOrientation(this)
+        if (AppSettings.settingsPinSet(this)) {
+            // Locked: no content view at all until the PIN checks
+            // out — the screen stays blank behind the prompt, and
+            // cancelling leaves Settings entirely.
+            showPinEntryDialog(
+                title = getString(R.string.pin_enter_title),
+                onCancelled = { finish() },
+                onUnlocked = { unlockSettings() }
+            )
+        } else {
+            pinUnlocked = true
+            buildSettingsUi()
+        }
+    }
+
+    /** 9.3.0 (Nova): the PIN checked out — build the UI and do
+     * the onResume work that ran (gated) while the prompt was up. */
+    private fun unlockSettings() {
+        pinUnlocked = true
+        buildSettingsUi()
+        updateShareUi()
+        startShareTicker()
+    }
+
+    /** Everything onCreate always built, run either immediately
+     * (no PIN set) or after the PIN gate opens. */
+    private fun buildSettingsUi() {
         setContentView(R.layout.activity_settings)
 
         findViewById<TextView>(R.id.about_version).text =
@@ -104,6 +138,14 @@ class SettingsActivity : FragmentActivity() {
                 AppSettings.setGuideShowsPast(this@SettingsActivity, checked)
             }
         }
+        // 8.3.0 (Nova): the idle-pause screensaver toggle, with
+        // the other guide & playback preferences.
+        findViewById<Switch>(R.id.pref_idle_saver).apply {
+            isChecked = AppSettings.idleSaverEnabled(this@SettingsActivity)
+            setOnCheckedChangeListener { _, checked ->
+                AppSettings.setIdleSaverEnabled(this@SettingsActivity, checked)
+            }
+        }
         findViewById<RadioGroup>(R.id.pref_channel_list_size).apply {
             check(
                 when (AppSettings.channelListSize(this@SettingsActivity)) {
@@ -122,6 +164,103 @@ class SettingsActivity : FragmentActivity() {
                     }
                 )
             }
+        }
+        // 9.0.0 (Nova): the accent colour choice, same pattern
+        // as the list size above. Changing it repaints the one
+        // accent surface on this screen (the active playlist
+        // label, via buildPlaylistsUi); every other screen
+        // reads the choice when it next builds.
+        findViewById<RadioGroup>(R.id.pref_accent_color).apply {
+            check(
+                when (AppSettings.accentChoice(this@SettingsActivity)) {
+                    AppSettings.ACCENT_AMBER -> R.id.pref_accent_amber
+                    AppSettings.ACCENT_VIOLET -> R.id.pref_accent_violet
+                    AppSettings.ACCENT_TEAL -> R.id.pref_accent_teal
+                    else -> R.id.pref_accent_green
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setAccentChoice(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_accent_amber -> AppSettings.ACCENT_AMBER
+                        R.id.pref_accent_violet -> AppSettings.ACCENT_VIOLET
+                        R.id.pref_accent_teal -> AppSettings.ACCENT_TEAL
+                        else -> AppSettings.ACCENT_GREEN
+                    }
+                )
+                buildPlaylistsUi()
+            }
+        }
+        // 9.0.0 (Nova): guide text size (Standard / Large).
+        findViewById<RadioGroup>(R.id.pref_guide_text).apply {
+            check(
+                if (AppSettings.guideTextSize(this@SettingsActivity) ==
+                    AppSettings.GUIDE_TEXT_LARGE
+                ) {
+                    R.id.pref_text_large
+                } else {
+                    R.id.pref_text_standard
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setGuideTextSize(
+                    this@SettingsActivity,
+                    if (checkedId == R.id.pref_text_large) {
+                        AppSettings.GUIDE_TEXT_LARGE
+                    } else {
+                        AppSettings.GUIDE_TEXT_STANDARD
+                    }
+                )
+            }
+        }
+        // 9.2.0 (Nova): the recordings storage guard cap
+        // (Off / 2 / 5 / 10 GB), same RadioGroup pattern. The
+        // guard itself runs at app start, on recording stop and
+        // on the Recordings screen — this only stores the cap.
+        findViewById<RadioGroup>(R.id.pref_rec_cap).apply {
+            check(
+                when (AppSettings.recordingAutoDeleteCapBytes(this@SettingsActivity)) {
+                    AppSettings.REC_CAP_OPTIONS_BYTES[1] -> R.id.pref_cap_2gb
+                    AppSettings.REC_CAP_OPTIONS_BYTES[2] -> R.id.pref_cap_5gb
+                    AppSettings.REC_CAP_OPTIONS_BYTES[3] -> R.id.pref_cap_10gb
+                    else -> R.id.pref_cap_off
+                }
+            )
+            setOnCheckedChangeListener { _, checkedId ->
+                AppSettings.setRecordingAutoDeleteCapBytes(
+                    this@SettingsActivity,
+                    when (checkedId) {
+                        R.id.pref_cap_2gb -> AppSettings.REC_CAP_OPTIONS_BYTES[1]
+                        R.id.pref_cap_5gb -> AppSettings.REC_CAP_OPTIONS_BYTES[2]
+                        R.id.pref_cap_10gb -> AppSettings.REC_CAP_OPTIONS_BYTES[3]
+                        else -> 0L
+                    }
+                )
+            }
+        }
+        // 9.2.0 (Nova): guide keyword markers — the button
+        // shows the count and opens the add/remove dialog.
+        updateKeywordsButton()
+        findViewById<Button>(R.id.pref_keywords_button).setOnClickListener {
+            showKeywordsDialog()
+        }
+
+        // 9.3.0 (Nova): the Settings PIN — set / change / remove.
+        updatePinButton()
+        findViewById<Button>(R.id.pref_pin_button).setOnClickListener {
+            showPinManageDialog()
+        }
+
+        // 10.0.0 (Nova): What's new + backup & restore.
+        findViewById<Button>(R.id.whats_new_button).setOnClickListener {
+            startActivity(Intent(this, WhatsNewActivity::class.java))
+        }
+        findViewById<Button>(R.id.backup_export_button).setOnClickListener {
+            exportBackup()
+        }
+        findViewById<Button>(R.id.backup_import_button).setOnClickListener {
+            confirmImportBackup()
         }
 
         shareStatusView = findViewById(R.id.share_status)
@@ -161,6 +300,9 @@ class SettingsActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 9.3.0 (Nova): while the PIN gate is up the settings UI
+        // doesn't exist yet — the share views included.
+        if (!pinUnlocked) return
         updateShareUi()
         startShareTicker()
     }
@@ -231,7 +373,9 @@ class SettingsActivity : FragmentActivity() {
             if (isActive) {
                 val activeView = TextView(this).apply {
                     text = getString(R.string.playlist_active)
-                    setTextColor(0xFF86C739.toInt())
+                    // 9.0.0 (Nova): the chosen accent (this was the
+                    // old hard-coded green).
+                    setTextColor(AppSettings.accentColor(this@SettingsActivity))
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                     typeface = Typeface.DEFAULT_BOLD
                     setPadding(dp(8), 0, 0, 0)
@@ -344,6 +488,207 @@ class SettingsActivity : FragmentActivity() {
             .show()
     }
 
+    /** 9.2.0 (Nova): the keywords button's label carries the
+     * current count, so the setting reads at a glance. */
+    private fun updateKeywordsButton() {
+        val count = AppSettings.guideKeywords(this).size
+        findViewById<Button>(R.id.pref_keywords_button).text = if (count == 0) {
+            getString(R.string.prefs_keywords_manage)
+        } else {
+            getString(R.string.prefs_keywords_manage_count, count)
+        }
+    }
+
+    /** 9.2.0 (Nova): manage the guide keyword markers — the
+     * dialog lists the keywords (tap one to remove it) plus an
+     * "Add keyword…" row. After every change the dialog reopens
+     * on the new list, the same reopen pattern the guide's
+     * reminders list uses. */
+    private fun showKeywordsDialog() {
+        val keywords = AppSettings.guideKeywords(this)
+        val items = keywords + getString(R.string.keywords_add)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.prefs_guide_keywords)
+            .setMessage(
+                if (keywords.isEmpty()) R.string.keywords_empty else R.string.keywords_hint
+            )
+            .setItems(items.toTypedArray()) { _, which ->
+                if (which == keywords.size) {
+                    showAddKeywordDialog()
+                } else {
+                    val removed = keywords[which]
+                    AppSettings.setGuideKeywords(this, keywords - removed)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.keyword_removed, removed),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    updateKeywordsButton()
+                    showKeywordsDialog()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** 9.2.0 (Nova): add one keyword (duplicates and blanks are
+     * dropped by the store; the toast says when that happened). */
+    private fun showAddKeywordDialog() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.keywords_add_title)
+            .setView(input)
+            .setPositiveButton(R.string.keywords_add) { _, _ ->
+                val word = input.text.toString().trim()
+                if (word.isNotEmpty()) {
+                    val before = AppSettings.guideKeywords(this)
+                    AppSettings.setGuideKeywords(this, before + word)
+                    val added = AppSettings.guideKeywords(this).size > before.size
+                    Toast.makeText(
+                        this,
+                        if (added) {
+                            getString(R.string.keyword_added, word)
+                        } else {
+                            getString(R.string.keyword_duplicate, word)
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    updateKeywordsButton()
+                }
+                showKeywordsDialog()
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> showKeywordsDialog() }
+            .show()
+    }
+
+    // ---- Settings PIN (9.3.0, Nova) ------------------------------------
+
+    /** The PIN button's label follows the state: set one, or
+     * change/remove the one that's set. */
+    private fun updatePinButton() {
+        findViewById<Button>(R.id.pref_pin_button).text = getString(
+            if (AppSettings.settingsPinSet(this)) {
+                R.string.prefs_pin_change_remove
+            } else {
+                R.string.prefs_pin_set
+            }
+        )
+    }
+
+    /** A 4-digit numeric password field — the shape every PIN
+     * prompt on this screen shares. */
+    private fun pinInput(): EditText = EditText(this).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER or
+            InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        filters = arrayOf(InputFilter.LengthFilter(4))
+        setSingleLine(true)
+    }
+
+    /** A PIN prompt that only lets the caller through when the
+     * entered PIN verifies against the stored record. A wrong PIN
+     * gets a toast and a fresh prompt; cancelling runs
+     * [onCancelled] (the entry gate finishes the activity, the
+     * in-Settings prompts just give up). The entered PIN is never
+     * logged, shown or stored anywhere. */
+    private fun showPinEntryDialog(
+        title: String,
+        onCancelled: () -> Unit = {},
+        onUnlocked: () -> Unit
+    ) {
+        val input = pinInput()
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                if (AppSettings.verifySettingsPin(this, input.text.toString())) {
+                    onUnlocked()
+                } else {
+                    Toast.makeText(this, R.string.pin_wrong, Toast.LENGTH_SHORT).show()
+                    showPinEntryDialog(title, onCancelled, onUnlocked)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> onCancelled() }
+            .setOnCancelListener { onCancelled() }
+            .show()
+    }
+
+    /** The PIN button's dialog: with no PIN set it goes straight
+     * to setting one; with one set, Change and Remove both first
+     * prove the current PIN — a TV left unlocked on the couch
+     * must not be enough to strip the lock off. */
+    private fun showPinManageDialog() {
+        if (!AppSettings.settingsPinSet(this)) {
+            showSetPinDialog()
+            return
+        }
+        val items = arrayOf(
+            getString(R.string.pin_change),
+            getString(R.string.pin_remove)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.prefs_settings_pin)
+            .setItems(items) { _, which ->
+                showPinEntryDialog(
+                    title = getString(R.string.pin_current_title),
+                    onUnlocked = {
+                        if (which == 0) {
+                            showSetPinDialog()
+                        } else {
+                            AppSettings.clearSettingsPin(this)
+                            Toast.makeText(
+                                this, R.string.pin_removed, Toast.LENGTH_SHORT
+                            ).show()
+                            updatePinButton()
+                        }
+                    }
+                )
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Set (or replace) the PIN: enter it, then enter it again —
+     * one mistyped digit would otherwise lock the user out of
+     * their own settings with no recovery short of clearing the
+     * app's data. */
+    private fun showSetPinDialog() {
+        val input = pinInput()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.pin_new_title)
+            .setView(input)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val pin = input.text.toString()
+                if (pin.length != 4) {
+                    Toast.makeText(this, R.string.pin_must_be_4, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val confirm = pinInput()
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.pin_confirm_title)
+                    .setView(confirm)
+                    .setPositiveButton(android.R.string.ok) { _, _ ->
+                        if (confirm.text.toString() == pin) {
+                            AppSettings.setSettingsPin(this, pin)
+                            Toast.makeText(
+                                this, R.string.pin_set_toast, Toast.LENGTH_SHORT
+                            ).show()
+                            updatePinButton()
+                        } else {
+                            Toast.makeText(
+                                this, R.string.pin_mismatch, Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun showRenamePlaylistDialog(playlist: PlaylistRepository.Playlist) {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT
@@ -400,6 +745,86 @@ class SettingsActivity : FragmentActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    // ---- Backup & restore (10.0.0, Nova) --------------------------------
+
+    /** Export the Nova backup: collect every covered store,
+     * serialise it and write the one fixed file, then tell the
+     * user exactly where it landed — the path is the whole point
+     * (they may want to copy it off the TV). */
+    private fun exportBackup() {
+        lifecycleScope.launch {
+            val file = NovaBackup.backupFile(this@SettingsActivity)
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val text = NovaBackup.encode(
+                        NovaBackup.collect(this@SettingsActivity)
+                    )
+                    file.writeText(text, Charsets.UTF_8)
+                    true
+                } catch (e: Exception) {
+                    false
+                }
+            }
+            if (ok) {
+                AlertDialog.Builder(this@SettingsActivity)
+                    .setTitle(R.string.backup_export_done_title)
+                    .setMessage(
+                        getString(R.string.backup_export_done_message, file.absolutePath)
+                    )
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show()
+            } else {
+                Toast.makeText(
+                    this@SettingsActivity, R.string.backup_export_failed,
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    /** Import asks first: it replaces the covered stores with
+     * the backup's, and that should never happen on a stray tap. */
+    private fun confirmImportBackup() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.backup_import_title)
+            .setMessage(R.string.backup_import_confirm)
+            .setPositiveButton(R.string.backup_import_action) { _, _ -> importBackup() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    /** Import: read + fully validate the file BEFORE anything is
+     * written (NovaBackup.parseBackup) — a missing or malformed
+     * file is one error toast and no changes. A good backup is
+     * applied whole, then the app restarts into the loading flow
+     * so the restored playlists and settings are what runs. */
+    private fun importBackup() {
+        lifecycleScope.launch {
+            val data = withContext(Dispatchers.IO) {
+                val file = NovaBackup.backupFile(this@SettingsActivity)
+                val text = try {
+                    if (file.exists()) file.readText(Charsets.UTF_8) else null
+                } catch (e: Exception) {
+                    null
+                }
+                text?.let { NovaBackup.parseBackup(it) }
+            }
+            if (data == null) {
+                Toast.makeText(
+                    this@SettingsActivity, R.string.backup_import_invalid,
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
+            }
+            NovaBackup.applyBackup(this@SettingsActivity, data)
+            Toast.makeText(
+                this@SettingsActivity, R.string.backup_import_done,
+                Toast.LENGTH_LONG
+            ).show()
+            restartToMain()
+        }
     }
 
     // ---- Share (4.7.1, 4.8.0) ----------------------------------------------

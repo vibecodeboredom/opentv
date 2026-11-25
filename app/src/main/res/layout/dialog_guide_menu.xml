@@ -96,6 +96,161 @@
         android:focusable="true"
         android:clickable="true" />
 
+    <!-- 8.0.0 (Nova): pending programme reminders — the list is
+         reachable from any programme's menu, not just a reminded
+         one, so it sits with Settings at the top. -->
+    <TextView
+        android:id="@+id/menu_my_reminders"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_my_reminders"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.1.0 (Nova): jump back to the programme on now — the grid
+         opens there, but after browsing hours away there was no
+         way back short of reopening the guide. -->
+    <TextView
+        android:id="@+id/menu_jump_now"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_jump_now"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 9.1.0 (Nova): jump the grid to prime time (19:00 today,
+         or tomorrow's once tonight is effectively over). -->
+    <TextView
+        android:id="@+id/menu_tonight"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_tonight"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 9.2.1 (Nova): upcoming programmes matching the guide
+         keywords (9.2.0's markers, as a list). Hides in code
+         when no keywords are set. -->
+    <TextView
+        android:id="@+id/menu_keyword_hits"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_keyword_hits"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.2.0 (Nova): browse a day forward/back — the grid's
+         window shifts by 24h. Previous day hides in code while
+         the grid is on today; jump to now returns from any day. -->
+    <TextView
+        android:id="@+id/menu_next_day"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_next_day"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <TextView
+        android:id="@+id/menu_prev_day"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_prev_day"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.1.0 (Nova): restrict the grid to one channel group; the
+         label carries the active filter (set in code) and the row
+         hides in code when the playlist has fewer than two groups. -->
+    <TextView
+        android:id="@+id/menu_group_filter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_group_filter"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.1.1 (Nova): how many hours the grid shows at once; the
+         label carries the current span (set in code). -->
+    <TextView
+        android:id="@+id/menu_guide_zoom"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_guide_zoom"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.1.1 (Nova): bring back every hidden channel; the label
+         carries the hidden count (set in code) and the row hides
+         in code when nothing is hidden. -->
+    <TextView
+        android:id="@+id/menu_unhide_all"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_unhide_all"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 9.1.0 (Nova): arrange the favorites into the user's own
+         order. Hides in code when fewer than two favorites are
+         visible — there would be nothing to arrange. -->
+    <TextView
+        android:id="@+id/menu_reorder_favorites"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_reorder_favorites"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
     <TextView
         android:id="@+id/menu_programme_title"
         android:layout_width="match_parent"
@@ -135,6 +290,52 @@
         android:layout_height="wrap_content"
         android:background="@drawable/guide_menu_item_bg"
         android:text="@string/menu_custom_recording"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.0.0 (Nova): set / remove a reminder for this programme.
+         Hidden in code for programmes that are not in the future
+         (or are "No information" placeholders). -->
+    <TextView
+        android:id="@+id/menu_reminder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_set_reminder"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.2.0 (Nova): schedule a recording of this programme.
+         Same visibility rule as the reminder row — future real
+         programmes only; the label flips to a cancel in code. -->
+    <TextView
+        android:id="@+id/menu_record_programme"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_record_programme"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:focusable="true"
+        android:clickable="true" />
+
+    <!-- 8.2.1 (Nova): set the reminder and the scheduled
+         recording for this programme in one tap. Same visibility
+         rule as the two rows above; the label shows as set in
+         code when both are set. -->
+    <TextView
+        android:id="@+id/menu_remind_record"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/guide_menu_item_bg"
+        android:text="@string/menu_remind_and_record"
         android:textColor="#FFFFFF"
         android:textSize="18sp"
         android:padding="16dp"

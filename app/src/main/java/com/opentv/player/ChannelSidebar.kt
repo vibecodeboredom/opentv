@@ -109,8 +109,11 @@ class ChannelSidebar(
     fun isVisible(): Boolean = panel.visibility == View.VISIBLE
 
     /** Open the sidebar on the groups list. 5.0.0: it slides in from
-     * the left (200ms) with the scrim fading in, instead of popping
-     * in — fast enough to never delay navigation. */
+     * the left with the scrim fading in, instead of popping in —
+     * fast enough to never delay navigation. 10.1.0 (Nova): the
+     * durations and curves come from AnimConfig now — the slide
+     * rides the emphasized entrance curve, the scrim (an effect,
+     * never spatial) the standard curve. */
     fun show() {
         hideGeneration++
         inGroups = true
@@ -122,20 +125,29 @@ class ChannelSidebar(
         val width = panel.width.takeIf { it > 0 } ?: dp(sizing.panelDp)
         panel.translationX = -width.toFloat()
         scrim.alpha = 0f
-        panel.animate().translationX(0f).setDuration(200).start()
-        scrim.animate().alpha(1f).setDuration(200).start()
+        panel.animate().translationX(0f)
+            .setDuration(AnimConfig.SIDEBAR_IN_MS)
+            .setInterpolator(AnimConfig.EMPHASIZED)
+            .start()
+        scrim.animate().alpha(1f)
+            .setDuration(AnimConfig.SIDEBAR_IN_MS)
+            .setInterpolator(AnimConfig.STANDARD)
+            .start()
         buildGroups()
     }
 
-    /** 5.0.0: slides back out to the left (180ms); the views hide
-     * when the slide finishes. */
+    /** 5.0.0: slides back out to the left; the views hide when the
+     * slide finishes. 10.1.0 (Nova): the exit runs at ~70% of the
+     * entrance on the accelerate curve (AnimConfig's exit rule). */
     fun hide() {
         if (panel.visibility != View.VISIBLE) return
         val generation = ++hideGeneration
         panel.animate().cancel()
         scrim.animate().cancel()
         val width = panel.width.takeIf { it > 0 } ?: dp(sizing.panelDp)
-        panel.animate().translationX(-width.toFloat()).setDuration(180)
+        panel.animate().translationX(-width.toFloat())
+            .setDuration(AnimConfig.SIDEBAR_OUT_MS)
+            .setInterpolator(AnimConfig.ACCELERATE)
             .withEndAction {
                 if (generation != hideGeneration) return@withEndAction
                 panel.visibility = View.GONE
@@ -143,7 +155,10 @@ class ChannelSidebar(
                 panel.translationX = 0f
                 scrim.alpha = 1f
             }.start()
-        scrim.animate().alpha(0f).setDuration(180).start()
+        scrim.animate().alpha(0f)
+            .setDuration(AnimConfig.SIDEBAR_OUT_MS)
+            .setInterpolator(AnimConfig.ACCELERATE)
+            .start()
         adapter.clearTitles()
     }
 
@@ -379,7 +394,10 @@ class ChannelSidebar(
                 for (ch in channels) {
                     if (ch.id !in hidden && ch.id in favorites) list += ch
                 }
-                list
+                // 9.1.0 (Nova): the user's custom favorites
+                // order, once one is set (playlist order until
+                // then) — same as the home screen's rows.
+                PlaylistRepository.applyFavoriteOrder(activity, list)
             }
             GROUP_ALL -> {
                 val list = mutableListOf<Channel>()

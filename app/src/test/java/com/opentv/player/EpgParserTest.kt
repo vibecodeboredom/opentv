@@ -52,4 +52,44 @@ class EpgParserTest {
         assertTrue(EpgParser.parse("not xml at all").isEmpty())
         assertTrue(EpgParser.parse("").isEmpty())
     }
+
+    @Test
+    fun parsesProgrammeDescriptions() {
+        // 9.3.0: the first <desc> per programme is kept (entities
+        // decoded, before or after the title); a programme without
+        // one gets "".
+        val xml = """
+            <tv>
+              <programme channel="CNN.us" start="20261107200000 +0000" stop="20261107210000 +0000">
+                <title>Evening News</title>
+                <desc>The day&apos;s top stories.</desc>
+              </programme>
+              <programme channel="CNN.us" start="20261107210000 +0000" stop="20261107220000 +0000">
+                <desc>Before the title.</desc>
+                <title>Late Show</title>
+              </programme>
+              <programme channel="CNN.us" start="20261107220000 +0000" stop="20261107230000 +0000">
+                <title>No Desc Show</title>
+              </programme>
+            </tv>
+        """.trimIndent()
+        val epg = EpgParser.parse(xml)
+        assertEquals("The day's top stories.", epg["CNN.us"]?.get(0)?.desc)
+        assertEquals("Before the title.", epg["CNN.us"]?.get(1)?.desc)
+        assertEquals("", epg["CNN.us"]?.get(2)?.desc)
+    }
+
+    @Test
+    fun firstDescriptionWins() {
+        val xml = """
+            <tv>
+              <programme channel="CNN.us" start="20261107200000 +0000" stop="20261107210000 +0000">
+                <title>News</title>
+                <desc>First.</desc>
+                <desc>Second.</desc>
+              </programme>
+            </tv>
+        """.trimIndent()
+        assertEquals("First.", EpgParser.parse(xml)["CNN.us"]?.get(0)?.desc)
+    }
 }

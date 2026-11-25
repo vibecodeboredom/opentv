@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 10.1.0 (Nova): keyed tag slot holding a view's pair of
+         focus SpringAnimations (see NovaMotion). A dedicated id so
+         it never collides with the plain tags presenters and the
+         guide already use for their own data. -->
+    <item name="nova_motion_springs" type="id" />
+</resources>
