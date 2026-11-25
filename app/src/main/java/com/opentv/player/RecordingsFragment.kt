@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.leanback.app.BrowseSupportFragment
 import androidx.leanback.widget.ArrayObjectAdapter
+import androidx.leanback.widget.FocusHighlight
 import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.ListRowPresenter
@@ -24,7 +25,11 @@ import java.text.DateFormat
 @OptIn(UnstableApi::class)
 class RecordingsFragment : BrowseSupportFragment() {
 
-    private val rowsAdapter = ArrayObjectAdapter(ListRowPresenter())
+    // 10.1.0 (Nova): framework focus zoom off, same as the home
+    // screen — the presenters' NovaMotion spring owns card scale.
+    private val rowsAdapter = ArrayObjectAdapter(
+        ListRowPresenter(FocusHighlight.ZOOM_FACTOR_NONE)
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

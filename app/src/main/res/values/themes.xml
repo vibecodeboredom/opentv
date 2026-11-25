@@ -26,4 +26,12 @@
         <item name="android:windowEnterAnimation">@anim/slide_in_right</item>
         <item name="android:windowExitAnimation">@anim/slide_out_right</item>
     </style>
+
+    <!-- 10.1.0 (Nova): centered menus/dialogs scale + fade in (and
+         out at ~70% of the time) instead of the platform pop —
+         applied per-dialog via NovaMotion.polishDialog. -->
+    <style name="NovaDialogAnimation">
+        <item name="android:windowEnterAnimation">@anim/dialog_enter</item>
+        <item name="android:windowExitAnimation">@anim/dialog_exit</item>
+    </style>
 </resources>

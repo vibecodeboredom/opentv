@@ -13,9 +13,11 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.leanback.app.BrowseSupportFragment
 import androidx.leanback.widget.ArrayObjectAdapter
+import androidx.leanback.widget.FocusHighlight
 import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.ListRowPresenter
+import androidx.leanback.widget.VerticalGridView
 import androidx.leanback.widget.OnItemViewClickedListener
 import androidx.lifecycle.lifecycleScope
 import java.text.SimpleDateFormat
@@ -29,7 +31,15 @@ import kotlinx.coroutines.launch
  */
 class BrowseFragment : BrowseSupportFragment() {
 
-    private val rowsAdapter = ArrayObjectAdapter(ListRowPresenter())
+    // 10.1.0 (Nova): the framework focus zoom is OFF for these
+    // rows — with ZOOM_FACTOR_NONE Leanback installs no focus
+    // animator at all, leaving the cards' scale to the spring in
+    // NovaMotion (attached by the presenters), which preserves
+    // velocity across rapid D-pad moves instead of restarting a
+    // fixed 150ms tween on every step.
+    private val rowsAdapter = ArrayObjectAdapter(
+        ListRowPresenter(FocusHighlight.ZOOM_FACTOR_NONE)
+    )
 
     // 8.2.0 (Nova): state for the "On now" row — the playlist and
     // EPG the home screen last loaded, the row currently in the
@@ -350,6 +360,73 @@ class BrowseFragment : BrowseSupportFragment() {
         // watchlist (refreshMoreRow positions it; until the EPG
         // lands it has nothing to show and stays hidden).
         refreshMoreRow()
+        // 10.1.0 (Nova): the rows cascade in (see below).
+        playEntranceAnimation()
+    }
+
+    /**
+     * 10.1.0 (Nova): staggered entrance — the freshly built rows
+     * rise and fade in as one cascade (AnimConfig: 30ms steps,
+     * delays capped at 500ms total, emphasized entrance curve),
+     * replacing the old instant pop-in. Only the rows currently
+     * laid out take part; rows the ticker inserts later simply
+     * appear, as before. The grid's children are RecyclerView
+     * rows, so every animator ends by pinning alpha/translation
+     * back to identity — a row view recycled mid-cascade can
+     * never carry a leftover offset into its next life.
+     */
+    private fun playEntranceAnimation() {
+        val root = view ?: return
+        root.post { animateRowsIn(root, 0) }
+    }
+
+    private fun animateRowsIn(root: View, attempt: Int) {
+        if (!isAdded) return
+        val grid = findVerticalGrid(root)
+        val count = grid?.childCount ?: 0
+        if (grid == null || count == 0) {
+            // Rows are populated but not laid out yet — retry
+            // briefly, then give up silently (the rows are on
+            // screen either way, just without the cascade).
+            if (attempt < 20) {
+                root.postDelayed({ animateRowsIn(root, attempt + 1) }, 50)
+            }
+            return
+        }
+        val step = minOf(
+            AnimConfig.ENTRANCE_STAGGER_MS,
+            AnimConfig.ENTRANCE_STAGGER_CAP_MS / count
+        )
+        val risePx = AnimConfig.ENTRANCE_RISE_DP * resources.displayMetrics.density
+        for (i in 0 until count) {
+            val child = grid.getChildAt(i)
+            child.alpha = 0f
+            child.translationY = risePx
+            child.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(AnimConfig.ENTRANCE_MS)
+                .setInterpolator(AnimConfig.EMPHASIZED)
+                .setStartDelay(i * step)
+                .withEndAction {
+                    child.alpha = 1f
+                    child.translationY = 0f
+                }
+                .start()
+        }
+    }
+
+    /** The browse rows live in a VerticalGridView inside the
+     * fragment's RowsSupportFragment subtree — find it by type
+     * rather than by framework id. */
+    private fun findVerticalGrid(view: View): VerticalGridView? {
+        if (view is VerticalGridView) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findVerticalGrid(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
     }
 
     /**

@@ -56,6 +56,7 @@ class WhatsNewActivity : FragmentActivity() {
          * was FOR, in the words its commit used, kept honest:
          * nothing here claims more than the release shipped. */
         val RELEASES = listOf(
+            "10.1.0" to "Motion & polish: cards and guide cells now grow on a spring that keeps its speed when you race across them, home rows cascade in, and menus, the sidebar and playback overlays all move on one shared set of curves.",
             "10.0.0" to "The finale: this What's new screen, backup & restore of your Nova data, and a clock on the home screen.",
             "9.3.1" to "Programme descriptions in the playback overlay, keyword hits match descriptions too, and a Starts in countdown in the guide details.",
             "9.3.0" to "Programme descriptions in the guide and search, a countdown on watchlist cards, and an optional PIN lock for Settings.",

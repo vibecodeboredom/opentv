@@ -140,8 +140,6 @@ class PlaybackActivity : FragmentActivity() {
         /** 6.0.0-rc3: mobile overlay auto-hide — 5s idle, then it
          * fades away. TV keeps the 10s timeout above. */
         private const val MOBILE_OVERLAY_TIMEOUT_MS = 5_000L
-        /** 6.0.0-rc3: mobile overlay fade-out duration. */
-        private const val OVERLAY_FADE_MS = 200L
         /** Channel up/down flash: half the Left/Right overlay time, so
          * zapping past a channel shows its info only briefly. */
         private const val CHANNEL_SWITCH_OVERLAY_TIMEOUT_MS = 5_000L
@@ -1643,13 +1641,18 @@ class PlaybackActivity : FragmentActivity() {
         // hint hides with the overlay (see hideOverlay).
         surfHint.visibility = if (surfMode) View.VISIBLE else View.GONE
         // 5.0.0 — neat animations: the overlay fades in quickly
-        // (150ms) instead of popping in, so channel switches feel
+        // instead of popping in, so channel switches feel
         // smoother. Fast enough to never delay the info itself.
+        // 10.1.0 (Nova): duration + curve from AnimConfig (an
+        // effect fade rides the standard curve, never a spring).
         // Cancel any fade-out in flight first, or its end action
         // would hide the overlay again after this show.
         overlay.animate().cancel()
         overlay.alpha = 0f
-        overlay.animate().alpha(1f).setDuration(150).start()
+        overlay.animate().alpha(1f)
+            .setDuration(AnimConfig.FADE_IN_MS)
+            .setInterpolator(AnimConfig.STANDARD)
+            .start()
         // 6.0.0-rc3: on mobile the top Guide button and centred
         // channel info show and fade with the overlay.
         if (DeviceType.isMobile(this)) {
@@ -1700,10 +1703,16 @@ class PlaybackActivity : FragmentActivity() {
     private fun fadeOutOverlayView(view: View) {
         if (view.visibility != View.VISIBLE) return
         view.animate().cancel()
-        view.animate().alpha(0f).setDuration(OVERLAY_FADE_MS).withEndAction {
-            view.visibility = View.GONE
-            view.alpha = 1f
-        }.start()
+        // 10.1.0 (Nova): the fade-out is AnimConfig's exit — ~70%
+        // of the fade-in on the accelerate curve (was a flat
+        // 200ms with the platform default curve).
+        view.animate().alpha(0f)
+            .setDuration(AnimConfig.FADE_OUT_MS)
+            .setInterpolator(AnimConfig.ACCELERATE)
+            .withEndAction {
+                view.visibility = View.GONE
+                view.alpha = 1f
+            }.start()
     }
 
     /** 6.0.0-rc3: show the mobile-only overlay group (top Guide
@@ -1718,12 +1727,16 @@ class PlaybackActivity : FragmentActivity() {
         if (player?.isPlaying != false) showMobileView(mobileCenterInfo)
     }
 
-    /** 6.0.0-rc3: fade one mobile overlay view in (150ms). */
+    /** 6.0.0-rc3: fade one mobile overlay view in.
+     * 10.1.0 (Nova): AnimConfig fade (duration + standard curve). */
     private fun showMobileView(view: View) {
         view.animate().cancel()
         view.visibility = View.VISIBLE
         view.alpha = 0f
-        view.animate().alpha(1f).setDuration(150).start()
+        view.animate().alpha(1f)
+            .setDuration(AnimConfig.FADE_IN_MS)
+            .setInterpolator(AnimConfig.STANDARD)
+            .start()
     }
 
     /** 6.0.0-rc3: fill the mobile-only centred info panel from the
@@ -2251,10 +2264,14 @@ class PlaybackActivity : FragmentActivity() {
                 items += getString(R.string.start_from_beginning)
                 actions += { startFromBeginning() }
             }
-            AlertDialog.Builder(this)
+            val menuDialog = AlertDialog.Builder(this)
                 .setTitle(recordingName ?: getString(R.string.recording_label))
                 .setItems(items.toTypedArray()) { _, which -> actions[which]() }
-                .show()
+                .create()
+            // 10.1.0 (Nova): the shared scale+fade menu entrance
+            // instead of the platform pop.
+            NovaMotion.polishDialog(menuDialog)
+            menuDialog.show()
             return
         }
         val isFav = ch.id in favoritesCache
@@ -2351,10 +2368,14 @@ class PlaybackActivity : FragmentActivity() {
         // sleepTimerMenuLabel).
         items += sleepTimerMenuLabel()
         actions += { showSleepTimerDialog() }
-        AlertDialog.Builder(this)
+        val menuDialog = AlertDialog.Builder(this)
             .setTitle(ch.name)
             .setItems(items.toTypedArray()) { _, which -> actions[which]() }
-            .show()
+            .create()
+        // 10.1.0 (Nova): the shared scale+fade menu entrance
+        // instead of the platform pop.
+        NovaMotion.polishDialog(menuDialog)
+        menuDialog.show()
     }
 
     /** 7.2.0 (Nova): the options-menu label for favorites

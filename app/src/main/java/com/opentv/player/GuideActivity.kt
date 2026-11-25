@@ -265,6 +265,12 @@ class GuideActivity : FragmentActivity() {
         guideTextScale = AppSettings.guideTextScale(this)
         currentChannelId = intent.getStringExtra(EXTRA_CURRENT_CHANNEL_ID)
         container = findViewById(R.id.guide_container)
+        // 10.1.0 (Nova): the focused programme cell grows on a
+        // spring (see populateProgrammeRow) — let it draw past its
+        // row's bounds instead of being clipped at the row edge.
+        // The scroll viewports above still clip at the screen
+        // edges, as they should.
+        container.clipChildren = false
         pinnedCol = findViewById(R.id.guide_pinned_col)
         loading = findViewById(R.id.guide_loading)
         scroll = findViewById(R.id.guide_scroll)
@@ -1194,6 +1200,9 @@ class GuideActivity : FragmentActivity() {
         val rowLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             tag = index
+            // 10.1.0 (Nova): a focused cell's spring overshoot
+            // must not clip at the row's top/bottom edge.
+            clipChildren = false
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1320,11 +1329,19 @@ class GuideActivity : FragmentActivity() {
                     )
                 }
                 // 5.0.0 — neat animations: the focused cell pops
-                // slightly (150ms, transform only, so the grid layout
-                // never moves). Quick enough to never feel slow.
-                card.animate().scaleX(if (hasFocus) 1.03f else 1f)
-                    .scaleY(if (hasFocus) 1.03f else 1f)
-                    .setDuration(150).start()
+                // slightly (transform only, so the grid layout
+                // never moves). 10.1.0 (Nova): the fixed 150ms /
+                // 1.03x tween is now the shared focus spring
+                // (AnimConfig via NovaMotion) at the TV-standard
+                // 1.1x — same spring as the home cards, velocity
+                // preserved when focus races across the grid. The
+                // cell lifts in Z while focused so the overshoot
+                // draws over its neighbours (the row and container
+                // no longer clip it — see onCreate/buildRowViews).
+                card.translationZ = if (hasFocus) AnimConfig.FOCUS_LIFT_Z_PX else 0f
+                NovaMotion.springScale(
+                    card, if (hasFocus) AnimConfig.FOCUS_SCALE else 1f
+                )
             }
             rowLayout.addView(card)
             if (isNow && firstNowCard == null) firstNowCard = card

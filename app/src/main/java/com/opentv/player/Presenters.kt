@@ -19,6 +19,10 @@ class ChannelPresenter : Presenter() {
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
         cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        // 10.1.0 (Nova): springy focus (see NovaMotion) — the
+        // row presenters run with the framework zoom off, so this
+        // spring is the card's only focus motion.
+        NovaMotion.attachCardFocus(cardView)
         return ViewHolder(cardView)
     }
 
@@ -61,6 +65,10 @@ class ActionPresenter : Presenter() {
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
         cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        // 10.1.0 (Nova): springy focus (see NovaMotion) — the
+        // row presenters run with the framework zoom off, so this
+        // spring is the card's only focus motion.
+        NovaMotion.attachCardFocus(cardView)
         return ViewHolder(cardView)
     }
 
@@ -99,6 +107,10 @@ class RecordingPresenter : Presenter() {
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
         cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        // 10.1.0 (Nova): springy focus (see NovaMotion) — the
+        // row presenters run with the framework zoom off, so this
+        // spring is the card's only focus motion.
+        NovaMotion.attachCardFocus(cardView)
         return ViewHolder(cardView)
     }
 
@@ -144,6 +156,10 @@ class OnNowPresenter : Presenter() {
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
         cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        // 10.1.0 (Nova): springy focus (see NovaMotion) — the
+        // row presenters run with the framework zoom off, so this
+        // spring is the card's only focus motion.
+        NovaMotion.attachCardFocus(cardView)
         val density = parent.context.resources.displayMetrics.density
         val bar = ProgressBar(
             parent.context, null, android.R.attr.progressBarStyleHorizontal
@@ -229,6 +245,10 @@ class ContinueWatchingPresenter : Presenter() {
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
         cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        // 10.1.0 (Nova): springy focus (see NovaMotion) — the
+        // row presenters run with the framework zoom off, so this
+        // spring is the card's only focus motion.
+        NovaMotion.attachCardFocus(cardView)
         val density = parent.context.resources.displayMetrics.density
         val bar = ProgressBar(
             parent.context, null, android.R.attr.progressBarStyleHorizontal
@@ -333,6 +353,10 @@ class WatchlistPresenter : Presenter() {
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
         cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        // 10.1.0 (Nova): springy focus (see NovaMotion) — the
+        // row presenters run with the framework zoom off, so this
+        // spring is the card's only focus motion.
+        NovaMotion.attachCardFocus(cardView)
         return ViewHolder(cardView)
     }
 
@@ -383,6 +407,10 @@ class ScheduledRecordingPresenter : Presenter() {
         cardView.isFocusableInTouchMode = true
         cardView.setMainImageDimensions(CARD_WIDTH, CARD_HEIGHT)
         cardView.setBackgroundResource(R.drawable.card_rounded_bg)
+        // 10.1.0 (Nova): springy focus (see NovaMotion) — the
+        // row presenters run with the framework zoom off, so this
+        // spring is the card's only focus motion.
+        NovaMotion.attachCardFocus(cardView)
         return ViewHolder(cardView)
     }
 
